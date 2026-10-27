@@ -48,6 +48,9 @@ This is where they live in this repository.
   stand-in compiler, `tools/cross/`); it failed on a planted Linux-only use.
   Linux-only code is marked `#[cfg(target_os = "linux")]` with a stand-in
   beside it elsewhere. Nothing is linked or run there.
+- **Install.** `tools/install.sh [--prefix DIR] [--destdir DIR]` lays
+  Ectomatter out as a Linux system has a program; `tests/install.rs` stages
+  one and starts it from there (run by `tools/boundaries.sh`).
 - **Log.** `~/.local/state/com.ectonomic.ectomatter/ectomatter.log`
   (`$XDG_STATE_HOME`), the run before's as `ectomatter.log.1`: the app's
   stderr is the file itself, so the terminal shows only where the log is.

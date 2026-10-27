@@ -11,7 +11,8 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # code it tries: core_host.rs, hosted.rs, keyboard.rs, launcher.rs,
 # updates.rs, lcd_page.rs, ecto_settings.rs); then Ectomatter run as a
 # stranger's computer has it (tests/stranger.rs), and its pages drawn on a
-# made-up desk, as approved (tests/renders.rs)
+# made-up desk, as approved (tests/renders.rs), and installed as
+# tools/install.sh lays it out (tests/install.rs)
 runs=(
   a_package_past_its_time_is_stopped_and_started_again
   a_package_out_of_memory_or_crashed_is_stopped_and_started_again
@@ -35,7 +36,7 @@ runs=(
   an_update_that_can_do_more_waits_and_a_package_must_match_its_checksum
   a_waiting_version_offers_review
 )
-out=$(cargo test --release -p ectomatter --bin ectomatter -- --include-ignored boundar "${runs[@]}" 2>&1; cargo test --release -p ectomatter --test stranger -- --include-ignored 2>&1; cargo test --release -p ectomatter --test renders 2>&1)
+out=$(cargo test --release -p ectomatter --bin ectomatter -- --include-ignored boundar "${runs[@]}" 2>&1; cargo test --release -p ectomatter --test stranger -- --include-ignored 2>&1; cargo test --release -p ectomatter --test renders 2>&1; cargo test --release -p ectomatter --test install 2>&1)
 lines=$(printf '%s\n' "$out" | grep -E '^test .* \.\.\. (ok|FAILED)$' | sort)
 if [ -z "$lines" ]; then printf '%s\n' "$out" | tail -30; exit 2; fi
 held=$(printf '%s\n' "$lines" | grep -c ' ok$')

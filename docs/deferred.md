@@ -253,7 +253,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Stage 1: installable on Linux
 
-- No install layout, release build of the cores, udev rule or desktop entry.
+- `tools/install.sh` lays Ectomatter out under a prefix (its programs, its
+  packages as installed, a desktop entry and its icon, udev's rule made from
+  the cores' manifests, the licenses), tried by `tests/install.rs`; but
+  nothing makes a package of it (no RPM, deb or Flatpak), nothing removes
+  an install, udev isn't told to read its rules again, and the rule for a
+  core added later isn't written (`main.rs`, `udev_rules`, run once, at
+  install).
 - Installed (not run from the source folder), the lab saves a core's tuning
   as a whole copy of the core's file in the person's data folder
   (`cores.rs`, `tuning_written`), and the core is read from that copy from
@@ -261,7 +267,10 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   there, and nothing says the copy shadows it.
 - No file Ectomatter saves has a version of its own (`files.rs`): a change to
   what one holds is read by its keys alone.
-- License gaps: Slint's attribution, the fonts' licenses.
+- Slint's license: Ectomatter is MIT, and Slint is GPLv3, or royalty-free
+  with an attribution, or commercial. Which one Ectomatter takes is
+  Grant's to choose; nothing in the app or the install attributes Slint
+  yet. (The typefaces' licenses are installed: `ui/fonts/*-OFL.txt`.)
 - The GitHub repositories exist in the Ectonomic organization
   (Ectonomic/Ectomatter and one per package, `ectomatter-<package id>`,
   public and empty since 2026-10-26); nothing is in them, and no package's

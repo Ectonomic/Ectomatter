@@ -420,6 +420,42 @@ fn glyph_fonts_in_windows() {
     );
 }
 
+/// udev's rules for the devices `cores` reach, from their manifests' matches:
+/// each device's HID nodes, by its USB ids, opened by the person at the seat
+/// (`uaccess`), as Ectomatter opens them; each device once, named by its core.
+fn udev_rules(cores: &[packages::Package]) -> String {
+    let mut out = String::from("# Ectomatter: the person at the computer may open the devices its cores reach\n# (written by `ectomatter --udev-rules`, from each core's manifest)\n");
+    let mut seen = std::collections::BTreeSet::new();
+    for p in cores {
+        for m in &p.manifest.spec.matches {
+            let (v, d) = (m.usb.vendor.to_lowercase(), m.usb.product.to_lowercase());
+            if seen.insert((v.clone(), d.clone())) {
+                out += &format!("# {} ({})\nSUBSYSTEM==\"hidraw\", ATTRS{{idVendor}}==\"{v}\", ATTRS{{idProduct}}==\"{d}\", TAG+=\"uaccess\"\n", p.manifest.name, p.id());
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod udev_tests {
+    /// The rules name every device every core here reaches, by the ids its
+    /// manifest gives, and no device twice.
+    #[test]
+    fn the_rules_open_every_cores_devices() {
+        let cores = crate::packages::of(crate::packages::Kind::Core);
+        assert!(!cores.is_empty(), "the source has cores");
+        let rules = super::udev_rules(&cores);
+        for p in &cores {
+            for m in &p.manifest.spec.matches {
+                let line = format!("ATTRS{{idVendor}}==\"{}\", ATTRS{{idProduct}}==\"{}\"", m.usb.vendor.to_lowercase(), m.usb.product.to_lowercase());
+                assert_eq!(rules.matches(&line).count(), 1, "{} {line} in:\n{rules}", p.id());
+            }
+        }
+        assert!(rules.lines().filter(|l| l.starts_with("SUBSYSTEM")).all(|l| l.ends_with("TAG+=\"uaccess\"")));
+    }
+}
+
 /// A stop asked for by a signal, for the window's loop to act on.
 static TERM: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 extern "C" fn on_term(_: libc::c_int) {
@@ -431,6 +467,12 @@ fn main() {
     let snapshot = args.iter().position(|a| a == "--snapshot").and_then(|i| args.get(i + 1)).cloned();
     // (a snapshot or a read of the keyboard is a tool's run, not the app's, and
     // leaves the person's log as it was)
+    // `--udev-rules`: the rules that let the person logged in open every
+    // device a core here reaches (an install puts them in udev's folder), and stop
+    if args.iter().any(|a| a == "--udev-rules") {
+        print!("{}", udev_rules(&packages::of(packages::Kind::Core)));
+        return;
+    }
     if snapshot.is_none() && !args.iter().any(|a| a == "--read-state") {
         log::start();
     }

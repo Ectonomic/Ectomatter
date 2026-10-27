@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Ectomatter
+Comment=Set up your keyboard, mouse and lights
+Exec=ectomatter
+Icon=com.ectonomic.ectomatter
+Terminal=false
+Categories=Settings;HardwareSettings;
+StartupWMClass=com.ectonomic.ectomatter
