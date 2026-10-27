@@ -388,12 +388,6 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         .handle()
         .insert_source(ping_source, |_, _, app: &mut App| app.take())
         .expect("the window's loop takes what Ectomatter's threads tell it");
-    // asked to stop (a log out, or kill): quit as the tray's Quit does, so
-    // what changed is saved and the screen handed back
-    unsafe {
-        libc::signal(libc::SIGTERM, on_term as *const () as libc::sighandler_t);
-        libc::signal(libc::SIGINT, on_term as *const () as libc::sighandler_t);
-    }
     // `--hide`: started into the tray, as at login (with no tray to start into,
     // the window shows, since closing it would quit)
     if std::env::args().any(|a| a == "--hide") && app.s.tray.is_some() {

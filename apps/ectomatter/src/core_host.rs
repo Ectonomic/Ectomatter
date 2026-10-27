@@ -711,8 +711,14 @@ impl Manifest {
         let path = dir.join("core.json");
         let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let m = ectomatter_draw::jsonc::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-        // (every field the protocol names and none it doesn't: a misspelled one is an error here)
+        // (as the protocol types it; a field it doesn't name, a newer
+        // protocol's or a misspelling, is passed over and told to the log for
+        // the package's author)
         let spec = ectomatter_protocol::manifest::Manifest::of(&m).map_err(|e| format!("{}: {e}", path.display()))?;
+        let unknown = ectomatter_protocol::manifest::Manifest::unknown(&m);
+        if !unknown.is_empty() {
+            eprintln!("ectomatter: {} gives what this Ectomatter's protocol doesn’t name, passed over: {}", path.display(), unknown.join(", "));
+        }
         Ok(Manifest {
             id: spec.id.clone(),
             name: spec.name.clone(),

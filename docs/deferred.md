@@ -128,6 +128,10 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Stage 4: maintainable
 
+- Quitting can wait longer than its four seconds: the loop's wait doesn't
+  count the time left, nor the sliders' 300 ms release
+  (`shell/session.rs`, `step`; `shell/wayland.rs`, `run`).
+
 - One object runs every page: `Front`, about 200 fields. Its code is split by
   page and part into `src/front/` (eleven files, 2026-10-26), but its state
   isn't: every part reaches every field, and no page's state is a type of its
@@ -207,10 +211,20 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   yet: the windows of their own (the Macro Editor, the lab, the screen
   layout editor: it says so in the log), the clipboard, drags, closing into
   the tray (closing quits), the window's rounded corners and shadow.
-- The winit shell takes the desktop's white from the Wayland screens
-  (`main.rs`, `levels`) and gives the screen's peak and the brightest
-  screen's as 1000 nits (`winit.rs`, `draw`); on Windows and macOS they're
-  to come from wgpu's `Surface::display_hdr_info`.
+- The winit shell takes the screen's white and peak from wgpu's
+  `display_hdr_info` where the system says (Windows, macOS), once, as the
+  window opens (`winit.rs`, `show`): not again when the window moves to
+  another screen or the screen's HDR is switched. On Linux it keeps the
+  levels read from Wayland's screens (`main.rs`, `levels`), the peak at
+  1000 nits. It gives no HDR10 metadata.
+- The winit shell's keys: dead keys and an input method's text, Insert and
+  the F-keys' own text don't reach the page (`winit.rs`, `key_text`); the
+  window's focus and its being minimized aren't told to Slint. On macOS,
+  where winit can't resize from an edge, a press within 6 points of one is
+  taken for a resize that doesn't happen (`winit.rs`, `edge`).
+- No test runs a session with a shell of its own: `Session::start`, `take`
+  and `step` are tried only through the two real shells (`shell/session.rs`).
+  A sender's wake is tested (`shell/mod.rs`).
 - On Linux the winit shell's HDR goes through the Vulkan driver's own
   description of the surface (Mesa's WSI attaches color management itself),
   not Ectomatter's: the desktop's white and the peak aren't told to the
@@ -228,7 +242,10 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   NVIDIA's readings (`nvml.rs`), the launcher's wait for a game's changes
   (`launcher.rs`, `listen_at`), a stop asked for by the system (`main.rs`,
   `on_term`, Unix's signals), and the time of day as local (`lcd_page.rs`,
-  Windows' `localtime_s`, untried). Recording keys and capturing sound read
+  Windows' `localtime_s`, untried). A folder is opened with `explorer` or
+  `open` (`picker.rs`, `show_folder`, untried); the runtime folder is the
+  system's temporary one off Unix, and a note's inode is 0 there
+  (`lcd_player.rs`, `runtime_dir`, `read_event`). Recording keys and capturing sound read
   Linux's devices and programs (`recording.rs`, `sound.rs`) and have no
   stand-in yet; they build because they find nothing.
   The Wayland shell refuses to open without the compositor's color

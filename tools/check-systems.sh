@@ -9,11 +9,13 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 here="$PWD/tools/cross"
+command -v cargo >/dev/null || { echo "  no cargo here: nothing checked"; exit 2; }
 status=0
 for target in x86_64-pc-windows-gnu aarch64-apple-darwin; do
   var=$(echo "$target" | tr '-' '_')
   out=$(env "CC_$var=$here/cc" "AR_$var=$here/ar" cargo check -q --target "$target" -p ectomatter -p ectomatter-present 2>&1)
-  if printf '%s\n' "$out" | grep -q '^error'; then
+  code=$?
+  if [ $code -ne 0 ] || printf '%s\n' "$out" | grep -q '^error'; then
     printf '%s\n' "$out" | grep -E '^error|-->' | head -40
     echo "  doesn't build  $target"
     status=1

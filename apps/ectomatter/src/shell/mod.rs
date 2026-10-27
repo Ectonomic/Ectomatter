@@ -80,6 +80,26 @@ mod tests {
         Press { text: Some(t.into()), code: 0, down: true, ctrl: false, shift: false }
     }
 
+    /// Every message wakes the shell's loop once it's sent, so the loop
+    /// takes it; a sender whose loop has gone says so.
+    #[test]
+    fn a_message_wakes_the_loop() {
+        let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let w = woken.clone();
+        let wake: Wake = Arc::new(move || {
+            w.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let (tx, rx) = channel::<u32>(&wake);
+        let other = tx.clone();
+        std::thread::spawn(move || other.send(1).unwrap()).join().unwrap();
+        tx.send(2).unwrap();
+        assert_eq!(woken.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![1, 2]);
+        drop(rx);
+        assert!(tx.send(3).is_err(), "the loop gone");
+        assert_eq!(woken.load(std::sync::atomic::Ordering::SeqCst), 2, "nothing woken for a message not sent");
+    }
+
     #[test]
     fn a_press_is_its_key_in_either_case_or_by_its_name() {
         assert!(press("k").is('k') && press("K").is('k') && press("Z").is('z'));

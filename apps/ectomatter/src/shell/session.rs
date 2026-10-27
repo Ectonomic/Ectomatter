@@ -647,6 +647,14 @@ impl Session {
     /// macros' jobs, the app in front, the launcher and the tray, each
     /// telling the window through a sender that calls `wake`.
     pub(crate) fn start(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: settings::Settings, reference: f64, gain: f32, wake: &shell::Wake) -> Session {
+        // asked to stop (a log out, or kill): quit as the tray's Quit does, so
+        // what changed is saved and the screen handed back (`step`), in every
+        // shell
+        #[cfg(unix)]
+        unsafe {
+            libc::signal(libc::SIGTERM, on_term as *const () as libc::sighandler_t);
+            libc::signal(libc::SIGINT, on_term as *const () as libc::sighandler_t);
+        }
         let (built_tx, built) = shell::channel::<(bool, Board)>(wake);
         let build = board_builder(built_tx.clone(), false);
         let home_build = board_builder(built_tx, true);
@@ -899,8 +907,10 @@ impl Session {
         }
         self.front.retry();
         if let Some(place) = self.front.restart.take() {
-            // (each device handed back before the new Ectomatter turns the scene on again)
+            // (each device handed back, and what changed written, before the new
+            // Ectomatter turns the scene on again and reads the settings)
             self.front.scene_quit();
+            self.front.settings.flush(true);
             if let Ok(me) = std::env::current_exe() {
                 let _ = std::process::Command::new(me).args(["--place", &place]).spawn();
             }

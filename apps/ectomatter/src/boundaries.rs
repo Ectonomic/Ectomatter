@@ -314,8 +314,14 @@ pub(crate) mod tests {
                 if m.is_file() {
                     read += 1;
                     let v = ectomatter_draw::jsonc::parse(&std::fs::read_to_string(&m).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", m.display()));
+                    let at = m.strip_prefix(repo()).unwrap().display().to_string();
                     if let Err(e) = ectomatter_protocol::manifest::Manifest::of(&v) {
-                        found.push(format!("{}: {e}", m.strip_prefix(repo()).unwrap().display()));
+                        found.push(format!("{at}: {e}"));
+                    }
+                    // (a newer protocol's field is passed over in the app; a package here
+                    // speaks this one, so one is a misspelling)
+                    for u in ectomatter_protocol::manifest::Manifest::unknown(&v) {
+                        found.push(format!("{at}: {u}, which the protocol doesn’t name"));
                     }
                 } else if p.is_dir() && !p.ends_with("module") && !p.ends_with("target") {
                     dirs.push(p);

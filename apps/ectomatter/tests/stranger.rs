@@ -112,7 +112,11 @@ fn ectomatter_starts_with_no_cores() {
         let (drawn, said) = snapshot(Path::new(env!("CARGO_BIN_EXE_ectomatter")), &s.0, Some(&s.0.join("share")), place);
         assert!(drawn, "{place} wasn't drawn:\n{said}");
         assert!(!said.contains("panicked"), "{place}:\n{said}");
-        assert!(!said.contains(" core ("), "{place}: a core was found:\n{said}");
+        assert!(said.contains(&format!("its packages are in {}", s.0.join("share").display())), "{place}: not its own packages:\n{said}");
+        assert!(said.contains("plugin started"), "{place}: its plugins didn't start:\n{said}");
+        for id in &cores {
+            assert!(!said.contains(&format!("the {id} core")), "{place}: the {id} core was found:\n{said}");
+        }
     }
 }
 

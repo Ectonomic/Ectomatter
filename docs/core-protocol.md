@@ -48,7 +48,7 @@ The manifest:
 }
 ```
 
-The fields are typed in the protocol's crate (`ectomatter_protocol::manifest`), and a field it doesn't name is an error: a package whose manifest gives one isn't read, and a release whose manifest gives one isn't taken.
+The fields are typed in the protocol's crate (`ectomatter_protocol::manifest`). A field it doesn't name is passed over, as section 9 asks, and the frontend tells its log which, for the package's author; a use it doesn't name, or a field of the wrong kind, stops the package from being read, since the frontend grants nothing it doesn't know.
 
 `kind` says which the package is: `"core"`, or `"plugin"` (section 11). A manifest without one is read as a core if it names the devices it reaches (`matches`), and as a plugin otherwise. `module` is the core's code, built for `wasm32-wasip2`; `ectomatter` is the oldest frontend it runs on. `devices` names the devices the core works with, so the frontend can say which before any is plugged in. `matches` is also the whole of what the core may open: the frontend lists and opens for it the devices these name, and no others. `matches` lets the frontend start a core only when one of its devices is plugged in, the way RetroArch picks a core for a file. A device often shows several interfaces and only one of them is the one the core talks to (the Z10's is the LED-indicator collection, usage page 0x08; the M3's is usage page 0xFFA0, usage 1), so a match may name an `interface`, a `usagePage` and a `usage` as well as the vendor and product.
 

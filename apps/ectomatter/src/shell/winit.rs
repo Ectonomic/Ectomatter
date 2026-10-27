@@ -27,6 +27,7 @@ use crate::*;
 /// The window and what draws into it, once the system has given it.
 struct Shown {
     window: Arc<Window>,
+    instance: wgpu::Instance,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -40,11 +41,19 @@ struct App {
     /// the pointer's place in the window's logical pixels, and the modifiers held
     at: (f64, f64),
     mods: ModifiersState,
-    /// the desktop's white, for SDR and for the frame's encoding
+    /// the desktop's white, for SDR and for the frame's encoding; the
+    /// screen's peak, for how bright the keys' light may go; and the nits
+    /// at scRGB's 1.0 (80 on Windows, the screen's white on macOS)
     reference: f64,
+    peak: f64,
+    unit: f32,
     exit: bool,
     /// something came in since the last frame (input, a wake): draw again
     poke: bool,
+    /// a redraw asked of the system and not yet given, and whether the window
+    /// is out of sight (minimized, covered): neither waits for a frame then
+    redraw_asked: bool,
+    occluded: bool,
     /// ECTOMATTER_FPS: frames a second and the slowest, counted since when
     fps: Option<(Instant, u32, Duration)>,
 }
@@ -59,7 +68,7 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: set
         let _ = proxy.send_event(());
     });
     let session = Session::start(slint, ui, settings, reference, gain, &wake);
-    let mut app = App { s: session, shown: None, at: (0.0, 0.0), mods: ModifiersState::default(), reference, exit: false, poke: true, fps: std::env::var_os("ECTOMATTER_FPS").map(|_| (Instant::now(), 0, Duration::ZERO)) };
+    let mut app = App { s: session, shown: None, at: (0.0, 0.0), mods: ModifiersState::default(), reference, peak: 1000.0, unit: 80.0, exit: false, poke: true, redraw_asked: false, occluded: false, fps: std::env::var_os("ECTOMATTER_FPS").map(|_| (Instant::now(), 0, Duration::ZERO)) };
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("ectomatter: the window's loop stopped: {e}");
     }
@@ -85,7 +94,18 @@ impl App {
         let adapter = ectomatter_present::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { compatible_surface: Some(&surface), ..Default::default() })).map_err(|e| e.to_string())?;
         let (device, queue) = ectomatter_present::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).map_err(|e| e.to_string())?;
         let caps = surface.get_capabilities(&adapter);
-        let (target, format) = ectomatter_present::best_target(&caps);
+        // the screen as the system tells it (Windows and macOS do; Wayland
+        // doesn't, and the levels Ectomatter read from it stand)
+        let screen = ectomatter_present::Screen::of(&surface.display_hdr_info(&adapter));
+        if let Some(white) = screen.white {
+            self.reference = white as f64;
+            self.s.pic.set_reference(self.reference);
+        }
+        if let Some(peak) = screen.peak {
+            self.peak = peak as f64;
+        }
+        self.unit = if cfg!(target_os = "macos") { self.reference as f32 } else { 80.0 };
+        let (target, format) = ectomatter_present::best_target(&caps, screen.hdr).ok_or("the window's surface offers no format to draw in")?;
         let color_space = if target == Target::Sdr { wgpu::SurfaceColorSpace::Auto } else { target.surface().1 };
         let size = window.inner_size();
         let config = wgpu::SurfaceConfiguration {
@@ -100,9 +120,9 @@ impl App {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
-        eprintln!("ectomatter: the window shows through wgpu on {} ({:?}), as {target:?} in {format:?}", adapter.get_info().name, adapter.get_info().backend);
+        eprintln!("ectomatter: the window shows through wgpu on {} ({:?}), as {target:?} in {format:?}; the screen's white {:.0} nits, its peak {:.0}", adapter.get_info().name, adapter.get_info().backend, self.reference, self.peak);
         let presenter = Presenter::new(&device, format, target);
-        self.shown = Some(Shown { window, surface, device, queue, config, presenter });
+        self.shown = Some(Shown { window, instance, surface, device, queue, config, presenter });
         self.resized();
         Ok(())
     }
@@ -111,6 +131,10 @@ impl App {
     fn resized(&mut self) {
         let Some(sh) = &mut self.shown else { return };
         let size = sh.window.inner_size();
+        // (minimized, as Windows has it: nothing to lay out for)
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
         let scale = sh.window.scale_factor();
         sh.config.width = size.width.max(1);
         sh.config.height = size.height.max(1);
@@ -122,28 +146,54 @@ impl App {
         sh.window.request_redraw();
     }
 
-    /// The next frame composed and shown.
+    /// The next frame composed and shown. The surface's texture is taken
+    /// first: where none can be had now (the window out of sight, the
+    /// surface out of date or lost), the next frame is drawn whole.
     fn draw(&mut self) {
+        self.redraw_asked = false;
         let scale = self.scale() as f32;
         let Some(sh) = &mut self.shown else { return };
         let size = sh.window.inner_size();
         let (w, h) = (size.width as usize, size.height as usize);
-        let t = Instant::now();
-        let Some(dirty) = self.s.compose(scale, Some((w, h)), 1000.0, 1000.0) else { return };
-        let boxes: Vec<(u32, u32, u32, u32)> = dirty.iter().map(|&(x, y, bw, bh)| (x as u32, y as u32, bw as u32, bh as u32)).collect();
-        sh.presenter.upload(&sh.device, &sh.queue, (w as u32, h as u32), &self.s.pic.out, &boxes);
+        if w == 0 || h == 0 || self.occluded {
+            return;
+        }
         let frame = match sh.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                sh.surface.configure(&sh.device, &sh.config);
+            wgpu::CurrentSurfaceTexture::Lost => {
+                // (a surface lost is made anew on the same window)
+                match sh.instance.create_surface(sh.window.clone()) {
+                    Ok(surface) => {
+                        surface.configure(&sh.device, &sh.config);
+                        sh.surface = surface;
+                    }
+                    Err(e) => eprintln!("ectomatter: the window's surface was lost and can't be made again: {e}"),
+                }
                 self.s.full = true;
+                self.poke = true;
                 return;
             }
-            _ => return,
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                sh.surface.configure(&sh.device, &sh.config);
+                self.s.full = true;
+                self.poke = true;
+                return;
+            }
+            _ => {
+                self.s.full = true;
+                self.poke = true;
+                return;
+            }
         };
+        let t = Instant::now();
+        // (nothing changed: the frame as last uploaded, drawn again)
+        if let Some(dirty) = self.s.compose(scale, Some((w, h)), self.peak, self.peak) {
+            let boxes: Vec<(u32, u32, u32, u32)> = dirty.iter().map(|&(x, y, bw, bh)| (x as u32, y as u32, bw as u32, bh as u32)).collect();
+            sh.presenter.upload(&sh.device, &sh.queue, (w as u32, h as u32), &self.s.pic.out, &boxes);
+        }
         let view = frame.texture.create_view(&Default::default());
         let mut enc = sh.device.create_command_encoder(&Default::default());
-        sh.presenter.draw(&sh.queue, &mut enc, &view, self.reference as f32);
+        sh.presenter.draw(&sh.queue, &mut enc, &view, self.reference as f32, self.unit);
         sh.queue.submit([enc.finish()]);
         sh.window.pre_present_notify();
         sh.queue.present(frame);
@@ -258,18 +308,121 @@ fn key_text(key: &WKey, without_mods: &WKey) -> Option<SharedString> {
     Some(k.into())
 }
 
-/// A key's code as Linux's input layer numbers it (evdev), where winit says;
-/// 0 elsewhere.
+/// A key's code as Linux's input layer numbers it (evdev), on every system:
+/// how Ectomatter names a key it's told to assign or record (keyboard.rs,
+/// `evdev_to_hid`). 0 for one it has no number for.
 fn key_code(physical: &winit::keyboard::PhysicalKey) -> u32 {
-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-    {
-        use winit::platform::scancode::PhysicalKeyExtScancode;
-        physical.to_scancode().unwrap_or(0)
+    use winit::keyboard::{KeyCode as K, PhysicalKey};
+    let PhysicalKey::Code(k) = physical else { return 0 };
+    let letters = [K::KeyQ, K::KeyW, K::KeyE, K::KeyR, K::KeyT, K::KeyY, K::KeyU, K::KeyI, K::KeyO, K::KeyP];
+    if let Some(i) = letters.iter().position(|l| l == k) {
+        return 16 + i as u32;
     }
-    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-    {
-        let _ = physical;
-        0
+    let letters = [K::KeyA, K::KeyS, K::KeyD, K::KeyF, K::KeyG, K::KeyH, K::KeyJ, K::KeyK, K::KeyL];
+    if let Some(i) = letters.iter().position(|l| l == k) {
+        return 30 + i as u32;
+    }
+    let letters = [K::KeyZ, K::KeyX, K::KeyC, K::KeyV, K::KeyB, K::KeyN, K::KeyM];
+    if let Some(i) = letters.iter().position(|l| l == k) {
+        return 44 + i as u32;
+    }
+    let digits = [K::Digit1, K::Digit2, K::Digit3, K::Digit4, K::Digit5, K::Digit6, K::Digit7, K::Digit8, K::Digit9, K::Digit0];
+    if let Some(i) = digits.iter().position(|d| d == k) {
+        return 2 + i as u32;
+    }
+    let f = [K::F1, K::F2, K::F3, K::F4, K::F5, K::F6, K::F7, K::F8, K::F9, K::F10];
+    if let Some(i) = f.iter().position(|d| d == k) {
+        return 59 + i as u32;
+    }
+    let f = [K::F13, K::F14, K::F15, K::F16, K::F17, K::F18, K::F19, K::F20, K::F21, K::F22, K::F23, K::F24];
+    if let Some(i) = f.iter().position(|d| d == k) {
+        return 183 + i as u32;
+    }
+    match k {
+        K::Escape => 1,
+        K::Minus => 12,
+        K::Equal => 13,
+        K::Backspace => 14,
+        K::Tab => 15,
+        K::BracketLeft => 26,
+        K::BracketRight => 27,
+        K::Enter => 28,
+        K::ControlLeft => 29,
+        K::Semicolon => 39,
+        K::Quote => 40,
+        K::Backquote => 41,
+        K::ShiftLeft => 42,
+        K::Backslash => 43,
+        K::Comma => 51,
+        K::Period => 52,
+        K::Slash => 53,
+        K::ShiftRight => 54,
+        K::NumpadMultiply => 55,
+        K::AltLeft => 56,
+        K::Space => 57,
+        K::CapsLock => 58,
+        K::NumLock => 69,
+        K::ScrollLock => 70,
+        K::Numpad7 => 71,
+        K::Numpad8 => 72,
+        K::Numpad9 => 73,
+        K::NumpadSubtract => 74,
+        K::Numpad4 => 75,
+        K::Numpad5 => 76,
+        K::Numpad6 => 77,
+        K::NumpadAdd => 78,
+        K::Numpad1 => 79,
+        K::Numpad2 => 80,
+        K::Numpad3 => 81,
+        K::Numpad0 => 82,
+        K::NumpadDecimal => 83,
+        K::IntlBackslash => 86,
+        K::F11 => 87,
+        K::F12 => 88,
+        K::NumpadEnter => 96,
+        K::ControlRight => 97,
+        K::NumpadDivide => 98,
+        K::PrintScreen => 99,
+        K::AltRight => 100,
+        K::Home => 102,
+        K::ArrowUp => 103,
+        K::PageUp => 104,
+        K::ArrowLeft => 105,
+        K::ArrowRight => 106,
+        K::End => 107,
+        K::ArrowDown => 108,
+        K::PageDown => 109,
+        K::Insert => 110,
+        K::Delete => 111,
+        K::AudioVolumeMute => 113,
+        K::AudioVolumeDown => 114,
+        K::AudioVolumeUp => 115,
+        K::Pause => 119,
+        K::SuperLeft => 125,
+        K::SuperRight => 126,
+        K::ContextMenu => 127,
+        K::MediaTrackNext => 163,
+        K::MediaPlayPause => 164,
+        K::MediaTrackPrevious => 165,
+        K::MediaStop => 166,
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use winit::keyboard::{KeyCode as K, PhysicalKey};
+
+    /// A key's code is the one Linux's input layer gives it, so "Press a
+    /// key" finds the same key on every system (keyboard.rs, `evdev_to_hid`).
+    #[test]
+    fn a_keys_code_is_linuxs() {
+        let code = |k| key_code(&PhysicalKey::Code(k));
+        assert_eq!([code(K::Escape), code(K::KeyQ), code(K::KeyA), code(K::KeyZ), code(K::KeyM), code(K::Digit1), code(K::Digit0), code(K::F1), code(K::F12), code(K::F13), code(K::SuperLeft)], [1, 16, 30, 44, 50, 2, 11, 59, 88, 183, 125]);
+        for k in [K::KeyA, K::Digit5, K::F5, K::Enter, K::ShiftLeft, K::ArrowUp] {
+            assert!(crate::keyboard::evdev_to_hid(code(k)).is_some(), "{k:?} is a key the keyboard knows");
+        }
     }
 }
 
@@ -305,6 +458,14 @@ impl ApplicationHandler for App {
         match event {
             Event::CloseRequested => self.s.quit(),
             Event::Resized(_) | Event::ScaleFactorChanged { .. } => self.resized(),
+            Event::Occluded(o) => {
+                self.occluded = o;
+                // (out of sight, the screen plays again rather than show the keyboard's own)
+                self.s.front.set_hidden(o);
+                if !o {
+                    self.s.full = true;
+                }
+            }
             Event::RedrawRequested => self.draw(),
             Event::CursorMoved { position, .. } => {
                 let p: winit::dpi::LogicalPosition<f64> = position.to_logical(scale);
@@ -389,23 +550,28 @@ impl ApplicationHandler for App {
         slint::platform::update_timers_and_animations();
         self.act();
         // a lighting effect's next frame, 30 a second; Slint's timers; or
-        // what Ectomatter waits for
-        let effect = self.s.front.animated().then(|| self.s.effect_due.saturating_duration_since(Instant::now()));
+        // what Ectomatter waits for. Out of sight, or with a redraw already
+        // asked for and not yet given, neither an animation nor an effect is
+        // waited on: the system gives the frame when it can.
+        let shows = !self.occluded && !self.redraw_asked;
+        let effect = (self.s.front.animated() && shows).then(|| self.s.effect_due.saturating_duration_since(Instant::now()));
+        let animating = self.s.slint.has_active_animations() && shows;
         // drawn again only for what may have changed: input or a wake, the
         // page asking to be, an animation running, an effect's frame due
-        let due = self.poke || self.s.slint.pending() || self.s.slint.has_active_animations() || effect.is_some_and(|e| e.is_zero());
+        let due = self.poke || self.s.slint.pending() || animating || effect.is_some_and(|e| e.is_zero());
         self.poke = false;
-        if let (true, Some(sh)) = (due, &self.shown) {
+        if let (true, false, Some(sh)) = (due, self.redraw_asked, &self.shown) {
             sh.window.request_redraw();
+            self.redraw_asked = true;
         }
-        let wait = if self.s.slint.has_active_animations() {
+        let wait = if animating {
             Some(Duration::ZERO)
         } else {
             [slint::platform::duration_until_next_timer_update(), self.s.front.waiting(), effect].into_iter().flatten().min()
         };
-        el.set_control_flow(match wait {
-            Some(w) => ControlFlow::WaitUntil(Instant::now() + w),
-            None => ControlFlow::Wait,
-        });
+        // (at least once a second, so a stop the system asked for, which only
+        // sets a flag, is acted on)
+        let wait = wait.unwrap_or(Duration::from_secs(1)).min(Duration::from_secs(1));
+        el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }
 }

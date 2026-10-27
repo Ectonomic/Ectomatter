@@ -10,13 +10,15 @@
 //! - **HDR10** (`Rgb10a2Unorm`, `SurfaceColorSpace::Bt2100Pq`): PQ again, with
 //!   BT.2020's primaries.
 //! - **scRGB** (`Rgba16Float`, `SurfaceColorSpace::ExtendedSrgbLinear`): linear
-//!   light with sRGB's primaries, 1.0 being 80 nits, so the desktop's white
-//!   is `reference / 80` and lit keys go above it.
-//! - **SDR** (an sRGB format): the desktop's white at 1.0, brighter clipped to
-//!   it, as a screen without HDR shows the page.
+//!   light with sRGB's primaries, 1.0 being the system's unit (80 nits on
+//!   Windows; the screen's own white on macOS, whose EDR counts from it), so
+//!   lit keys go above the desktop's white.
+//! - **SDR**: the desktop's white at 1.0, brighter clipped to it, as a screen
+//!   without HDR shows the page: encoded as sRGB by the texture itself where
+//!   the surface's format is an sRGB one, by the presenter where it isn't.
 //!
-//! wgpu applies no encoding of its own to any of these (wgpu 30, `lib.rs`),
-//! so the values written are the values shown.
+//! For HDR10 and scRGB wgpu applies no encoding of its own (wgpu 30,
+//! `lib.rs`), so the values written are the values shown.
 
 use std::future::Future;
 
@@ -42,34 +44,58 @@ impl Target {
         }
     }
 
-    fn mode(self) -> u32 {
+    /// The shader's mode for this target drawn into `format`.
+    fn mode(self, format: wgpu::TextureFormat) -> u32 {
         match self {
             Target::Hdr10 => 0,
             Target::ScRgb => 1,
-            Target::Sdr => 2,
+            Target::Sdr if format.is_srgb() => 2,
+            Target::Sdr => 3,
         }
     }
 }
 
-/// The best target a surface offers, HDR first: HDR10 where it takes PQ,
-/// else scRGB, else SDR in whichever sRGB format it has.
-pub fn best_target(caps: &wgpu::SurfaceCapabilities) -> (Target, wgpu::TextureFormat) {
+/// What the system says of the screen a surface is on: whether it shows HDR
+/// now, its SDR white and its peak in nits, each where it says.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Screen {
+    pub hdr: Option<bool>,
+    pub white: Option<f32>,
+    pub peak: Option<f32>,
+}
+
+impl Screen {
+    pub fn of(info: &wgpu::DisplayHdrInfo) -> Screen {
+        let l = info.luminance.as_ref();
+        Screen { hdr: info.coarse.as_ref().and_then(|c| c.high_dynamic_range), white: l.and_then(|l| l.sdr_white_nits), peak: l.and_then(|l| l.max_nits) }
+    }
+}
+
+/// The best target a surface offers for a screen that shows HDR now (or may:
+/// `hdr` none, the system not saying), HDR first: HDR10 where it takes PQ,
+/// else scRGB, else SDR in a format it offers (an sRGB one where it has
+/// one). A screen the system says shows SDR gets SDR, whatever the surface
+/// offers.
+pub fn best_target(caps: &wgpu::SurfaceCapabilities, hdr: Option<bool>) -> Option<(Target, wgpu::TextureFormat)> {
     let offers = |f: wgpu::TextureFormat, cs: wgpu::SurfaceColorSpace| cs.to_color_spaces().is_some_and(|set| caps.color_spaces(f).contains(set));
-    for t in [Target::Hdr10, Target::ScRgb] {
-        let (f, cs) = t.surface();
-        if offers(f, cs) {
-            return (t, f);
+    if hdr != Some(false) {
+        for t in [Target::Hdr10, Target::ScRgb] {
+            let (f, cs) = t.surface();
+            if offers(f, cs) {
+                return Some((t, f));
+            }
         }
     }
-    let srgb = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
-    (Target::Sdr, srgb)
+    let format = caps.formats.iter().copied().find(|f| f.is_srgb()).or_else(|| caps.formats.first().copied())?;
+    Some((Target::Sdr, format))
 }
 
 const SHADER: &str = r#"
 struct Params {
     reference: f32,
     mode: u32,
-    _a: u32,
+    // nits at scRGB's 1.0
+    unit: f32,
     _b: u32,
 };
 @group(0) @binding(0) var frame: texture_2d<u32>;
@@ -117,9 +143,13 @@ fn fs(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
             vec3<f32>(0.0433131, 0.0113623, 0.8955953));
         rgb = nits_to_pq(m * nits);
     } else if (params.mode == 1u) {
-        rgb = nits / 80.0;
+        rgb = nits / params.unit;
     } else {
         rgb = clamp(nits / params.reference, vec3<f32>(0.0), vec3<f32>(1.0));
+        if (params.mode == 3u) {
+            // (sRGB's encoding, the format not doing it)
+            rgb = select(1.055 * pow(rgb, vec3<f32>(1.0 / 2.4)) - 0.055, 12.92 * rgb, rgb <= vec3<f32>(0.0031308));
+        }
     }
     return vec4<f32>(rgb * a, a);
 }
@@ -129,6 +159,7 @@ fn fs(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
 /// target: the frame uploaded as it is, converted as it's drawn.
 pub struct Presenter {
     target: Target,
+    format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     params: wgpu::Buffer,
@@ -168,7 +199,7 @@ impl Presenter {
             cache: None,
         });
         let params = device.create_buffer(&wgpu::BufferDescriptor { label: Some("ectomatter frame"), size: 16, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        Presenter { target, pipeline, layout, params, frame: None }
+        Presenter { target, format, pipeline, layout, params, frame: None }
     }
 
     pub fn target(&self) -> Target {
@@ -220,10 +251,10 @@ impl Presenter {
     }
 
     /// Draw the frame last uploaded into `view`, for a desktop whose white is
-    /// `reference` nits.
-    pub fn draw(&self, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, reference: f32) {
+    /// `reference` nits, scRGB's 1.0 being `unit` nits.
+    pub fn draw(&self, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, reference: f32, unit: f32) {
         let Some((_, group, _)) = &self.frame else { return };
-        queue.write_buffer(&self.params, 0, bytemuck::cast_slice(&[reference.to_bits(), self.target.mode(), 0, 0]));
+        queue.write_buffer(&self.params, 0, bytemuck::cast_slice(&[reference.to_bits(), self.target.mode(self.format), unit.to_bits(), 0]));
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("ectomatter frame"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment { view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store } })],
@@ -255,14 +286,28 @@ pub fn block_on<F: Future>(f: F) -> F::Output {
 mod tests {
     use super::*;
 
-    /// A device on Mesa's lavapipe, Vulkan on the CPU: no GPU is touched.
+    /// A device on a CPU: Mesa's lavapipe on Linux (Vulkan on the CPU, no GPU
+    /// touched, its driver file found where the system keeps them), the
+    /// system's own fallback elsewhere (WARP on Windows).
     fn cpu_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-        let icd = "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json";
-        assert!(std::path::Path::new(icd).exists(), "these tests need Mesa's lavapipe ({icd})");
-        // (set before any Vulkan loader runs in this test binary; every test
-        // here asks for the same)
-        unsafe { std::env::set_var("VK_ICD_FILENAMES", icd) };
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends: wgpu::Backends::VULKAN, ..wgpu::InstanceDescriptor::new_without_display_handle() });
+        static ONLY_LAVAPIPE: std::sync::Once = std::sync::Once::new();
+        let mut backends = wgpu::Backends::PRIMARY;
+        if cfg!(target_os = "linux") {
+            let icd = ["/usr/share/vulkan/icd.d", "/usr/local/share/vulkan/icd.d", "/etc/vulkan/icd.d"]
+                .iter()
+                .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
+                .map(|e| e.path())
+                .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("lvp_icd") && n.to_string_lossy().contains(std::env::consts::ARCH)));
+            let icd = icd.expect("these tests need Mesa's lavapipe (lvp_icd.*.json)");
+            // (set once, before any Vulkan loader runs in this test binary; both
+            // of the loader's names for it, so no other driver loads)
+            ONLY_LAVAPIPE.call_once(|| unsafe {
+                std::env::set_var("VK_ICD_FILENAMES", &icd);
+                std::env::set_var("VK_DRIVER_FILES", &icd);
+            });
+            backends = wgpu::Backends::VULKAN;
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..wgpu::InstanceDescriptor::new_without_display_handle() });
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { force_fallback_adapter: true, ..Default::default() })).expect("lavapipe's adapter");
         assert_eq!(adapter.get_info().device_type, wgpu::DeviceType::Cpu, "lavapipe, not a GPU");
         Some(block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("a device on lavapipe"))
@@ -275,7 +320,7 @@ mod tests {
         ((c1 + c2 * y) / (1.0 + c3 * y)).powf(m2)
     }
 
-    /// A frame of greys and colors at known nits, some see-through.
+    /// A frame of grays and colors at known nits, some see-through.
     fn frame() -> (u32, u32, Vec<[u16; 4]>, Vec<([f64; 3], f64)>) {
         let px: Vec<([f64; 3], f64)> = vec![
             ([0.0, 0.0, 0.0], 1.0),
@@ -298,6 +343,12 @@ mod tests {
         let (w, h, data, _) = frame();
         let mut p = Presenter::new(device, format, target);
         p.upload(device, queue, (w, h), &data, &[]);
+        read_back(device, queue, &p, format, (w, h), reference)
+    }
+
+    /// What a presenter draws into a texture of `format`, `w` by `h`, read back
+    /// as each pixel's four values, row by row.
+    fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, p: &Presenter, format: wgpu::TextureFormat, (w, h): (u32, u32), reference: f32) -> Vec<[f64; 4]> {
         let out = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
@@ -313,7 +364,7 @@ mod tests {
         let row = (w * bpp).div_ceil(256) * 256;
         let back = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (row * h) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
         let mut enc = device.create_command_encoder(&Default::default());
-        p.draw(queue, &mut enc, &view, reference);
+        p.draw(queue, &mut enc, &view, reference, 80.0);
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo { texture: &out, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             wgpu::TexelCopyBufferInfo { buffer: &back, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },
@@ -323,9 +374,10 @@ mod tests {
         back.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let bytes = back.slice(..).get_mapped_range().expect("the read-back mapped").to_vec();
-        (0..w as usize)
-            .map(|x| {
-                let b = &bytes[x * bpp as usize..];
+        (0..(w * h) as usize)
+            .map(|i| {
+                let (x, y) = (i % w as usize, i / w as usize);
+                let b = &bytes[y * row as usize + x * bpp as usize..];
                 match format {
                     wgpu::TextureFormat::Rgba16Float => {
                         let h = |i: usize| half(u16::from_le_bytes([b[i * 2], b[i * 2 + 1]]));
@@ -413,7 +465,7 @@ mod tests {
         let view = out.create_view(&Default::default());
         let back = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 256, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
         let mut enc = device.create_command_encoder(&Default::default());
-        p.draw(&queue, &mut enc, &view, 203.0);
+        p.draw(&queue, &mut enc, &view, 203.0, 80.0);
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo { texture: &out, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             wgpu::TexelCopyBufferInfo { buffer: &back, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(256), rows_per_image: Some(1) } },
@@ -427,4 +479,78 @@ mod tests {
         assert!(red(2) < 0.001, "the box changed: {}", red(2));
         assert!((red(1) - 203.0 / 80.0).abs() < 0.03, "beside it kept: {}", red(1));
     }
+
+    fn srgb(v: f64) -> f64 {
+        if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+    }
+
+    /// See-through pixels come out premultiplied in every target.
+    #[test]
+    fn a_see_through_pixel_comes_out_premultiplied() {
+        let Some((device, queue)) = cpu_device() else { return };
+        let (_, _, _, px) = frame();
+        let (i, (c, a)) = px.iter().enumerate().find(|(_, (_, a))| *a > 0.0 && *a < 1.0).unwrap();
+        let got = drawn(&device, &queue, wgpu::TextureFormat::Rgba8UnormSrgb, Target::Sdr, 203.0);
+        // (the texture encodes what's written, which is premultiplied linear light)
+        let want = srgb((c[0] / 203.0).clamp(0.0, 1.0) * a);
+        assert!((got[i][0] - want).abs() <= 1.5 / 255.0, "{:?} wants {want}", got[i]);
+        let got = drawn(&device, &queue, wgpu::TextureFormat::Rgba16Float, Target::Hdr10, 203.0);
+        let m0 = 0.6274039 * c[0] + 0.3292830 * c[1] + 0.0433131 * c[2];
+        assert!((got[i][0] - pq(m0) * a).abs() <= 0.002, "{:?} wants {}", got[i], pq(m0) * a);
+    }
+
+    /// SDR into a format that doesn't encode sRGB itself: the presenter does.
+    #[test]
+    fn sdr_into_a_plain_format_is_encoded_by_the_presenter() {
+        let Some((device, queue)) = cpu_device() else { return };
+        let (_, _, _, px) = frame();
+        let got = drawn(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, Target::Sdr, 203.0);
+        for (g, (c, _)) in got.iter().zip(&px).filter(|(_, (_, a))| *a == 1.0) {
+            for i in 0..3 {
+                let want = srgb((c[i] / 203.0).clamp(0.0, 1.0));
+                assert!((g[i] - want).abs() <= 1.5 / 255.0, "{g:?} for {c:?}");
+            }
+        }
+    }
+
+    /// A box uploaded in a frame of several rows lands in its own row and
+    /// column, and nowhere else.
+    #[test]
+    fn a_box_lands_in_its_own_row() {
+        let Some((device, queue)) = cpu_device() else { return };
+        let (w, h) = (5u32, 3u32);
+        let white = (pq(203.0) * 65535.0).round() as u16;
+        let mut data = vec![[white, white, white, 65535]; (w * h) as usize];
+        let mut p = Presenter::new(&device, wgpu::TextureFormat::Rgba16Float, Target::ScRgb);
+        p.upload(&device, &queue, (w, h), &data, &[]);
+        // (a box two by two, from column 2 of row 1: its second row is found
+        // by the frame's own row length; the change outside it isn't copied)
+        data[(2 * w + 3) as usize] = [0, 0, 0, 65535];
+        data[(0 * w + 1) as usize] = [0, 0, 0, 65535];
+        p.upload(&device, &queue, (w, h), &data, &[(2, 1, 2, 2)]);
+        let got = read_back(&device, &queue, &p, wgpu::TextureFormat::Rgba16Float, (w, h), 203.0);
+        for (i, g) in got.iter().enumerate() {
+            let dark = i == (2 * w + 3) as usize;
+            assert_eq!(g[0] < 0.01, dark, "pixel {} of row {}: {g:?}", i % w as usize, i / w as usize);
+        }
+    }
+
+    /// The target a surface is set up for: HDR first where the screen may
+    /// show it, SDR where the system says it shows SDR, and only formats the
+    /// surface offers.
+    #[test]
+    fn the_best_target_is_one_the_surface_offers() {
+        use wgpu::{SurfaceCapabilities, SurfaceColorSpaces as S, SurfaceFormatCapabilities as F, TextureFormat as T};
+        let caps = |fs: &[(T, S)]| SurfaceCapabilities { formats: fs.iter().map(|f| f.0).collect(), format_capabilities: fs.iter().map(|&(format, color_spaces)| F { format, color_spaces }).collect(), ..Default::default() };
+        let hdr = caps(&[(T::Bgra8UnormSrgb, S::SRGB), (T::Rgba16Float, S::SRGB | S::EXTENDED_SRGB_LINEAR), (T::Rgb10a2Unorm, S::SRGB | S::BT2100_PQ)]);
+        assert_eq!(best_target(&hdr, None), Some((Target::Hdr10, T::Rgb10a2Unorm)));
+        assert_eq!(best_target(&hdr, Some(true)), Some((Target::Hdr10, T::Rgb10a2Unorm)));
+        assert_eq!(best_target(&hdr, Some(false)), Some((Target::Sdr, T::Bgra8UnormSrgb)), "the screen shows SDR");
+        let scrgb = caps(&[(T::Bgra8Unorm, S::SRGB), (T::Rgba16Float, S::SRGB | S::EXTENDED_SRGB_LINEAR)]);
+        assert_eq!(best_target(&scrgb, None), Some((Target::ScRgb, T::Rgba16Float)));
+        let plain = caps(&[(T::Bgra8Unorm, S::SRGB)]);
+        assert_eq!(best_target(&plain, None), Some((Target::Sdr, T::Bgra8Unorm)), "no sRGB format: the one offered");
+        assert_eq!(best_target(&caps(&[]), None), None);
+    }
+
 }
