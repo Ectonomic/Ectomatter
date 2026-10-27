@@ -128,7 +128,11 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Stage 4: maintainable
 
-- One object runs every page: `front.rs`, 10,506 lines, about 200 fields.
+- One object runs every page: `Front`, about 200 fields. Its code is split by
+  page and part into `src/front/` (eleven files, 2026-10-26), but its state
+  isn't: every part reaches every field, and no page's state is a type of its
+  own. Its largest file is `front/mod.rs` (3,266 lines: the types, `new`, and
+  what every page shares, such as acting on the window's controls).
 - One window component holds every page: `ui/app.slint`, 7,236 lines.
 - Untyped JSON at every file and protocol boundary.
 - The render tests (`apps/ectomatter/tests/renders.rs`) draw on a made-up

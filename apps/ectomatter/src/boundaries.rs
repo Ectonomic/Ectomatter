@@ -411,10 +411,12 @@ pub(crate) mod tests {
                 }
             }
         }
-        // (front.rs draws the screen too: its picture, its card's and the keyboard's display)
-        for (n, line) in code("apps/ectomatter/src/front.rs") {
-            if line.contains("lcd") && (line.contains(":<20") || line.contains("take(20)") || line.contains("take(4)")) {
-                found.push(format!("apps/ectomatter/src/front.rs:{n}"));
+        // (the pages' code draws the screen too: its picture, its card's and the keyboard's display)
+        for f in rust_files().into_iter().filter(|f| f.starts_with("apps/ectomatter/src/front")) {
+            for (n, line) in code(&f) {
+                if line.contains("lcd") && (line.contains(":<20") || line.contains("take(20)") || line.contains("take(4)")) {
+                    found.push(format!("{f}:{n}"));
+                }
             }
         }
         let ui = read("apps/ectomatter/ui/app.slint");

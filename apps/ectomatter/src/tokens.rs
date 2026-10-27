@@ -336,12 +336,22 @@ mod system {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let openers = ["fn hang_menu_most(", "fn open_menu_on(", "fn place_menu(", "fn fit_menu_width(", "fn show_rows(", "fn show_menus("];
         let mut bad = Vec::new();
-        for entry in std::fs::read_dir(&src).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
+        // (every Rust file under src/, its folders' too)
+        let mut files = Vec::new();
+        let mut dirs = vec![src.clone()];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if p.extension().is_some_and(|e| e == "rs") {
+                    files.push(p);
+                }
             }
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
+        }
+        assert!(files.len() > 1, "src/ read");
+        for path in files {
+            let name = path.strip_prefix(&src).unwrap().to_string_lossy().to_string();
             let text = std::fs::read_to_string(&path).unwrap();
             let mut within = "";
             for (i, line) in text.lines().enumerate() {
@@ -351,7 +361,7 @@ mod system {
                 let code = line.split("//").next().unwrap_or("");
                 if let Some(f) = openers.iter().find(|f| code.contains(**f)) {
                     within = f;
-                } else if code.trim_start().starts_with("fn ") || code.trim_start().starts_with("pub fn ") {
+                } else if ["fn ", "pub fn ", "pub(super) fn ", "pub(crate) fn "].iter().any(|f| code.trim_start().starts_with(f)) {
                     within = "";
                 }
                 let typed = |call: &str| code.split(call).skip(1).any(|rest| rest.split(',').skip(1).take(2).chain(rest.split(')').take(1)).any(|a| a.trim().parse::<f32>().is_ok_and(|v| v != 0.0)));
