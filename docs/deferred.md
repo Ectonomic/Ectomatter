@@ -133,7 +133,10 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   isn't: every part reaches every field, and no page's state is a type of its
   own. Its largest file is `front/mod.rs` (3,266 lines: the types, `new`, and
   what every page shares, such as acting on the window's controls).
-- One window component holds every page: `ui/app.slint`, 7,236 lines.
+- One window component holds every page: `AppWindow` in `ui/app.slint`
+  (about 3,800 of its 5,000 lines), every page's properties and callbacks on
+  it. The windows of their own are in `ui/windows/` (2026-10-26); the main
+  window's pages aren't components of their own yet.
 - Untyped JSON at every file and protocol boundary.
 - The render tests (`apps/ectomatter/tests/renders.rs`) draw on a made-up
   desk, but some of what they draw can still come from the computer running

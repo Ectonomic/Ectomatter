@@ -419,11 +419,10 @@ pub(crate) mod tests {
                 }
             }
         }
-        let ui = read("apps/ectomatter/ui/app.slint");
-        for (i, line) in ui.lines().enumerate() {
-            let line = line.split("//").next().unwrap_or("");
+        // (every window's Slint, app.slint's and each under ui/)
+        for (f, n, line) in ui_code() {
             if ["/ 20", "* 4 / 20", "for k in 19", "for k in 3:", "lcd-h * 5", "20 - b.width", "4 - b.height"].iter().any(|t| line.contains(t)) {
-                found.push(format!("apps/ectomatter/ui/app.slint:{} {}", i + 1, line.trim()));
+                found.push(format!("{f}:{n} {}", line.trim()));
             }
         }
         fail_on(found, "the screen's size typed in");

@@ -1,0 +1,986 @@
+// The screen layout editor, a window of its own: the layouts in a list, the
+// chosen one on the keyboard's screen as blocks to place, and the blocks' own
+// settings.
+// (Re-exported by app.slint, which the build compiles.)
+
+import { Space, Radius, Font, Line, Size, Part, Stroke, Ink } from "tokens.slint";
+import { CarryChip, ScreenBay, ColorButton, SegGround, SegChoice, EmptyState, ListRow, EditorHeader, EffectTile, Confirm, TitleBar, Typing, WordButton, TextButton, LinkButton, CheckBox, PageBox, MenuRow, Menu, Picker, Cell, CellView } from "../system/system.slint";
+
+// ------------------------------------------------------------------ the screen layout editor
+// A layout in the editor's list: its name, the line saying what it shows, whether open.
+export struct LayoutRow {
+    name: string,
+    about: string,
+    on: bool,
+}
+
+// A block on the editor's screen: its first cell and its size in cells, whether
+// selected, whether an effect; whether its corner can change its rows; and for each
+// height it can have from one row on, the nearest column its corner may pull it in to
+// (as narrow as it can be there) and how far its corner can reach (the column after its
+// last free cell), so the corner stops at its neighbors and the screen's edges.
+// An effect's tile in the Effect box: its name, its picture on the screen, and whether
+// it is the one chosen (lit, and its picture moving).
+export struct FxTile {
+    name: string,
+    pic: image,
+    on: bool,
+}
+
+export struct EdBlock {
+    row: int,
+    col: int,
+    width: int,
+    height: int,
+    on: bool,
+    fx: bool,
+    tall: bool,
+    lows: [int],
+    ends: [int],
+}
+
+// A kind of block's glyph, 12 across: 0 Text, 1 Data, 2 Bar, 3 Effect.
+component BlockGlyph inherits Rectangle {
+    in property <int> which;
+    in property <color> tint;
+    width: 12px;
+    height: 12px;
+    if root.which == 0: Path {
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M2 2.5h8M6 2.5V10";
+        fill: transparent;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        stroke-line-cap: round;
+    }
+    if root.which == 1: Path {
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M1.6 9.2a4.4 4.4 0 1 1 8.8 0M6 9.2l2.3-3";
+        fill: transparent;
+        stroke: root.tint;
+        stroke-width: 1.35px;
+        stroke-line-cap: round;
+    }
+    if root.which == 2: Rectangle {
+        Path {
+            width: 12px;
+            height: 12px;
+            viewbox-width: 12;
+            viewbox-height: 12;
+            commands: "M2.5 3.4h7a1.5 1.5 0 0 1 1.5 1.5v2.2a1.5 1.5 0 0 1-1.5 1.5h-7a1.5 1.5 0 0 1-1.5-1.5v-2.2a1.5 1.5 0 0 1 1.5-1.5z";
+            fill: transparent;
+            stroke: root.tint;
+            stroke-width: 1.2px;
+        }
+        Rectangle {
+            x: 2.5px;
+            y: 4.9px;
+            width: 4.2px;
+            height: 2.2px;
+            border-radius: 0.5px;
+            background: root.tint;
+        }
+    }
+    if root.which == 3: Path {
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M6 1.2l1.15 3.65L10.8 6 7.15 7.15 6 10.8 4.85 7.15 1.2 6l3.65-1.15z";
+        fill: root.tint;
+    }
+}
+
+// A kind of block in the bar over the screen, as a layout's bar on the playlist:
+// selected, it goes into the first free cells that fit it; pressed and dragged, it
+// is carried to the screen (where it is in the window, as it moves and as it is let go).
+component BlockChip inherits Rectangle {
+    in property <string> text;
+    in property <int> which;
+    in property <bool> lit;
+    callback add();
+    callback carry(length, length);
+    callback drop(length, length);
+    callback cancel();
+    width: Size.block-chip;
+    height: 24px; // art: a block's chip: its glyph and its name
+    border-radius: Radius.small;
+    background: root.lit ? Ink.edge : ta.has-hover ? Ink.pick-hover : Ink.pick;
+    property <bool> far;
+    BlockGlyph {
+        x: 9px; // art: a block's chip: its glyph and its name
+        y: 6px; // art: a block's chip: its glyph and its name
+        which: root.which;
+        tint: root.lit || ta.has-hover ? Ink.bright : Ink.soft;
+    }
+    Text {
+        x: 28px; // art: a block's chip: its glyph and its name
+        height: parent.height;
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.caption;
+        color: root.lit || ta.has-hover ? Ink.bright : Ink.dim;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        // the finger, as on anything that can be selected; the closed hand once it is carried
+        mouse-cursor: root.far ? MouseCursor.grabbing : MouseCursor.pointer;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.far = false;
+            }
+            if (e.kind == PointerEventKind.up) {
+                if (root.far) {
+                    root.far = false;
+                    root.drop(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                } else if (e.button == PointerEventButton.left) {
+                    root.add();
+                }
+            }
+            if (e.kind == PointerEventKind.cancel && root.far) {
+                root.far = false;
+                root.cancel();
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                if (!root.far && (abs(self.mouse-x - self.pressed-x) > Part.drag || abs(self.mouse-y - self.pressed-y) > Part.drag)) {
+                    root.far = true;
+                }
+                if (root.far) {
+                    root.carry(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
+            }
+        }
+    }
+}
+
+// A layout in the editor's list, a list's row: the one open lit, with the bar at its left.
+component LayoutListRow inherits ListRow {
+    in property <LayoutRow> r;
+    name: root.r.name;
+    sub: root.r.about;
+    chosen: root.r.on;
+    active: root.r.on;
+}
+
+// The screen layout editor, a window of its own as the Macro Editor is: the
+// layouts down its left; the one open, its name and its menu; the bar of blocks
+// joined to the top of the screen's box, with the layout's backlight and the grid
+// at its end; the screen, its blocks outlined; under it, the box of the block
+// selected. Changes save as they are made.
+export component LayoutWindow inherits Window {
+    // the keyboard whose screen this is, as its core names it
+    in property <string> device-name;
+    in property <bool> is-maximized;
+    in property <image> mark;
+    in property <[LayoutRow]> rows;
+    in-out property <length> list-scroll;
+    // the layout open (none once every layout is deleted): its name, changed in place;
+    // deleting it asks first, in the header's place
+    in property <bool> has-layout: true;
+    in property <string> name;
+    in property <bool> editing-name;
+    in-out property <string> name-text;
+    in property <bool> confirm-open;
+    in property <string> confirm-title;
+    in property <string> confirm-body;
+    // the screen: its picture and the background round it, its blocks, its grid; a block
+    // on its way in from the bar (the cells it would take), and its name under the pointer
+    in property <image> picture;
+    in property <color> field: #0a0908;  // art: the screen's own ground, until its core says
+    in property <[EdBlock]> blocks;
+    // the block selected (-1, none); its corner being dragged and how many cells wider and
+    // rows taller so far; and whether it is being carried (its corner and × step aside)
+    in property <int> sel-block: -1;
+    in-out property <bool> corner-on;
+    in-out property <int> corner-dw;
+    in-out property <int> corner-dh;
+    in-out property <bool> sel-moving;
+    // the line in the bar after the blocks: how to add one, or that there's no room
+    in property <string> bar-hint: "Drag a block onto the screen.";
+    // counted up each time the layout has taken a block's move or new ends, so the
+    // block dragged lets go of the drag even when nothing changed
+    in property <int> settled;
+    in property <bool> grid;
+    in property <bool> ghost-on;
+    in property <EdBlock> ghost;
+    // an effect selected: the effects, as tiles in its box
+    in property <[FxTile]> fx-tiles;
+    callback fx-chose(int);
+    in property <bool> carry-on;
+    in property <string> carry-name;
+    in property <int> carry-kind;
+    in property <length> carry-x;
+    in property <length> carry-y;
+    in property <int> lit-chip: -1;
+    // the layout's backlight: its own color, or the profile's default (whose color the
+    // switch's dot shows); the color and its code; the picker open on it
+    in property <bool> own-light;
+    in property <color> default-light;
+    in property <color> own-color;
+    in property <string> own-hex;
+    in property <bool> picking;
+    // the box under the screen: 0 nothing selected, 1 text, 2 data, 3 bar; its title and
+    // its cells; whether the layout has blocks yet
+    in property <int> box-kind;
+    in property <string> box-title;
+    in property <[Cell]> box-cells;
+    in property <length> box-h;
+    in property <bool> has-blocks;
+    // the open menu
+    in property <bool> menu-open;
+    // whether the open menu keeps a column for ticks (not when nothing in it is ticked)
+    in property <bool> menu-marks: true;
+    in property <length> menu-ax;
+    in property <length> menu-w: Size.menu;
+    in property <[MenuRow]> menu-rows;
+    in property <length> menu-top;
+    in property <length> menu-max;
+    in property <length> menu-natural;
+    out property <length> menu-x: menu.x;
+    out property <length> menu-y: menu.y;
+    out property <length> menu-width: menu.width;
+    out property <length> menu-height: menu.height;
+    out property <length> window-height: root.height;
+    out property <length> window-width: root.width;
+    // the color picker
+    in property <bool> picker-open;
+    in property <length> picker-x;
+    in property <length> picker-top;
+    out property <length> picker-height: picker.natural;
+    in property <float> pk-hue;
+    in property <float> pk-sat;
+    in property <float> pk-val;
+    in property <color> pk-now;
+    in property <color> pk-pure;
+    in property <image> pk-sv-img;
+    in property <image> pk-hue-img;
+    in-out property <string> pk-hex;
+    in-out property <string> pk-r;
+    in-out property <string> pk-g;
+    in-out property <string> pk-b;
+    in-out property <string> pk-h;
+    in-out property <string> pk-s;
+    in-out property <string> pk-v;
+    in property <[color]> pk-presets;
+    in property <[color]> pk-recent;
+    // the screen's columns and rows, as the keyboard's core describes them (none, 0 by 0,
+    // before it does)
+    in property <int> screen-cols;
+    in property <int> screen-rows;
+    // where the screen's cells are in the window, for a block carried from the bar
+    out property <length> cells-x: lcd.absolute-position.x;
+    out property <length> cells-y: lcd.absolute-position.y;
+    out property <length> cell-w: root.screen-cols > 0 ? lcd.width / root.screen-cols : 0;
+    out property <length> cell-h: root.screen-rows > 0 ? lcd.height / root.screen-rows : 0;
+
+    callback minimize();
+    callback maximize();
+    callback close-window();
+    callback drag();
+    callback choose(int);
+    // + New (or the empty window's New layout): its menu, hung from the button (where it is
+    // and how wide)
+    callback new-layout(length, length, length, length);
+    callback rename();
+    callback name-done(string);
+    callback name-cancel();
+    callback more(length, length, length);
+    callback confirm-yes();
+    callback confirm-no();
+    callback block-chosen(int);
+    callback block-moved(int, int, int);
+    callback block-sized(int, int, int);
+    callback block-remove();
+    callback chip-add(int);
+    callback chip-carry(int, length, length);
+    callback chip-drop(int, length, length);
+    callback chip-cancel();
+    callback light-own(bool);
+    callback light-color(length, length, length);
+    callback grid-toggle();
+    callback cell-pick(int, int, length, length, length, length);
+    callback cell-left(int, int, bool);
+    callback cell-slide(int, float);
+    callback cell-typed(int, int, string);
+    callback menu-chose(int);
+    callback menu-dismiss();
+    callback pk-sv(float, float);
+    callback pk-hue-at(float);
+    callback pk-field(int, string);
+    callback pk-well(color);
+    callback pk-enter();
+    callback pk-dismiss();
+
+    background: transparent;
+    default-font-family: Font.ui;
+    property <length> radius: root.is-maximized ? 0 : Radius.window;
+    property <length> main-w: root.width - Size.sidebar;
+    property <length> rig-w: main-w - 2 * Space.margin;
+    // the screen holds the keyboard when a block on it is pressed, so a field in the box
+    // lets go of it (and the window no longer counts as typing)
+    keys := FocusScope { width: 0; height: 0; }
+    function take-keys() {
+        keys.focus();
+        Typing.on = false;
+    }
+
+    // the title bar, every window's: where this window is
+    TitleBar {
+        y: 0;
+        mark: root.mark;
+        crumbs: [root.device-name, "Screen layouts"];
+        corner: root.radius;
+        drag => { root.drag(); }
+        maximize => { root.maximize(); }
+        minimize => { root.minimize(); }
+        close => { root.close-window(); }
+    }
+
+    // the layouts
+    Rectangle {
+        x: 0;
+        y: Size.title-bar;
+        width: Size.sidebar;
+        height: root.height - Size.title-bar;
+        background: Ink.box;
+        border-bottom-left-radius: root.radius;
+        Text {
+            x: Space.inline + Part.field-pad;
+            y: (Size.bar - Size.compact) / 2;
+            height: Size.compact;
+            text: "All layouts";
+            font-size: Font.text;
+            font-weight: Font.medium;
+            color: Ink.bright;
+            vertical-alignment: center;
+        }
+        TextButton {
+            x: parent.width - Space.row - self.width;
+            y: (Size.bar - Size.compact) / 2;
+            text: "+ New";
+            clicked => { root.new-layout(self.absolute-position.x, self.absolute-position.y, self.width, self.height); }
+        }
+        Flickable {
+            x: Space.inline;
+            y: Size.bar - Space.tight;
+            width: parent.width - 2 * Space.inline;
+            height: parent.height - self.y - Space.inline;
+            content-height: root.rows.length * (Size.row + Space.list);
+            content-y <=> root.list-scroll;
+            mouse-drag-pan-enabled: false;
+            for r[i] in root.rows: LayoutListRow {
+                y: i * (Size.row + Space.list);
+                width: parent.width;
+                r: r;
+                clicked => { root.choose(i); }
+            }
+        }
+    }
+
+    // the layout open
+    Rectangle {
+        x: Size.sidebar;
+        y: Size.title-bar;
+        width: main-w;
+        height: root.height - Size.title-bar;
+        background: Ink.base;
+        border-bottom-right-radius: root.radius;
+        // its name, a pencil to change it, and its menu: its header, every editor's
+        EditorHeader {
+            visible: root.has-layout;
+            y: 0;
+            width: parent.width;
+            name: root.name;
+            renaming: root.editing-name;
+            typed <=> root.name-text;
+            rename => { root.rename(); }
+            rename-done(t) => { root.name-done(t); }
+            rename-cancel => { root.name-cancel(); }
+            more(x, y, h) => { root.more(x, y, h); }
+        }
+
+        // the bar of blocks, joined to the top of the screen's box, as the playlist's panel
+        // is to its foot; the layout's backlight and the grid at its end
+        Rectangle {
+            visible: root.has-layout;
+            x: Space.margin;
+            y: Size.bar;
+            width: rig-w;
+            height: Size.bar;
+            border-top-left-radius: Radius.box;
+            border-top-right-radius: Radius.box;
+            background: Ink.box;
+            for name[k] in ["Text", "Data", "Bar", "Effect"]: BlockChip {
+                x: Space.pad + k * (Size.block-chip + Space.inline);
+                y: (parent.height - self.height) / 2;
+                text: name;
+                which: k;
+                lit: root.lit-chip == k;
+                add => { root.chip-add(k); }
+                carry(x, y) => { root.chip-carry(k, x, y); }
+                drop(x, y) => { root.chip-drop(k, x, y); }
+                cancel => { root.chip-cancel(); }
+            }
+            // (whole or not at all: in a narrow window it steps aside for the backlight)
+            Text {
+                x: Space.pad + 4 * (Size.block-chip + Space.inline) - Space.inline + Space.row;
+                y: (parent.height - self.height) / 2;
+                width: light-row.x - self.x - Space.pad;
+                height: Line.text;
+                visible: self.preferred-width <= self.width;
+                text: root.bar-hint;
+                font-family: Font.ui;
+                font-size: Font.note;
+                color: Ink.quiet;
+                vertical-alignment: center;
+            }
+            // at the bar's right, compact and at its middle: the layout's backlight, Default
+            // (the profile's, whose color the dot shows) or a color of the layout's own, as its
+            // dot and its code, which open the picker; a hairline, then Grid, only the editor's
+            // view
+            light-row := HorizontalLayout {
+                x: parent.width - Space.pad - self.width;
+                y: (parent.height - self.height) / 2;
+                width: self.preferred-width;
+                height: Size.compact;
+                spacing: Space.inline;
+                Text {
+                    text: "Backlight";
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    color: Ink.soft;
+                    vertical-alignment: center;
+                }
+                // (a switch, its choices as wide as their words)
+                SegGround {
+                    width: def-c.need + own-c.need + Part.seg-gap + 2 * Part.inset;
+                    def-c := SegChoice {
+                        x: Part.inset;
+                        y: Part.inset;
+                        width: self.need;
+                        height: parent.height - 2 * Part.inset;
+                        text: "Default";
+                        swatched: true;
+                        swatch: root.default-light;
+                        on: !root.own-light;
+                        clicked => { if (root.own-light) { root.light-own(false); } }
+                    }
+                    own-c := SegChoice {
+                        x: def-c.x + def-c.width + Part.seg-gap;
+                        y: Part.inset;
+                        width: self.need;
+                        height: parent.height - 2 * Part.inset;
+                        text: "Own color";
+                        on: root.own-light;
+                        clicked => { if (!root.own-light) { root.light-own(true); } }
+                    }
+                }
+                if root.own-light: ColorButton {
+                    swatch: root.own-color;
+                    code: root.own-hex;
+                    open: root.picking;
+                    clicked(x, y, h) => { root.light-color(x, y, h); }
+                }
+                Rectangle {
+                    width: Stroke.line;
+                    Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        width: Stroke.line;
+                        height: Line.text;
+                        background: Ink.line;
+                    }
+                }
+                CheckBox {
+                    width: self.preferred-width;
+                    text: "Grid";
+                    on: root.grid;
+                    clicked => { root.grid-toggle(); }
+                }
+            }
+        }
+        // the bar's gray behind the box's top corners, where the two meet
+        Rectangle {
+            visible: root.has-layout;
+            x: Space.margin;
+            y: 2 * Size.bar - Radius.box;
+            width: rig-w;
+            height: 2 * Radius.box;
+            background: Ink.box;
+        }
+        // the screen's box, and the bay the screen is set into, as on the Screen tab (the
+        // screen's cells square)
+        screen-box := Rectangle {
+            visible: root.has-layout;
+            x: Space.margin;
+            y: 2 * Size.bar;
+            width: rig-w;
+            height: bay.height + 2 * Space.pad;
+            border-radius: Radius.box;
+            background: Ink.well;
+            bay := ScreenBay {
+                x: (parent.width - self.width) / 2;
+                y: Space.pad;
+                screen-w: Size.edit-screen;
+                screen-h: root.screen-cols > 0 ? Size.edit-screen * root.screen-rows / root.screen-cols : 0;
+                field: root.field;
+                lcd := Rectangle {
+                    x: bay.screen-x;
+                    y: bay.screen-y;
+                    width: bay.screen-w;
+                    height: bay.screen-h;
+                    Rectangle {
+                        border-radius: Radius.tiny;
+                        clip: true;
+                        Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: root.picture;
+                        }
+                    }
+                    // a press away from every block lets the selected one go (and takes the
+                        // keyboard from any field in the box, so Delete is the screen's again)
+                    TouchArea {
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                root.take-keys();
+                                root.block-chosen(-1);
+                            }
+                        }
+                    }
+                    // the screen's cells
+                    if root.grid: Rectangle {
+                        for k in root.screen-cols - 1: Rectangle {
+                            x: (k + 1) * parent.width / root.screen-cols - 0.5px; // art: the screen's cells' lines
+                            width: 1px; // art: the screen's cells' lines
+                            background: Ink.white.with-alpha(0.11);
+                        }
+                        for k in root.screen-rows - 1: Rectangle {
+                            y: (k + 1) * parent.height / root.screen-rows - 0.5px; // art: the screen's cells' lines
+                            height: 1px; // art: the screen's cells' lines
+                            background: Ink.white.with-alpha(0.11);
+                        }
+                    }
+                    // a block on its way in: the cells it would take
+                    if root.ghost-on: Rectangle {
+                        x: root.ghost.col * parent.width / root.screen-cols + 1px; // art: the cells a block on its way in would take
+                        y: root.ghost.row * parent.height / root.screen-rows + 1px; // art: the cells a block on its way in would take
+                        width: root.ghost.width * parent.width / root.screen-cols - 2px; // art: the cells a block on its way in would take
+                        height: root.ghost.height * parent.height / root.screen-rows - 2px; // art: the cells a block on its way in would take
+                        border-radius: 3px; // art: the cells a block on its way in would take
+                        border-width: 1.5px; // art: the cells a block on its way in would take
+                        border-color: Ink.white.with-alpha(0.69);
+                        background: root.field.with-alpha(0.5);
+                    }
+                    // each block outlined; the one selected in amber (its corner glyph and × over
+                    // every block, below). Dragged, a block follows the pointer cell by cell; its
+                    // corner dragged takes the block wider or narrower (and words taller or
+                    // shorter), as far as the free cells and the screen let it
+                    for b[i] in root.blocks: blk := Rectangle {
+                        property <length> cw: root.cell-w;
+                        property <length> ch: root.cell-h;
+                        // a move: how many cells across and down; the corner (the selected block's,
+                        // dragged): how many cells wider and rows taller
+                        property <int> dc: 0;
+                        property <int> dr: 0;
+                        property <int> dw: b.on ? root.corner-dw : 0;
+                        property <int> dh: b.on ? root.corner-dh : 0;
+                        property <bool> sizing: b.on && root.corner-on;
+                        // carried by the pointer (past a few pixels from where it was pressed)
+                        property <bool> moving: false;
+                        property <int> at-col: max(0, min(root.screen-cols - b.width, b.col + dc));
+                        property <int> at-row: max(0, min(root.screen-rows - b.height, b.row + dr));
+                        // (the corner: as tall as asked within the rows the block can have, then
+                        // as wide as that height's free cells let it, and no narrower than the
+                        // block can be at that height)
+                        property <int> s-h: max(1, min(b.ends.length, b.height + dh));
+                        property <int> s-end: max(b.lows[s-h - 1], min(b.ends[s-h - 1], b.col + b.width + dw));
+                        property <int> show-w: sizing ? s-end - b.col : b.width;
+                        property <int> show-h: sizing ? s-h : b.height;
+                        // (where it is and its size, each a byte's worth, see lcd_page::size_of)
+                        property <int> home: b.row * 256 + b.col;
+                        property <int> span: b.width * 256 + b.height;
+                        property <int> settled: root.settled;
+                        changed home => { self.rest(); }
+                        changed span => { self.rest(); }
+                        changed settled => { self.rest(); }
+                        function rest() {
+                            self.dc = 0;
+                            self.dr = 0;
+                            self.moving = false;
+                            if (b.on) {
+                                root.sel-moving = false;
+                            }
+                        }
+                        // (sizing never moves the block's first cell)
+                        x: at-col * cw;
+                        y: at-row * ch;
+                        width: show-w * cw;
+                        height: show-h * ch;
+                        // (an effect stays behind the other blocks, selected too, so the blocks on
+                        // it can still be selected)
+                        z: b.fx ? 0 : b.on ? 2 : 1;
+                        // (the outline a pixel in from the block's cells, as the grid's lines are between them)
+                        Rectangle {
+                            x: 1px; // art: a block's outline, a pixel in
+                            y: 1px; // art: a block's outline, a pixel in
+                            width: parent.width - 2px; // art: a block's outline, a pixel in
+                            height: parent.height - 2px; // art: a block's outline, a pixel in
+                            border-radius: 3px; // art: a block's outline, a pixel in
+                            border-width: b.on || move-ta.pressed ? 2px : 1px; // art: a block's outline, a pixel in
+                            border-color: b.on || move-ta.pressed ? Ink.warn : move-ta.has-hover ? Ink.white.with-alpha(0.502) : Ink.white.with-alpha(0.2);
+                            background: b.on && !b.fx ? Ink.warn.with-alpha(0.102) : move-ta.has-hover && !b.on ? Ink.glass : transparent;
+                        }
+                        // the finger, as on anything that can be selected; the closed hand only
+                        // once the block is carried, and the finger again as it is let go
+                        move-ta := TouchArea {
+                            mouse-cursor: parent.moving ? MouseCursor.grabbing : MouseCursor.pointer;
+                            // the pointer measured from where it was pressed: the outline moves
+                            // with the drag, so how far it has moved already is added back
+                            moved => {
+                                if (abs(self.mouse-x - self.pressed-x + (parent.at-col - b.col) * cw) > Part.drag
+                                    || abs(self.mouse-y - self.pressed-y + (parent.at-row - b.row) * ch) > Part.drag) {
+                                    parent.moving = true;
+                                }
+                                parent.dc = round((self.mouse-x - self.pressed-x + (parent.at-col - b.col) * cw) / cw);
+                                parent.dr = round((self.mouse-y - self.pressed-y + (parent.at-row - b.row) * ch) / ch);
+                                if (b.on) {
+                                    root.sel-moving = parent.moving;
+                                }
+                            }
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.down) {
+                                    // (the keyboard is the screen's while a block is pressed: Delete
+                                    // removes the block rather than a letter in the box's field)
+                                    root.take-keys();
+                                    parent.dc = 0;
+                                    parent.dr = 0;
+                                    parent.moving = false;
+                                }
+                                if (e.kind == PointerEventKind.up) {
+                                    parent.moving = false;
+                                    root.sel-moving = false;
+                                    if (parent.at-col != b.col || parent.at-row != b.row) {
+                                        root.block-moved(i, parent.at-row, parent.at-col);
+                                    } else {
+                                        parent.rest();
+                                        root.block-chosen(i);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // the selected block's outline, corner glyph and × over every block: an effect
+                    // stays behind the blocks on it, selected too, so they can still be selected,
+                    // and its corner and × are still there to use (they step aside while the block
+                    // is carried, and the × while the corner is dragged)
+                    if root.sel-block >= 0 && root.sel-block < root.blocks.length && !root.sel-moving: sel := Rectangle {
+                        property <EdBlock> sb: root.blocks[root.sel-block];
+                        property <length> cw: root.cell-w;
+                        property <length> ch: root.cell-h;
+                        property <int> s-h: max(1, min(sb.ends.length, sb.height + root.corner-dh));
+                        property <int> s-end: max(sb.lows[s-h - 1], min(sb.ends[s-h - 1], sb.col + sb.width + root.corner-dw));
+                        property <int> show-w: root.corner-on ? s-end - sb.col : sb.width;
+                        property <int> show-h: root.corner-on ? s-h : sb.height;
+                        property <int> home: sb.row * 256 + sb.col;
+                        property <int> span: sb.width * 256 + sb.height;
+                        property <int> settled: root.settled;
+                        changed home => { self.rest(); }
+                        changed span => { self.rest(); }
+                        changed settled => { self.rest(); }
+                        function rest() {
+                            root.corner-on = false;
+                            root.corner-dw = 0;
+                            root.corner-dh = 0;
+                        }
+                        // the corner let go: the block's new size, or, back where it started, as it was
+                        function let-go() {
+                            if (self.show-w != sb.width || self.show-h != sb.height) {
+                                root.block-sized(root.sel-block, self.show-w, self.show-h);
+                            } else {
+                                self.rest();
+                            }
+                        }
+                        x: sb.col * cw;
+                        y: sb.row * ch;
+                        width: show-w * cw;
+                        height: show-h * ch;
+                        z: 3;
+                        Rectangle {
+                            x: 1px; // art: the selected block's corner and its ×
+                            y: 1px; // art: the selected block's corner and its ×
+                            width: parent.width - 2px; // art: the selected block's corner and its ×
+                            height: parent.height - 2px; // art: the selected block's corner and its ×
+                            border-radius: 3px; // art: the selected block's corner and its ×
+                            border-width: 2px; // art: the selected block's corner and its ×
+                            border-color: Ink.warn;
+                        }
+                        // the corner glyph: an L of twice the outline's weight on the outline's own
+                        // line round the bottom right corner (the line's middle is 2 px in from the
+                        // block's edge), drawn as two bars so it lands on the line's own pixels:
+                        // square where they meet, rounded at their far ends. With room round it to
+                        // press
+                        Rectangle {
+                            x: parent.width - 2px - 12px; // art: the selected block's corner and its ×
+                            y: parent.height - 2px - 12px; // art: the selected block's corner and its ×
+                            width: 24px; // art: the selected block's corner and its ×
+                            height: 24px; // art: the selected block's corner and its ×
+                            property <color> ink: corner-ta.has-hover || corner-ta.pressed ? Ink.warn.mix(Ink.white, 0.8) : Ink.warn;
+                            // (the corner's middle, at 12 in the box, on the line's middle)
+                            Rectangle {
+                                x: 12px - 14px; // art: the selected block's corner and its ×
+                                y: 12px - 2px; // art: the selected block's corner and its ×
+                                width: 16px; // art: the selected block's corner and its ×
+                                height: 4px; // art: the selected block's corner and its ×
+                                border-top-left-radius: self.height / 2;
+                                border-bottom-left-radius: self.height / 2;
+                                background: parent.ink;
+                            }
+                            Rectangle {
+                                x: 12px - 2px; // art: the selected block's corner and its ×
+                                y: 12px - 14px; // art: the selected block's corner and its ×
+                                width: 4px; // art: the selected block's corner and its ×
+                                height: 16px; // art: the selected block's corner and its ×
+                                border-top-left-radius: self.width / 2;
+                                border-top-right-radius: self.width / 2;
+                                background: parent.ink;
+                            }
+                            // (the corner moves with the size, so how far it has moved already is
+                            // added back, as for the block itself)
+                            corner-ta := TouchArea {
+                                mouse-cursor: sel.sb.tall ? MouseCursor.nwse-resize : MouseCursor.ew-resize;
+                                moved => {
+                                    root.corner-on = true;
+                                    root.corner-dw = round((self.mouse-x - self.pressed-x + (sel.show-w - sel.sb.width) * sel.cw) / sel.cw);
+                                    root.corner-dh = round((self.mouse-y - self.pressed-y + (sel.show-h - sel.sb.height) * sel.ch) / sel.ch);
+                                }
+                                pointer-event(e) => {
+                                    if (e.kind == PointerEventKind.up && root.corner-on) {
+                                        sel.let-go();
+                                    }
+                                }
+                            }
+                        }
+                        // its ×: a ring of the outline's weight round the screen's dark, centered on
+                        // the outline's top right corner and filled with amber under the pointer (it
+                        // steps aside while the corner is dragged)
+                        if !root.corner-on: Rectangle {
+                            x: parent.width - 2px - 12px; // art: the selected block's corner and its ×
+                            y: 2px - 12px; // art: the selected block's corner and its ×
+                            width: 24px; // art: the selected block's corner and its ×
+                            height: 24px; // art: the selected block's corner and its ×
+                            Rectangle {
+                                x: 4px; // art: the selected block's corner and its ×
+                                y: 4px; // art: the selected block's corner and its ×
+                                width: 16px; // art: the selected block's corner and its ×
+                                height: 16px; // art: the selected block's corner and its ×
+                                border-radius: self.width / 2;
+                                background: x-ta.has-hover ? Ink.warn : root.field;
+                                border-width: 2px; // art: the selected block's corner and its ×
+                                border-color: Ink.warn;
+                                Path {
+                                    width: 7px; // art: the selected block's corner and its ×
+                                    height: 7px; // art: the selected block's corner and its ×
+                                    viewbox-width: 10;
+                                    viewbox-height: 10;
+                                    commands: "M1.5 1.5l7 7M8.5 1.5l-7 7";
+                                    fill: transparent;
+                                    stroke: x-ta.has-hover ? Ink.base : Ink.warn;
+                                    stroke-width: 1.6px; // art: the selected block's corner and its ×
+                                    stroke-line-cap: round;
+                                }
+                            }
+                            x-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.block-remove(); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // the box under the screen: the block selected, named for its kind; Remove at its
+        // title's line, its words ending at the box's padding
+        PageBox {
+            visible: root.has-layout;
+            x: Space.margin;
+            y: 2 * Size.bar + screen-box.height + Space.gap;
+            width: (rig-w - Space.gap) / 2;
+            height: root.box-h;
+            title: root.box-title;
+            if root.box-kind != 0: LinkButton {
+                x: parent.width - Space.pad + Part.quiet-pad - self.width;
+                y: Part.title-top + (Line.title - self.height) / 2;
+                text: "Remove";
+                clicked => { root.block-remove(); }
+            }
+            // nothing selected: what each block is for (screen_edit.rs reckons the box's
+            // height from the same lines)
+            if root.box-kind == 0: Rectangle {
+                if root.has-blocks: Text {
+                    x: Space.pad;
+                    y: Size.box-head;
+                    height: Line.note;
+                    text: "Select a block on the screen to change the block.";
+                    font-size: Font.note;
+                    color: Ink.quiet;
+                }
+                for g[k] in [
+                    { name: "Text", says: "Words you type, like a label or a greeting." },
+                    { name: "Data", says: "A reading, such as the time, the date or the CPU temperature." },
+                    { name: "Bar", says: "A bar that fills as a reading rises." },
+                ]: Rectangle {
+                    x: Space.pad;
+                    y: Size.box-head + (root.has-blocks ? Line.note + Space.row : 0) + k * (Line.note + Space.row);
+                    width: parent.width - 2 * Space.pad;
+                    height: Line.note;
+                    BlockGlyph {
+                        x: 0;
+                        y: (parent.height - self.height) / 2;
+                        which: k;
+                        tint: Ink.soft;
+                    }
+                    Text {
+                        x: 22px; // art: a block kind's glyph, name and what it says
+                        height: parent.height;
+                        text: g.name;
+                        font-size: Font.note;
+                        font-weight: Font.medium;
+                        color: Ink.dim;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        x: 22px + 58px; // art: a block kind's glyph, name and what it says
+                        width: parent.width - self.x;
+                        height: parent.height;
+                        text: g.says;
+                        font-size: Font.note;
+                        color: Ink.quiet;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+            // an effect selected: the effects as tiles, four to a row, built as the Lighting
+            // tab's Effect grid is: each a well with its picture under a film and its name, the
+            // chosen one lit and only its picture moving
+            if root.box-kind == 4: Rectangle {
+                property <length> tw: (self.width - 2 * Space.pad - 3 * Space.inline) / 4;
+                for t[k] in root.fx-tiles: EffectTile {
+                    x: Space.pad + mod(k, 4) * (parent.tw + Space.inline);
+                    y: Size.box-head + floor(k / 4) * (Size.tile + Space.inline);
+                    width: parent.tw;
+                    name: t.name;
+                    icon: t.pic;
+                    on: t.on;
+                    screen: true;
+                    clicked => { root.fx-chose(k); }
+                }
+            }
+            for c in root.box-cells: CellView {
+                c: c;
+                pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
+                field-left(id, index, kept) => { root.cell-left(id, index, kept); }
+                slide(id, v) => { root.cell-slide(id, v); }
+                typed(id, index, t) => { root.cell-typed(id, index, t); }
+            }
+        }
+
+        // no layout left to open: what the keyboard shows meanwhile, and a new one
+        if !root.has-layout: EmptyState {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2 - 40px; // art: a little above the middle
+            height: self.preferred-height;
+            title: "No screen layouts";
+            text: "The keyboard’s screen stays blank until a playlist has a layout to show.";
+            HorizontalLayout {
+                padding-top: Space.label;
+                alignment: center;
+                WordButton {
+                    primary: true;
+                    text: "New layout";
+                    clicked => { root.new-layout(self.absolute-position.x, self.absolute-position.y, self.width, self.height); }
+                }
+            }
+        }
+    }
+
+    // a block carried from the bar: its name and its glyph, under the pointer and clear of it
+    if root.carry-on: CarryChip {
+        x: root.carry-x + Space.pad;
+        y: root.carry-y + Space.row;
+        text: root.carry-name;
+        VerticalLayout {
+            alignment: center;
+            BlockGlyph {
+                which: root.carry-kind;
+                tint: Ink.dim;
+            }
+        }
+    }
+
+    // the open menu, over everything
+    // the open menu turned `y` down as it opens (src/menu_size.rs's reveal)
+    public function scroll-menu(y: length) {
+        menu.scroll-to(y);
+    }
+    menu := Menu {
+        marks: root.menu-marks;
+        visible: root.menu-open;
+        x: max(Space.inline, min(root.menu-ax, root.width - root.menu-w - Space.inline));
+        width: root.menu-w;
+        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - Space.inline));
+        y: root.menu-top;
+        rows: root.menu-rows;
+        search: false;
+        chose(i) => { root.menu-chose(i); }
+        dismiss => { root.menu-dismiss(); }
+    }
+
+    picker := Picker {
+        visible: root.picker-open;
+        x: max(Space.inline, min(root.picker-x, root.width - Size.picker - Space.inline));
+        y: root.picker-top;
+        height: root.picker-height;
+        hue: root.pk-hue;
+        sat: root.pk-sat;
+        val: root.pk-val;
+        now: root.pk-now;
+        pure: root.pk-pure;
+        sv-img: root.pk-sv-img;
+        hue-img: root.pk-hue-img;
+        t-hex <=> root.pk-hex;
+        t-r <=> root.pk-r;
+        t-g <=> root.pk-g;
+        t-b <=> root.pk-b;
+        t-h <=> root.pk-h;
+        t-s <=> root.pk-s;
+        t-v <=> root.pk-v;
+        presets: root.pk-presets;
+        recent: root.pk-recent;
+        sv(x, y) => { root.pk-sv(x, y); }
+        hue-at(x) => { root.pk-hue-at(x); }
+        field(i, t) => { root.pk-field(i, t); }
+        well(c) => { root.pk-well(c); }
+        enter => { root.pk-enter(); }
+        dismiss => { root.pk-dismiss(); }
+    }
+
+    // are you sure: the question in a dialog, every window's; Escape is Cancel
+    if root.confirm-open: Confirm {
+        corner: root.radius;
+        title: root.confirm-title;
+        body: root.confirm-body;
+        do: "Delete layout";
+        cancel => { root.confirm-no(); }
+        yes => { root.confirm-yes(); }
+    }
+}

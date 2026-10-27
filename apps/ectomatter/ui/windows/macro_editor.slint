@@ -1,0 +1,798 @@
+// The Macro Editor, a window of its own: the library of macros on the left,
+// the chosen macro as a chain of steps, the tools under it, how it plays, and
+// its Revert and Save.
+// (Re-exported by app.slint, which the build compiles.)
+
+import { Space, Radius, Font, Line, Size, Part, Stroke, Ink } from "tokens.slint";
+import { RecordButton, EmptyState, ListRow, EditorHeader, IconButton, Confirm, TitleBar, Typing, WordButton, TextButton, ScrollBar, FieldBox, DropField, MenuRow, Menu, Cell, AnchorHead } from "../system/system.slint";
+
+// ---------------------------------------------------------------- the Macro Editor
+// Its own window, as the web app had it (macro.css at cd9ea82): the library
+// in the rail's shade on the left, the chosen macro on the home's ground as a
+// chain of steps on a tile, the tools under the chain, how it plays and its
+// Revert and Save at the foot.
+
+// a macro in the library
+// a row of the Macro Editor's list: a macro (kind 0), or the heading of a
+// section of them (kind 1): Ectomatter's own, then each device's that keeps
+// macros in its own memory. Each knows its library (0 the keyboard's, 1
+// Ectomatter's) and where it sits in the list; a heading, whether a new one
+// can be made there.
+export struct MacroItem {
+    kind: int,
+    lib: int,
+    n: int,
+    name: string,
+    sub: string,
+    // (a section's note, a line each, as Rust broke it)
+    lines: [string],
+    timed: bool,
+    current: bool,
+    dirty: bool,
+    can-new: bool,
+    y: length,
+    h: length,
+}
+
+// a small icon from the editor's set, drawn in its color
+component MacroIcon inherits Path {
+    in property <int> which;   // 0 keys, 1 clock, 2 gear, 3 pen
+    viewbox-width: 16;
+    viewbox-height: 16;
+    fill: transparent;
+    stroke-width: 1.4px * self.width / 16px;
+    commands: root.which == 1 ? "M13.8 8.5a5.8 5.8 0 1 1-11.6 0a5.8 5.8 0 1 1 11.6 0zM8 5.3v3.2l2.2 1.4M6.5 1.5h3"
+        : root.which == 2 ? "M10.3 8a2.3 2.3 0 1 1-4.6 0a2.3 2.3 0 1 1 4.6 0zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"
+        : root.which == 3 ? "M10.5 2.5l3 3L6 13H3v-3z"
+        : "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
+}
+
+// a macro's row in the library, a list's row with its glyph: a macro that waits, or one that doesn't
+component MacroRow inherits ListRow {
+    in property <MacroItem> m;
+    callback menu(length, length);
+    name: root.m.name;
+    sub: root.m.sub;
+    chosen: root.m.current;
+    dirty: root.m.dirty;
+    inset: 40px; // art: the macro's glyph, in its row
+    right-clicked(x, y) => { root.menu(x, y); }
+    MacroIcon {
+        x: 11.5px; // art: the macro's glyph, in its row
+        y: (parent.height - self.height) / 2;
+        width: 15px; // art: the macro's glyph, in its row
+        height: 15px; // art: the macro's glyph, in its row
+        which: root.m.timed ? 1 : 0;
+        stroke: root.m.current ? Ink.bright : Ink.soft;
+    }
+}
+
+// a piece of the chain, placed by the window: a step, a wait, a joint, the
+// insert point, the recording's caret
+component ChainPiece inherits Rectangle {
+    in property <Cell> c;
+    in property <bool> blink;
+    // a step being dragged is over this one: the web's bar at its left edge
+    in property <bool> drop-to;
+    callback clicked(int, int, length, length, length);
+    callback dropped(int, length, length);
+    // a step dragged: where the pointer is, and where on the step it was taken
+    callback drag-at(int, length, length, length, length);
+    callback wait-typed(int, string);
+    // a step or wait just recorded pops in, once, as the web page's did
+    property <bool> fresh: root.c.index >= 1000 && (root.c.kind == 15 || root.c.kind == 16);
+    property <duration> born;
+    init => { root.born = animation-tick(); }
+    property <float> age: root.fresh ? max(0, min(1, (animation-tick() - root.born) / 400ms)) : 1;
+    property <float> eased: 1 - (1 - root.age) * (1 - root.age);
+    opacity: 0.3 + 0.7 * root.eased;
+    transform-scale: 0.85 + 0.15 * root.eased;
+    callback wait-done(int, string);
+    callback wait-cancel();
+    x: root.c.x;
+    y: root.c.y;
+    width: root.c.w;
+    height: root.c.h;
+    // a step: its key, and which way it goes; chosen, it turns ink
+    if root.c.kind == 15: Rectangle {
+        property <bool> dragging: ev.pressed && (abs(ev.mouse-x - ev.pressed-x) > Part.drag || abs(ev.mouse-y - ev.pressed-y) > Part.drag);
+        border-radius: Radius.control;
+        background: root.c.on ? Ink.ink : ev.has-hover ? Ink.pick-hover : Ink.pick;
+        opacity: dragging ? 0.6 : 1;
+        HorizontalLayout {
+            padding-left: 11px;  // art: a step in the chain (macros.rs measures it so)
+            padding-right: 11px;  // art: a step in the chain
+            spacing: 6px;  // art: a step in the chain
+            // (a media key's note; a job's mark, on a device or the screen, or
+            // another macro played; a key's step has none)
+            if root.c.style == 1: Text {
+                text: "♫";
+                font-family: Font.ui;
+                font-size: Font.caption;
+                color: root.c.on ? Ink.base : Ink.media;
+                vertical-alignment: center;
+            }
+            if root.c.style == 2: Text {
+                text: "◆";
+                font-family: Font.ui;
+                font-size: Font.caption;
+                color: root.c.on ? Ink.base : Ink.warn;
+                vertical-alignment: center;
+            }
+            if root.c.style == 3: Text {
+                text: "▶";
+                font-family: Font.ui;
+                font-size: Font.caption;
+                color: root.c.on ? Ink.base : Ink.good;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.c.text;
+                font-family: Font.ui;
+                font-size: Font.control;
+                font-weight: Font.medium;
+                color: root.c.on ? Ink.base : Ink.ink;
+                vertical-alignment: center;
+            }
+            // (which way a key goes; a job goes no way)
+            if root.c.style < 2: Text {
+                text: root.c.value > 0.5 ? "↓" : "↑";
+                font-family: Font.ui;
+                font-size: Font.note;
+                font-weight: Font.medium;
+                color: root.c.value > 0.5 ? (root.c.on ? Ink.base : Ink.ink) : (root.c.on ? Ink.edge : Ink.quiet);
+                vertical-alignment: center;
+            }
+        }
+        if root.drop-to: Rectangle {
+            x: -4px;
+            y: 1px; // art: a step in the chain, drawn
+            width: 3px; // art: a step in the chain, drawn
+            height: parent.height - 2px; // art: a step in the chain, drawn
+            background: Ink.soft;
+        }
+        ev := TouchArea {
+            mouse-cursor: pointer;
+            moved => {
+                if (self.pressed && root.c.id != 0 && (abs(self.mouse-x - self.pressed-x) > Part.drag || abs(self.mouse-y - self.pressed-y) > Part.drag)) {
+                    root.drag-at(root.c.index, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, self.pressed-x, self.pressed-y);
+                }
+            }
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left) {
+                    if (abs(self.mouse-x - self.pressed-x) > Part.drag || abs(self.mouse-y - self.pressed-y) > Part.drag) {
+                        root.dropped(root.c.index, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                    } else {
+                        root.clicked(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height);
+                    }
+                }
+            }
+        }
+    }
+    // a wait: its milliseconds and a clock
+    if root.c.kind == 16: Rectangle {
+        border-radius: Radius.control;
+        background: wt.has-hover ? Ink.shade2 : transparent;
+        HorizontalLayout {
+            padding-left: 8px;  // art: a wait in the chain (macros.rs measures it so)
+            padding-right: 8px;  // art: a wait in the chain
+            spacing: 4px;  // art: a wait in the chain
+            Text {
+                text: root.c.text;
+                font-family: Font.ui;
+                font-size: Font.note;
+                font-weight: Font.medium;
+                color: wt.has-hover ? Ink.bright : Ink.soft;
+                vertical-alignment: center;
+            }
+            MacroIcon {
+                y: (parent.height - 12px) / 2; // art: a step in the chain, drawn
+                width: 12px; // art: a step in the chain, drawn
+                height: 12px; // art: a step in the chain, drawn
+                which: 1;
+                stroke: wt.has-hover ? Ink.bright : Ink.soft;
+                opacity: 0.7;
+            }
+        }
+        wt := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.clicked(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a wait being typed
+    if root.c.kind == 20: Rectangle {
+        border-radius: Radius.control;
+        background: Ink.pick;
+        MacroIcon {
+            x: 8px; // art: a step in the chain, drawn
+            y: (parent.height - 12px) / 2; // art: a step in the chain, drawn
+            width: 12px; // art: a step in the chain, drawn
+            height: 12px; // art: a step in the chain, drawn
+            which: 1;
+            stroke: Ink.white;
+        }
+        input := TextInput {  // art: a wait typed in place, in the chain
+            x: 24px; // art: a step in the chain, drawn
+            width: 44px; // art: a step in the chain, drawn
+            height: parent.height;
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: Font.note;
+            font-weight: Font.medium;
+            color: Ink.white;
+            vertical-alignment: center;
+            single-line: true;
+            init => {
+                self.focus();
+                self.select-all();
+            }
+            accepted => { root.wait-done(root.c.index, self.text); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) {
+                    root.wait-cancel();
+                    return accept;
+                }
+                reject
+            }
+            changed has-focus => {
+                Typing.on = self.has-focus;
+                if (!self.has-focus) {
+                    root.wait-done(root.c.index, self.text);
+                }
+            }
+        }
+        Text {
+            x: 70px; // art: a step in the chain, drawn
+            height: parent.height;
+            text: "ms";
+            font-family: Font.ui;
+            font-size: Font.note;
+            font-weight: Font.medium;
+            color: Ink.white;
+            vertical-alignment: center;
+        }
+    }
+    // a joint between two steps, where a step can be put
+    if root.c.kind == 17: Rectangle {
+        property <bool> lit: root.c.on || (root.c.style == 0 && cn.has-hover);
+        Rectangle {
+            x: 4px; // art: a step in the chain, drawn
+            y: 8px; // art: a step in the chain, drawn
+            width: 12px; // art: a step in the chain, drawn
+            height: 2px; // art: a step in the chain, drawn
+            border-radius: self.height / 2;
+            background: parent.lit ? Ink.soft : Ink.edge;
+        }
+        Rectangle {
+            x: 12px; // art: a step in the chain, drawn
+            y: 6px; // art: a step in the chain, drawn
+            width: 6px; // art: a step in the chain, drawn
+            height: 6px; // art: a step in the chain, drawn
+            border-radius: self.width / 2;
+            background: Ink.off;
+        }
+        if root.c.on: Rectangle {
+            x: 0;
+            y: -1px;
+            width: 20px; // art: a step in the chain, drawn
+            height: 20px; // art: a step in the chain, drawn
+            border-radius: self.width / 2;
+            background: Ink.ink;
+            Text {
+                text: "+";
+                font-family: Font.ui;
+                font-size: Font.name;
+                font-weight: Font.strong;
+                color: Ink.base;
+            }
+        }
+        cn := TouchArea {
+            enabled: root.c.style == 0;
+            mouse-cursor: pointer;
+            clicked => { root.clicked(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // where new steps go
+    if root.c.kind == 18: Rectangle {
+        border-radius: 1px; // art: a step in the chain, drawn
+        background: Ink.edge;
+        opacity: root.c.on ? 1 : 0.25;
+        TouchArea {
+            x: -4px;
+            width: parent.width + 8px; // art: a step in the chain, drawn
+            mouse-cursor: pointer;
+            clicked => { root.clicked(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // the recording's caret
+    if root.c.kind == 19: Rectangle {
+        background: Ink.record;
+        opacity: root.blink ? 1 : 0.15;
+    }
+}
+
+export component MacroWindow inherits Window {
+    in property <bool> is-maximized;
+    in property <image> mark;
+    in property <[MacroItem]> items;
+    in-out property <length> lib-scroll;
+    // the device the open macro belongs to, if any, and the list's height
+    in property <string> lib-title;
+    in property <length> items-h;
+    in property <string> macro-name;
+    in property <bool> editing-name;
+    in-out property <string> name-text;
+    in property <bool> can-rename;
+    in property <string> state-text;
+    in property <int> state-kind;      // 0 quiet, 1 changed, 2 recording
+    in property <[Cell]> chain;
+    in property <length> chain-h;
+    in property <int> chain-empty;     // 0 steps, 1 none yet, 2 recording with none yet
+    in property <[string]> empty-lines;
+    // a step being dragged: its chip under the pointer, and the step it would go before
+    in property <bool> ghost-on;
+    in property <Cell> ghost;
+    in property <int> drop-index: -1;
+    in property <bool> tools-off;
+    in property <bool> can-clear;
+    in property <bool> can-key;
+    in property <bool> can-media;
+    in property <bool> can-wait;
+    // Ectomatter's own macros' actions and other macros: shown for its library alone
+    in property <bool> jobs-shown;
+    in property <bool> can-jobs;
+    in property <bool> can-record;
+    in property <string> meter-text;
+    in property <bool> meter-warn;
+    in property <bool> recording;
+    in property <string> rec-clock;
+    in property <string> plays-text;
+    in property <bool> plays-on;
+    in property <bool> count-shown;
+    in-out property <string> count-text;
+    in property <bool> locked;
+    in property <string> status-text;
+    in property <int> status-kind;
+    in property <bool> can-revert;
+    in property <bool> can-save;
+    // the open menu
+    in property <bool> menu-open;
+    // whether the open menu keeps a column for ticks (not when nothing in it is ticked)
+    in property <bool> menu-marks: true;
+    in property <length> menu-ax;
+    in property <length> menu-w: Size.menu;
+    in property <[MenuRow]> menu-rows;
+    in property <string> menu-placeholder;
+    in property <bool> menu-back;
+    in property <bool> menu-search;
+    in-out property <string> menu-query;
+    in property <length> menu-top;
+    in property <length> menu-max;
+    in property <length> menu-natural;
+    out property <length> menu-x: menu.x;
+    out property <length> menu-y: menu.y;
+    out property <length> menu-width: menu.width;
+    out property <length> menu-height: menu.height;
+    out property <length> window-height: root.height;
+    out property <length> window-width: root.width;
+    // the chain's width, for the window to wrap it
+    // (the chain's room: the canvas, less the chain's inset either side)
+    out property <length> chain-width: root.width - Size.sidebar - 2 * Space.margin - 2 * Part.chain-in;
+    out property <length> chain-scroll: chain-flick.content-y;
+    // are you sure: deleting a macro
+    in property <bool> confirm-open;
+    in property <string> confirm-title;
+    in property <string> confirm-body;
+    in property <string> confirm-body2;
+
+    callback minimize();
+    callback maximize();
+    callback close-window();
+    callback drag();
+    // the library shown, and its drop-down at the list's top, which opens the
+    // menu of every library: Ectomatter's own, then each device's that keeps macros
+    in property <string> lib-name;
+    callback libs(length, length, length, length);
+    // a macro by its library and number, and a new one in a library
+    callback choose(int, int);
+    callback new-in(int);
+    callback row-menu(int, int, length, length);
+    callback rename();
+    callback name-done(string);
+    callback name-cancel();
+    callback more(length, length, length);
+    callback chain-click(int, int, length, length, length);
+    callback chain-drop(int, length, length);
+    callback chain-drag(int, length, length, length, length);
+    callback wait-done(int, string);
+    callback wait-cancel();
+    callback tool(int, length, length, length, length);
+    callback plays(length, length, length, length);
+    callback count-done(string);
+    callback revert();
+    callback save();
+    callback menu-chose(int);
+    callback menu-typed(string);
+    callback menu-enter();
+    callback menu-dismiss();
+    callback menu-back-to();
+    callback menu-field(int, string);
+    callback confirm-yes();
+    callback confirm-no();
+
+    background: transparent;
+    default-font-family: Font.ui;
+    property <length> radius: root.is-maximized ? 0 : Radius.window;
+    in property <bool> blink;
+
+    public function focus-menu() {
+        menu.focus-search();
+    }
+    public function blur-menu() {
+        menu.blur-search();
+    }
+
+    // the title bar, every window's: where this window is
+    TitleBar {
+        y: 0;
+        mark: root.mark;
+        crumbs: root.lib-title != "" ? [root.lib-title, "Macro Editor"] : ["Macro Editor"];
+        corner: root.radius;
+        drag => { root.drag(); }
+        maximize => { root.maximize(); }
+        minimize => { root.minimize(); }
+        close => { root.close-window(); }
+    }
+
+    // the macros: the library shown, chosen from a drop-down at the top
+    // (Ectomatter's own, then each device's that keeps macros in its own
+    // memory); under it, where its macros are kept and who plays them, a way
+    // to make a new one there, and its macros
+    Rectangle {
+        x: 0;
+        y: Size.title-bar;
+        width: Size.sidebar;
+        height: root.height - Size.title-bar;
+        background: Ink.box;
+        border-bottom-left-radius: root.radius;
+        // (its head: the libraries' drop-down, Space.inline in; macro_page.rs's LIST_TOP)
+        property <length> head-h: Space.inline + Size.button + Space.inline;
+        DropField {
+            x: Space.inline;
+            y: Space.inline;
+            width: parent.width - 2 * Space.inline;
+            height: Size.button;
+            subtle: true;
+            on-box: true;
+            text: root.lib-name;
+            clicked(x, y, h) => { root.libs(x, y, h, self.width); }
+        }
+        // the list, Space.inline in from the column's sides, as a list's in a box is
+        Flickable {
+            x: Space.inline;
+            y: parent.head-h;
+            width: parent.width - 2 * Space.inline;
+            height: parent.height - parent.head-h - Space.inline;
+            content-height: root.items-h;
+            content-y <=> root.lib-scroll;
+            mouse-drag-pan-enabled: false;
+            for m[i] in root.items: Rectangle {
+                y: m.y;
+                width: parent.width;
+                height: m.h;
+                if m.kind == 0: MacroRow {
+                    width: parent.width;
+                    m: m;
+                    clicked => { root.choose(m.lib, m.n); }
+                    menu(x, y) => { root.row-menu(m.lib, m.n, x, y); }
+                }
+                // a section's heading: as the mouse's page heads its lists
+                // (a heading with no name, where the tab above names the library:
+                // its note beside the New button, from the top, its first line at
+                // the button's middle)
+                if m.kind == 1: Rectangle {
+                    if m.name != "": AnchorHead {
+                        x: Space.row;
+                        y: 0;
+                        height: Size.list-head;
+                        width: parent.width - Space.row - new-b.width - Space.tight;
+                        text: m.name;
+                        overflow: elide;
+                    }
+                    new-b := TextButton {
+                        x: parent.width - self.width - Space.tight;
+                        y: 0;
+                        text: "+ New";
+                        enabled: m.can-new;
+                        clicked => { root.new-in(m.lib); }
+                    }
+                    // (broken into lines where the page measured them, so the
+                    // macros start below the last)
+                    for l[k] in m.lines: Text {
+                        x: Space.row;
+                        y: (m.name == "" ? (Size.compact - Line.note) / 2 : Size.list-head) + k * Line.note;
+                        height: Line.note;
+                        text: l;
+                        font-family: Font.ui;
+                        font-size: Font.note;
+                        color: Ink.quiet;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+        ScrollBar {
+            x: parent.width - Part.scroll-in;
+            y: parent.head-h;
+            height: parent.height - parent.head-h - Space.inline;
+            view: parent.height - parent.head-h - Space.inline;
+            content: root.items-h;
+            offset: -root.lib-scroll;
+            framed: false;
+            thumb-color: Ink.edge;
+            scroll-to(o) => { root.lib-scroll = -o; }
+        }
+    }
+
+    // the workspace: the canvas a margin in from its edges, the foot a gap under it
+    property <length> foot-h: Space.gap + Size.button + Space.margin;
+    // the tools' row at the canvas's foot, Space.inline in from it
+    property <length> tools-h: Size.button + 2 * Space.inline;
+    Rectangle {
+        x: Size.sidebar;
+        y: Size.title-bar;
+        width: root.width - Size.sidebar;
+        height: root.height - Size.title-bar;
+        background: Ink.base;
+        border-bottom-right-radius: root.radius;
+        // the name, whether it is saved, and the less common actions: its header, every editor's
+        EditorHeader {
+            y: 0;
+            width: parent.width;
+            name: root.macro-name;
+            can-rename: root.can-rename;
+            renaming: root.editing-name;
+            typed <=> root.name-text;
+            state: root.state-text;
+            state-kind: root.state-kind;
+            blink: root.blink;
+            more-enabled: !root.recording;
+            rename => { root.rename(); }
+            rename-done(t) => { root.name-done(t); }
+            rename-cancel => { root.name-cancel(); }
+            more(x, y, h) => { root.more(x, y, h); }
+        }
+        // the recording area: the chain, then the tools under it
+        // recording is a signal, so the canvas keeps a red edge while it runs
+        if root.recording: Rectangle {
+            x: Space.margin - 1px; // art: the canvas's red edge while it records
+            y: Size.bar - 1px; // art: the canvas's red edge while it records
+            width: parent.width - 2 * Space.margin + 2px; // art: the canvas's red edge while it records
+            height: parent.height - Size.bar - foot-h + 2px; // art: the canvas's red edge while it records
+            border-radius: Radius.box + 1px; // art: the canvas's red edge while it records
+            background: Ink.record.with-alpha(0.702);
+        }
+        canvas := Rectangle {
+            x: Space.margin;
+            y: Size.bar;
+            width: parent.width - 2 * Space.margin;
+            height: parent.height - Size.bar - foot-h;
+            border-radius: Radius.box;
+            background: Ink.shade1;
+            chain-flick := Flickable {
+                y: 0;
+                width: parent.width;
+                height: parent.height - tools-h;
+                // (the chain Part.chain-in in from the canvas, at its foot too)
+                content-height: max(self.height, root.chain-h + 2 * Part.chain-in);
+                mouse-drag-pan-enabled: false;
+                for c in root.chain: ChainPiece {
+                    c: c;
+                    blink: root.blink;
+                    drop-to: root.ghost-on && c.kind == 15 && c.id != 0 && c.index == root.drop-index;
+                    drag-at(i, x, y, ox, oy) => { root.chain-drag(i, x, y, ox, oy); }
+                    clicked(id, i, x, y, h) => { root.chain-click(id, i, x, y, h); }
+                    dropped(i, x, y) => { root.chain-drop(i, x, y); }
+                    wait-done(i, t) => { root.wait-done(i, t); }
+                    wait-cancel => { root.wait-cancel(); }
+                }
+                // nothing in it yet: a dashed ring round the record dot, and what to do
+                if root.chain-empty != 0: Rectangle {
+                    x: (parent.width - Size.empty) / 2;
+                    y: (parent.height - 118px) / 2; // art: the record dot's dashed ring, while it's empty
+                    width: Size.empty;
+                    height: 118px; // art: the record dot's dashed ring, while it's empty
+                    Path {
+                        x: (parent.width - 38px) / 2; // art: the record dot's dashed ring, while it's empty
+                        y: 0;
+                        width: 38px; // art: the record dot's dashed ring, while it's empty
+                        height: 38px; // art: the record dot's dashed ring, while it's empty
+                        viewbox-width: 38;
+                        viewbox-height: 38;
+                        commands: "M19.00 0.50A18.5 18.5 0 0 1 22.04 0.75M25.01 1.50A18.5 18.5 0 0 1 27.81 2.73M30.36 4.40A18.5 18.5 0 0 1 32.61 6.47M34.49 8.88A18.5 18.5 0 0 1 35.94 11.57M36.93 14.46A18.5 18.5 0 0 1 37.44 17.47M37.44 20.53A18.5 18.5 0 0 1 36.93 23.54M35.94 26.43A18.5 18.5 0 0 1 34.49 29.12M32.61 31.53A18.5 18.5 0 0 1 30.36 33.60M27.81 35.27A18.5 18.5 0 0 1 25.01 36.50M22.04 37.25A18.5 18.5 0 0 1 19.00 37.50M15.96 37.25A18.5 18.5 0 0 1 12.99 36.50M10.19 35.27A18.5 18.5 0 0 1 7.64 33.60M5.39 31.53A18.5 18.5 0 0 1 3.51 29.12M2.06 26.43A18.5 18.5 0 0 1 1.07 23.54M0.56 20.53A18.5 18.5 0 0 1 0.56 17.47M1.07 14.46A18.5 18.5 0 0 1 2.06 11.57M3.51 8.88A18.5 18.5 0 0 1 5.39 6.47M7.64 4.40A18.5 18.5 0 0 1 10.19 2.73M12.99 1.50A18.5 18.5 0 0 1 15.96 0.75";
+                        fill: transparent;
+                        stroke: Ink.edge;
+                        stroke-width: 1px; // art: the record dot's dashed ring, while it's empty
+                    }
+                    Rectangle {
+                        x: (parent.width - 11px) / 2; // art: the record dot's dashed ring, while it's empty
+                        y: 13.5px; // art: the record dot's dashed ring, while it's empty
+                        width: 11px; // art: the record dot's dashed ring, while it's empty
+                        height: 11px; // art: the record dot's dashed ring, while it's empty
+                        border-radius: self.width / 2;
+                        background: Ink.record;
+                    }
+                    EmptyState {
+                        y: 52px; // art: the record dot's dashed ring, while it's empty
+                        width: parent.width;
+                        title: root.chain-empty == 2 ? "Recording" : "No keys yet";
+                        lines: root.empty-lines;
+                    }
+                }
+            }
+            ScrollBar {
+                x: parent.width - Part.scroll-in;
+                y: Space.inline;
+                height: chain-flick.height - Space.inline;
+                view: chain-flick.height;
+                content: chain-flick.content-height;
+                offset: -chain-flick.content-y;
+                framed: false;
+                thumb-color: Ink.edge;
+                scroll-to(o) => { chain-flick.content-y = -o; }
+            }
+            // the tools, a toolbar's quiet buttons at the canvas's foot: the settings, Clear,
+            // then what to add; how full it is, and Record
+            HorizontalLayout {
+                x: Space.inline;
+                y: parent.height - tools-h + Space.inline;
+                width: parent.width - 2 * Space.inline;
+                height: Size.button;
+                spacing: Space.list;
+                cross-axis-alignment: center;
+                IconButton {
+                    width: Size.compact;
+                    height: Size.compact;
+                    icon: "M10.3 8a2.3 2.3 0 1 1-4.6 0a2.3 2.3 0 1 1 4.6 0zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4";
+                    units: 16;
+                    enabled: !root.tools-off;
+                    clicked(x, y, h) => { root.tool(0, x, y, h, self.width); }
+                }
+                TextButton { text: "Clear"; enabled: root.can-clear; clicked => { root.tool(1, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
+                // (a rule between clearing and adding, Space.tight either side of it)
+                Rectangle {
+                    width: 2 * Space.tight + Stroke.line;
+                    Rectangle { x: Space.tight; y: (parent.height - self.height) / 2; width: Stroke.line; height: Line.small; background: Ink.line; }
+                }
+                TextButton { text: "+ Key"; enabled: root.can-key; clicked => { root.tool(2, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
+                TextButton { text: "+ Media key"; enabled: root.can-media; clicked => { root.tool(3, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
+                TextButton { text: "+ Wait"; enabled: root.can-wait; clicked => { root.tool(4, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
+                if root.jobs-shown: TextButton { text: "+ Action"; enabled: root.can-jobs; clicked => { root.tool(6, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
+                if root.jobs-shown: TextButton { text: "+ Macro"; enabled: root.can-jobs; clicked => { root.tool(7, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: root.meter-text;
+                    font-family: Font.ui;
+                    font-size: Font.caption;
+                    color: root.meter-warn ? Ink.warn : Ink.quiet;
+                    vertical-alignment: center;
+                }
+                // (while it records, how long, in red, Space.inline either side)
+                if root.recording: Rectangle { width: Space.inline; }
+                if root.recording: Text {
+                    text: root.rec-clock;
+                    font-family: Font.ui;
+                    font-size: Font.control;
+                    color: Ink.bad;
+                    vertical-alignment: center;
+                }
+                Rectangle { width: Space.inline; }
+                RecordButton {
+                    on: root.recording;
+                    enabled: root.can-record;
+                    clicked(x, y, h) => { root.tool(5, x, y, h, self.width); }
+                }
+            }
+        }
+
+        // the foot: how it plays, what was last done, Revert and Save, a gap under the canvas;
+        // a line of controls at a button's height
+        HorizontalLayout {
+            x: Space.margin;
+            y: parent.height - Space.margin - Size.button;
+            width: parent.width - 2 * Space.margin;
+            height: Size.button;
+            spacing: Space.inline;
+            cross-axis-alignment: center;
+            Text { text: "Plays"; font-family: Font.ui; font-size: Font.caption; color: Ink.quiet; vertical-alignment: center; }
+            DropField {
+                width: 170px; // art: the Plays chooser, as wide as its longest choice
+                height: Size.button;
+                text: root.plays-text;
+                enabled: root.plays-on;
+                clicked(x, y, h) => { root.plays(x, y, h, self.width); }
+            }
+            if root.count-shown: FieldBox {
+                width: 56px; // art: the count, as wide as its digits
+                height: Size.button;
+                centered: true;
+                text <=> root.count-text;
+                accepted => { root.count-done(self.text); }
+                left => { root.count-done(self.text); }
+            }
+            if root.count-shown: Text { text: "times"; font-family: Font.ui; font-size: Font.control; color: Ink.dim; vertical-alignment: center; }
+            if root.locked: Text {
+                text: "This macro holds something the editor cannot rebuild exactly, so it is shown read only.";
+                font-family: Font.ui;
+                font-size: Font.note;
+                color: Ink.quiet;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.status-text;
+                font-family: Font.ui;
+                font-size: Font.note;
+                color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.quiet;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            WordButton {
+                text: "Revert";
+                enabled: root.can-revert;
+                clicked => { root.revert(); }
+            }
+            WordButton {
+                text: "Save macro";
+                primary: true;
+                enabled: root.can-save;
+                clicked => { root.save(); }
+            }
+        }
+    }
+
+    // the step being dragged, following the pointer as the web page's drag image did
+    if root.ghost-on: ChainPiece {
+        c: root.ghost;
+        opacity: 0.75;
+    }
+
+    // the open menu, over everything
+    // the open menu turned `y` down as it opens (src/menu_size.rs's reveal)
+    public function scroll-menu(y: length) {
+        menu.scroll-to(y);
+    }
+    menu := Menu {
+        marks: root.menu-marks;
+        visible: root.menu-open;
+        x: max(Space.inline, min(root.menu-ax, root.width - root.menu-w - Space.inline));
+        width: root.menu-w;
+        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - Space.inline));
+        y: root.menu-top;
+        rows: root.menu-rows;
+        placeholder: root.menu-placeholder;
+        back: root.menu-back;
+        search: root.menu-search;
+        query <=> root.menu-query;
+        chose(i) => { root.menu-chose(i); }
+        go-back => { root.menu-back-to(); }
+        typed(t) => { root.menu-typed(t); }
+        enter => { root.menu-enter(); }
+        dismiss => { root.menu-dismiss(); }
+        field-done(i, t) => { root.menu-field(i, t); }
+    }
+
+    // are you sure: a scrim over the window, and the question on it
+    // are you sure: the question in a dialog, every window's; Escape is Cancel
+    if root.confirm-open: Confirm {
+        corner: root.radius;
+        title: root.confirm-title;
+        body: root.confirm-body;
+        body2: root.confirm-body2;
+        do: "Delete macro";
+        cancel => { root.confirm-no(); }
+        yes => { root.confirm-yes(); }
+    }
+}

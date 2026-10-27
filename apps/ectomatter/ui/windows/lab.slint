@@ -1,0 +1,486 @@
+// The lab, a window of its own: a device's light tuned, a section at a time,
+// its drawing with a line from each slider to its part.
+// (Re-exported by app.slint, which the build compiles.)
+
+import { Space, Radius, Font, Line, Size, Stroke, Ink } from "tokens.slint";
+import { FormNote, FormWarning, FormDialog, Slider, Confirm, TitleBar, WordButton, FieldBox, MenuRow, Menu, Picker, Cell, CellView } from "../system/system.slint";
+
+// The stage of the lab: a section's drawing of the key, with the
+// line from each slider to its part, drawn in Rust at the window's own pixels;
+// its words are cells over it.
+export struct Sketch {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    image: image,
+}
+
+// One of the lab's sliders, where it stands beside the drawing: its
+// name, its box and unit (a derived one, as a beam's angle, quieter), its
+// knob along its track, where it was saved, if it has moved from there,
+// whether its value is other than the saved one, which its reset puts back,
+// and, for a share, what each end of its track stands for
+export struct LabRow {
+    x: length,
+    y: length,
+    w: length,
+    id: int,
+    name: string,
+    hot: bool,
+    number: string,
+    unit: string,
+    derived: bool,
+    at: float,
+    was: float,
+    moved: bool,
+    changed: bool,
+    low: string,
+    high: string,
+}
+
+// A slider of the lab: the whole row tells the page when the
+// pointer is over it, so its line and its part light up whether the pointer
+// is on its name, its box or its track.
+component LabControl inherits Rectangle {
+    in property <LabRow> r;
+    callback slide(int, float);
+    callback reset(int);
+    callback entered(int, string);
+    callback hovered(int, bool);
+    callback focused(int, bool);
+    x: root.r.x - 10px; // art: a lab slider's row
+    y: root.r.y - 7px; // art: a lab slider's row
+    width: root.r.w + 20px; // art: a lab slider's row
+    // its name's line, as tall as the number box; its slider Space.tight under
+    // that, and a share's ends Space.tight under its slider; 7 px round them all
+    // (drawing.rs stands the rows apart by these: CTRL_H, ENDS_H)
+    property <length> slider-y: 7px + Size.quiet + Space.tight; // art: a lab slider's row, round it
+    property <length> ends-y: self.slider-y + Size.slider + Space.tight;
+    height: (root.r.low != "" ? self.ends-y + Line.small : self.slider-y + Size.slider) + 7px; // art: a lab slider's row, round it
+    border-radius: Radius.panel;
+    // lit under the pointer: a shade over the stage's box
+    property <float> lit: 0.043; // art: a lab slider's row, lit
+    background: root.r.hot ? Ink.white.with-alpha(root.lit) : transparent;
+    zone := TouchArea {
+        changed has-hover => { root.hovered(root.r.id, self.has-hover); }
+        Text {
+            x: 10px; // art: a lab slider's row
+            y: 7px; // art: a lab slider's row
+            height: Size.quiet;
+            text: root.r.name;
+            font-family: Font.ui;
+            font-size: Font.text;
+            color: root.r.hot ? Ink.bright : Ink.dim;
+            vertical-alignment: center;
+        }
+        CellView {
+            c: { kind: 15, x: root.r.w + 10px - 58px - 7px - 60px, y: 7px, w: 60px, h: Size.quiet, text: root.r.number, id: root.r.id }; // art: a lab slider's row
+            entered(id, t) => { root.entered(id, t); }
+            focused(id, on) => { root.focused(id, on); }
+        }
+        Text {
+            x: root.r.w + 10px - 58px; // art: a lab slider's row
+            y: 7px; // art: a lab slider's row
+            width: 58px; // art: a lab slider's row
+            height: Size.quiet;
+            text: root.r.unit;
+            font-family: Font.ui;
+            font-size: Font.control;
+            color: root.r.derived ? Ink.quiet : Ink.soft;
+            vertical-alignment: center;
+        }
+        // its slider, the app's one, short of the reset at its end, marking
+        // where its value was saved once it has moved from there
+        Slider {
+            x: 10px; // art: a lab slider's row
+            y: root.slider-y;
+            width: root.r.w - 26px; // art: a lab slider's row, short of its reset
+            value: root.r.at;
+            saved: root.r.moved ? root.r.was : -1;
+            moved(v) => { root.slide(root.r.id, v); }
+            reset => { root.reset(root.r.id); }
+        }
+        // what each end of its track stands for, under its ends
+        if root.r.low != "": Text {
+            x: 10px; // art: a lab slider's row
+            y: root.ends-y;
+            height: Line.small;
+            text: root.r.low;
+            font-family: Font.ui;
+            font-size: Font.caption;
+            color: root.r.hot ? Ink.dim : Ink.soft;
+            vertical-alignment: center;
+        }
+        if root.r.high != "": Text {
+            x: 10px; // art: a lab slider's row
+            y: root.ends-y;
+            width: root.r.w - 26px; // art: a lab slider's row
+            height: Line.small;
+            text: root.r.high;
+            font-family: Font.ui;
+            font-size: Font.caption;
+            color: root.r.hot ? Ink.dim : Ink.soft;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+        // its reset, at the end of its track: the arrow alone, as gray as the
+        // track while the value is the saved one, brighter once it differs,
+        // and brighter still under the pointer; a click puts the value back
+        Path {
+            x: 10px + root.r.w - 18px; // art: a lab slider's row
+            y: root.slider-y + (Size.slider - self.height) / 2;
+            width: 14px; // art: a lab slider's row
+            height: 14px; // art: a lab slider's row
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5";
+            fill: transparent;
+            stroke: !root.r.changed ? Ink.track : back.has-hover ? Ink.bright : Ink.soft;
+            stroke-width: 1.4px; // art: a lab slider's row
+        }
+        back := TouchArea {
+            x: 10px + root.r.w - 22px; // art: a lab slider's row
+            y: root.slider-y + (Size.slider - self.height) / 2;
+            width: 22px; // art: a lab slider's row
+            height: 22px; // art: a lab slider's row
+            // (nothing to put back at the saved value)
+            enabled: root.r.changed;
+            mouse-cursor: pointer;
+            changed has-hover => { root.hovered(root.r.id + 1000, self.has-hover); }
+            clicked => { root.reset(root.r.id); }
+        }
+    }
+}
+
+// The lab: a developer's window for tuning how the Z10's keys are
+// lit, beside the main window so the keyboard stays in view as it changes.
+// Landscape, one section at a time: its drawing in the middle, its sliders
+// round it, the line under it saying what the slider under the pointer does,
+// and what is on the keyboard now read out by Save.
+export component LabWindow inherits Window {
+    in property <bool> is-maximized;
+    // the device the lab tunes, for its title bar
+    in property <string> device-name;
+    // the lab's name for the device: its kind's (Keyboard lab, Mouse lab)
+    in property <string> lab-name: "Keyboard lab";
+    in property <image> mark;
+    in property <[Cell]> cells;
+    in property <[Sketch]> sketches;
+    in property <[Cell]> over;
+    in property <[LabRow]> rows;
+    in property <[Cell]> foot;
+    in property <string> status-text;
+    in property <int> status-kind;
+    // the most room what was last done takes, its words wrapping past it
+    in property <length> status-room;
+    in property <bool> can-save;
+    in property <bool> can-revert;
+    // Save's words, and its width: where it saves, the core or the light setup in use
+    in property <string> save-text: "Save to the core";
+    in property <length> save-w;
+    // the button that puts the section on screen back as Default has it: its words, and whether there is anything to put back
+    in property <string> default-text: "Reset";
+    in property <bool> can-default;
+    // whether there is one: a setup of the person's own is tuned, not Default itself
+    in property <bool> has-default;
+    // what is over everything on the page: the light setups' menu, open
+    in property <[Cell]> top;
+    // the chosen key's text boxes, a list of their own
+    in property <[Cell]> boxes;
+    out property <length> window-width: root.width;
+    out property <length> window-height: root.height;
+
+    callback minimize();
+    callback maximize();
+    callback close-window();
+    callback drag();
+    callback slide(int, float);
+    callback entered(int, string);
+    callback revert();
+    callback save();
+    // a section chosen; a slider or a reading under the pointer; a slider's box typed in;
+    // Hold to compare held or let go; a slider put back
+    callback pick(int, int);
+    callback compare(bool);
+    callback reset(int);
+    callback pad(int, float, float);
+    callback hovered(int, bool);
+    callback focused(int, bool);
+    // the typefaces' list's place on the page (none while it is shut), and the wheel turning it
+    in property <length> list-x;
+    in property <length> list-y;
+    in property <length> list-w;
+    in property <length> list-h;
+    callback list-scroll(float);
+    // the color picker, as the main window's, hung from the cap color's button that opened it
+    in property <bool> picker-open;
+    in property <length> picker-x;
+    in property <length> picker-top;
+    in property <float> pk-hue;
+    in property <float> pk-sat;
+    in property <float> pk-val;
+    in property <color> pk-now;
+    in property <color> pk-pure;
+    in property <image> pk-sv-img;
+    in property <image> pk-hue-img;
+    in-out property <string> pk-hex;
+    in-out property <string> pk-r;
+    in-out property <string> pk-g;
+    in-out property <string> pk-b;
+    in-out property <string> pk-h;
+    in-out property <string> pk-s;
+    in-out property <string> pk-v;
+    in property <[color]> pk-presets;
+    in property <[color]> pk-recent;
+    out property <length> picker-height: picker.natural;
+    callback pk-sv(float, float);
+    callback pk-hue-at(float);
+    callback pk-field(int, string);
+    callback pk-well(color);
+    callback pk-enter();
+    callback pk-dismiss();
+
+    // the open menu: the setups', or the lights' list
+    in property <bool> menu-open;
+    in property <bool> menu-marks: true;
+    in property <length> menu-ax;
+    in property <length> menu-w: Size.menu;
+    in property <[MenuRow]> menu-rows;
+    in property <length> menu-top;
+    in property <length> menu-max;
+    in property <length> menu-natural;
+    out property <length> menu-x: menu.x;
+    out property <length> menu-y: menu.y;
+    out property <length> menu-width: menu.width;
+    out property <length> menu-height: menu.height;
+    callback menu-chose(int);
+    callback menu-dismiss();
+    // a setup's name being given (1: Save as a new setup, Rename) or a delete asked about (2)
+    in property <int> ask;
+    in property <string> ask-title;
+    in property <string> ask-text;
+    in property <string> ask-go;
+    in-out property <string> ask-name;
+    // what's wrong with the name typed (none yet, or one already used)
+    in property <string> ask-warn;
+    callback ask-typed(string);
+    callback ask-done(bool);
+
+    background: transparent;
+    default-font-family: Font.ui;
+    property <length> radius: root.is-maximized ? 0 : Radius.window;
+
+    // the title bar, every window's: where this window is
+    TitleBar {
+        y: 0;
+        mark: root.mark;
+        crumbs: [root.device-name, root.lab-name];
+        corner: root.radius;
+        drag => { root.drag(); }
+        maximize => { root.maximize(); }
+        minimize => { root.minimize(); }
+        close => { root.close-window(); }
+    }
+
+    // the page: its head and sections, the stage, the line under it
+    Rectangle {
+        y: Size.title-bar;
+        height: root.height - Size.title-bar - Size.foot;
+        background: Ink.base;
+        for c in root.cells: CellView {
+            c: c;
+            pick(id, i, x, y, h, w) => { root.pick(id, i); }
+            hovered(id, on) => { root.hovered(id, on); }
+        }
+        for s in root.sketches: Image {
+            x: s.x;
+            y: s.y;
+            width: s.w;
+            height: s.h;
+            source: s.image;
+        }
+        // the typefaces' list, open: turned by the wheel anywhere on it
+        TouchArea {
+            x: root.list-x;
+            y: root.list-y;
+            width: root.list-w;
+            height: root.list-h;
+            scroll-event(e) => {
+                root.list-scroll(e.delta-y / 1px);
+                accept
+            }
+        }
+        // the words on the stage, and the section's choices over it
+        for c in root.over: CellView {
+            c: c;
+            pick(id, i, x, y, h, w) => { root.pick(id, i); }
+            hovered(id, on) => { root.hovered(id, on); }
+            pad(id, x, y) => { root.pad(id, x, y); }
+            typed(id, t) => { root.entered(id, t); }
+        }
+        for c in root.boxes: CellView {
+            c: c;
+            pick(id, i, x, y, h, w) => { root.pick(id, i); }
+            typed(id, t) => { root.entered(id, t); }
+            focused(id, on) => { root.focused(id, on); }
+        }
+        for r in root.rows: LabControl {
+            r: r;
+            slide(id, v) => { root.slide(id, v); }
+            reset(id) => { root.reset(id); }
+            entered(id, t) => { root.entered(id, t); }
+            hovered(id, on) => { root.hovered(id, on); }
+            focused(id, on) => { root.focused(id, on); }
+        }
+        for c in root.top: CellView {
+            c: c;
+            pick(id, i, x, y, h, w) => { root.pick(id, i); }
+            hovered(id, on) => { root.hovered(id, on); }
+            typed(id, t) => { root.entered(id, t); }
+        }
+        picker := Picker {
+            visible: root.picker-open;
+            x: max(Space.inline, min(root.picker-x, root.width - Size.picker - Space.inline));
+            y: root.picker-top;
+            height: root.picker-height;
+            hue: root.pk-hue;
+            sat: root.pk-sat;
+            val: root.pk-val;
+            now: root.pk-now;
+            pure: root.pk-pure;
+            sv-img: root.pk-sv-img;
+            hue-img: root.pk-hue-img;
+            t-hex <=> root.pk-hex;
+            t-r <=> root.pk-r;
+            t-g <=> root.pk-g;
+            t-b <=> root.pk-b;
+            t-h <=> root.pk-h;
+            t-s <=> root.pk-s;
+            t-v <=> root.pk-v;
+            presets: root.pk-presets;
+            recent: root.pk-recent;
+            sv(x, y) => { root.pk-sv(x, y); }
+            hue-at(x) => { root.pk-hue-at(x); }
+            field(i, t) => { root.pk-field(i, t); }
+            well(c) => { root.pk-well(c); }
+            enter => { root.pk-enter(); }
+            dismiss => { root.pk-dismiss(); }
+        }
+    }
+
+    // the foot: what is on the keyboard now, what was last done, Revert and Save
+    Rectangle {
+        y: root.height - Size.foot;
+        height: Size.foot;
+        background: Ink.base;
+        border-bottom-left-radius: root.radius;
+        border-bottom-right-radius: root.radius;
+        Rectangle {
+            x: Space.margin;
+            y: 0;
+            width: parent.width - 2 * Space.margin;
+            height: Stroke.line;
+            background: Ink.line;
+        }
+        for c in root.foot: CellView {
+            c: c;
+            hovered(id, on) => { root.hovered(id, on); }
+        }
+        // (a line of buttons at the foot's middle, the page's margin in)
+        HorizontalLayout {
+            x: Space.margin;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 2 * Space.margin;
+            height: self.preferred-height;
+            spacing: Space.inline;
+            cross-axis-alignment: center;
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: root.status-text;
+                font-size: Font.note;
+                color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.quiet;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                max-width: max(0px, root.status-room);
+                wrap: word-wrap;
+            }
+            WordButton {
+                text: "Hold to compare";
+                enabled: root.can-revert;
+                changed down => { root.compare(self.down); }
+            }
+            if root.has-default: WordButton {
+                text: root.default-text;
+                enabled: root.can-default;
+                clicked => { root.pick(1610, 0); }
+                changed hover => { root.hovered(1610, self.hover); }
+            }
+            WordButton {
+                text: "Revert";
+                enabled: root.can-revert;
+                clicked => { root.revert(); }
+            }
+            WordButton {
+                wide: root.save-w;
+                text: root.save-text;
+                primary: true;
+                enabled: root.can-save;
+                clicked => { root.save(); }
+            }
+        }
+    }
+
+    // the open menu, over everything
+    // the open menu turned `y` down as it opens (src/menu_size.rs's reveal)
+    public function scroll-menu(y: length) {
+        menu.scroll-to(y);
+    }
+    menu := Menu {
+        marks: root.menu-marks;
+        visible: root.menu-open;
+        x: max(Space.inline, min(root.menu-ax, root.width - root.menu-w - Space.inline));
+        width: root.menu-w;
+        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - Space.inline));
+        y: root.menu-top;
+        rows: root.menu-rows;
+        search: false;
+        chose(i) => { root.menu-chose(i); }
+        dismiss => { root.menu-dismiss(); }
+    }
+
+    // a setup's name: Save as a new setup, or Rename, in a dialog
+    if root.ask == 1: FormDialog {
+        corner: root.radius;
+        cancel => { root.ask-done(false); }
+        across: Size.ask;
+        title: root.ask-title;
+        go: root.ask-go;
+        go-pressed => { root.ask-done(true); }
+        VerticalLayout {
+            spacing: Space.tight;
+            FieldBox {
+                text <=> root.ask-name;
+                edited => { root.ask-typed(self.text); }
+                accepted => { root.ask-done(true); }
+                escape => { root.ask-done(false); }
+                init => { self.start-typing(); }
+            }
+            if root.ask-warn != "": FormWarning { text: root.ask-warn; }
+            if root.ask-text != "": FormNote { text: root.ask-text; }
+        }
+    }
+
+    // a setup to delete: asked first, as everything that deletes is
+    if root.ask == 2: Confirm {
+        corner: root.radius;
+        title: root.ask-title;
+        body: root.ask-text;
+        do: root.ask-go;
+        cancel => { root.ask-done(false); }
+        yes => { root.ask-done(true); }
+    }
+
+}
