@@ -1,0 +1,454 @@
+// A mouse's page, built from the keyboard page's own parts: its bar, then
+// the tab's words, the mouse's picture (on Buttons with each button's job
+// beside it), and the tab's boxes. The window binds each property and
+// callback here to its own of the same name (app.slint, `mouse-page`).
+
+import { Space, Radius, Font, Line, Size, Part, Ink } from "tokens.slint";
+import { ColorSquare, ListRow, BoxRow, PageBar, HintRow, WordButton, BarButton, Stage, PageBox, ScrollBox, Cell, CellView, LaidBox, CellBox, ProfileItem, ListBox, AnchorColumn } from "../system/system.slint";
+import { EffectItem, LibGroup, LayerTab, MouseRow, MouseCall, MousePatch, EffectGrid, KeyLibrary, KeyDetail, MouseLayers } from "shared.slint";
+
+export component MousePage inherits Rectangle {
+    callback boxes-resized();
+    callback cell-left(int, int, bool);
+    callback cell-pick(int, int, length, length, length, length);
+    callback cell-slide(int, float);
+    callback cell-typed(int, int, string);
+    in property <[Cell]> cells;
+    in-out property <length> head-end;
+    in-out property <length> mouse-all-need;
+    in property <string> mouse-all-note;
+    in property <bool> mouse-any-rebound;
+    in-out property <length> mouse-band-max;
+    in-out property <length> mouse-band-min;
+    callback mouse-box-resized(int, length);
+    in property <[LaidBox]> mouse-boxes;
+    callback mouse-call-hover(int, bool);
+    in property <[MouseCall]> mouse-calls;
+    in property <string> mouse-cap;
+    in property <length> mouse-cells-h;
+    in property <bool> mouse-chosen;
+    in property <int> mouse-conn;
+    in property <string> mouse-dot-on;
+    in property <string> mouse-dots;
+    callback mouse-effect(int);
+    in property <bool> mouse-effect-moves;
+    in property <[EffectItem]> mouse-effects;
+    in property <string> mouse-factory;
+    in-out property <length> mouse-fx-h;
+    in-out property <length> mouse-fx-w;
+    in property <bool> mouse-hdr-ready;
+    in property <string> mouse-hint;
+    in property <image> mouse-hint-chip;
+    in property <bool> mouse-hint-chip-on;
+    in property <string> mouse-job;
+    callback mouse-job-clicked(length, length, length, length);
+    in-out property <length> mouse-key-need;
+    in property <int> mouse-kind;
+    in property <[string]> mouse-kind-icons;
+    callback mouse-kind-picked(int, length, length, length);
+    in property <[string]> mouse-kinds;
+    in property <[LayerTab]> mouse-layers;
+    callback mouse-lib-find(string);
+    in property <[LibGroup]> mouse-lib-groups;
+    in-out property <string> mouse-lib-query;
+    in property <int> mouse-lib-reveal-n;
+    in property <length> mouse-lib-reveal-y;
+    callback mouse-lib-toggle(string);
+    in property <string> mouse-line-on;
+    in property <string> mouse-lines;
+    in property <MousePatch> mouse-logo;
+    in property <color> mouse-logo-tint;
+    in property <MousePatch> mouse-logo-under;
+    in-out property <length> mouse-low-y;
+    callback mouse-macro-editor();
+    in property <bool> mouse-menu-open;
+    in property <string> mouse-name;
+    in property <string> mouse-note;
+    in property <MousePatch> mouse-over;
+    in property <bool> mouse-over-shown;
+    callback mouse-pic-clicked(length, length);
+    in property <bool> mouse-pic-hand;
+    in property <length> mouse-pic-m;
+    callback mouse-pic-moved(length, length, bool);
+    in property <MousePatch> mouse-picked;
+    in property <bool> mouse-picked-shown;
+    in property <image> mouse-picture;
+    in-out property <length> mouse-pro-w;
+    callback mouse-profile-choose(int);
+    callback mouse-profile-menu(length, length, length);
+    callback mouse-profile-new();
+    callback mouse-profile-rename(string);
+    in property <[ProfileItem]> mouse-profiles;
+    in property <bool> mouse-rebound;
+    in-out property <bool> mouse-renaming;
+    callback mouse-reset();
+    callback mouse-reset-all();
+    callback mouse-row(int);
+    in property <[MouseRow]> mouse-rows;
+    in property <string> mouse-said;
+    in-out property <length> mouse-second-need;
+    in-out property <length> mouse-stage-h;
+    in property <string> mouse-state;
+    in property <string> mouse-status;
+    in property <int> mouse-tab;
+    callback mouse-tab-chosen(int);
+    in property <image> mouse-tile;
+    in property <string> mouse-title;
+    callback mouse-undo();
+    in property <bool> mouse-undo-shown;
+    in property <length> mouse-w;
+    in property <MousePatch> mouse-wheel;
+    in property <color> mouse-wheel-tint;
+    in property <MousePatch> mouse-wheel-under;
+    in-out property <string> place;
+    in-out property <length> pws-w;
+    in-out property <length> pws-x;
+    callback rail(string);
+    in-out property mouse-flick-content-height <=> mouse-flick.content-height;
+    in-out property mouse-flick-content-y <=> mouse-flick.content-y;
+    in-out property mouse-flick-height <=> mouse-flick.height;
+    in-out property mouse-pro-preferred-height <=> mouse-pro.preferred-height;
+    in-out property mouse-row-height <=> mouse-row.height;
+
+    property <length> stage-h: mouse-stage-h;
+    property <length> low-y: mouse-low-y;
+
+    mouse-flick := Flickable {
+        y: Size.bar;
+        height: parent.height - Size.bar;
+        // (Settings' form brings its own margin under it)
+        content-height: low-y + (root.mouse-tab < 3 ? max(mouse-pro.visible ? mouse-pro.height : 0, mouse-row.height) + Space.margin : root.mouse-cells-h);
+        mouse-drag-pan-enabled: false;
+        HintRow {
+            x: pws-x;
+            width: pws-w;
+            text: root.mouse-hint;
+            chip: root.mouse-hint-chip;
+            chip-on: root.mouse-hint-chip-on;
+        }
+        // the mouse's stage, every device's: its shade round the hole the window
+        // draws the mouse in, in HDR (filled till the mouse is drawn there)
+        if root.mouse-tab < 2: Rectangle {
+            x: pws-x;
+            y: head-end;
+            width: pws-w;
+            height: stage-h;
+            border-radius: Radius.box;
+            clip: true;
+            property <length> hx: max(0, self.width / 2 - 600px + 480px - root.mouse-pic-m); // art: the mouse's picture, from its mock's canvas
+            property <length> hy: max(0, 30px - root.mouse-pic-m); // art: the mouse's picture, from its mock's canvas
+            property <length> hx2: min(self.width, self.width / 2 - 600px + 720px + root.mouse-pic-m); // art: the mouse's picture, from its mock's canvas
+            property <length> hy2: min(self.height, 440px + root.mouse-pic-m); // art: the mouse's picture, from its mock's canvas
+            Stage {
+                width: parent.width;
+                height: parent.height;
+                hole-x: hx;
+                hole-y: hy;
+                hole-w: hx2 - hx;
+                hole-h: hy2 - hy;
+                filled: !root.mouse-hdr-ready;
+            }
+            // the mock's own canvas, the mouse's middle at 600 of its 1092
+            Rectangle {
+                x: parent.width / 2 - 600px; // art: the mouse's picture, from its mock's canvas
+                width: 1092px; // art: the mouse's picture, from its mock's canvas
+                height: parent.height;
+                pic := MouseLayers {
+                    x: 480px - root.mouse-pic-m; // art: the mouse's picture, from its mock's canvas
+                    y: 30px - root.mouse-pic-m; // art: the mouse's picture, from its mock's canvas
+                    width: 240px + 2 * root.mouse-pic-m; // art: the mouse's picture, from its mock's canvas
+                    height: 410px + 2 * root.mouse-pic-m; // art: the mouse's picture, from its mock's canvas
+                    drawn: false;
+                    base: root.mouse-picture;
+                    picked: root.mouse-picked;
+                    picked-shown: root.mouse-picked-shown;
+                    over: root.mouse-over;
+                    over-shown: root.mouse-over-shown;
+                    logo-under: root.mouse-logo-under;
+                    wheel-under: root.mouse-wheel-under;
+                    logo: root.mouse-logo;
+                    wheel: root.mouse-wheel;
+                    logo-tint: root.mouse-logo-tint;
+                    wheel-tint: root.mouse-wheel-tint;
+                    // a click on a button (or, on Lighting, a light) chooses it
+                    pic-ta := TouchArea {
+                        mouse-cursor: root.mouse-pic-hand ? pointer : default;
+                        changed mouse-x => { root.mouse-pic-moved(self.mouse-x, self.mouse-y, self.has-hover); }
+                        changed mouse-y => { root.mouse-pic-moved(self.mouse-x, self.mouse-y, self.has-hover); }
+                        changed has-hover => { root.mouse-pic-moved(self.mouse-x, self.mouse-y, self.has-hover); }
+                        clicked => { root.mouse-pic-clicked(self.mouse-x, self.mouse-y); }
+                    }
+                }
+                if root.mouse-tab == 0: Rectangle {
+                    Path {
+                        width: 1092px; // art: the mouse's picture, from its mock's canvas
+                        height: 470px; // art: the mouse's picture, from its mock's canvas
+                        viewbox-width: 1092;
+                        viewbox-height: 470;
+                        commands: root.mouse-lines;
+                        stroke: Ink.edge;
+                        stroke-width: 1px; // art: the mouse's picture, from its mock's canvas
+                        fill: transparent;
+                    }
+                    Path {
+                        width: 1092px; // art: the mouse's picture, from its mock's canvas
+                        height: 470px; // art: the mouse's picture, from its mock's canvas
+                        viewbox-width: 1092;
+                        viewbox-height: 470;
+                        commands: root.mouse-dots;
+                        fill: Ink.edge;
+                    }
+                    Path {
+                        width: 1092px; // art: the mouse's picture, from its mock's canvas
+                        height: 470px; // art: the mouse's picture, from its mock's canvas
+                        viewbox-width: 1092;
+                        viewbox-height: 470;
+                        commands: root.mouse-line-on;
+                        stroke: Ink.dim;
+                        stroke-width: 1px; // art: the mouse's picture, from its mock's canvas
+                        fill: transparent;
+                    }
+                    Path {
+                        width: 1092px; // art: the mouse's picture, from its mock's canvas
+                        height: 470px; // art: the mouse's picture, from its mock's canvas
+                        viewbox-width: 1092;
+                        viewbox-height: 470;
+                        commands: root.mouse-dot-on;
+                        fill: Ink.dim;
+                    }
+                    for c[i] in root.mouse-calls: Rectangle {
+                        x: c.left ? 220px : 780px; // art: a button's callout on the mouse's picture
+                        y: c.top;
+                        width: 200px; // art: a button's callout on the mouse's picture
+                        height: 40px; // art: a button's callout on the mouse's picture
+                        Text {
+                            y: 0;
+                            width: parent.width;
+                            height: 16px; // art: a button's callout on the mouse's picture
+                            text: c.name;
+                            font-family: Font.ui;
+                            font-size: Font.small;
+                            letter-spacing: 0.2px; // art: a button's callout on the mouse's picture
+                            color: Ink.quiet;
+                            horizontal-alignment: c.left ? right : left;
+                        }
+                        Rectangle {
+                            x: c.left ? parent.width - self.width : 0;
+                            y: 17px; // art: a button's callout on the mouse's picture
+                            width: job-t.preferred-width + (c.chosen ? 16px : 0); // art: a button's callout on the mouse's picture
+                            height: 22px; // art: a button's callout on the mouse's picture
+                            border-radius: Radius.small;
+                            background: c.chosen ? Ink.pick : transparent;
+                            border-width: c.chosen ? 1px : 0; // art: a button's callout on the mouse's picture
+                            border-color: Ink.white.with-alpha(0.251);
+                            job-t := Text {
+                                x: c.chosen ? 8px : 0; // art: a button's callout on the mouse's picture
+                                height: parent.height;
+                                text: c.job;
+                                font-family: Font.ui;
+                                font-size: Font.note;
+                                color: c.rebound ? Ink.warn : c.chosen ? Ink.bright : Ink.dim;
+                                vertical-alignment: center;
+                            }
+                        }
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            changed has-hover => { root.mouse-call-hover(i, self.has-hover); }
+                            clicked => { root.mouse-row(i); }
+                        }
+                    }
+                }
+            }
+        }
+        // the profiles, first in the row, as every device page has them; the well
+        // reaching the foot of the boxes beside it
+        mouse-pro := AnchorColumn {
+            visible: mouse-pro-w > 0;
+            x: pws-x;
+            y: low-y;
+            width: Size.column;
+            height: max(self.preferred-height, mouse-row.height);
+            profiles: root.mouse-profiles;
+            kept: true;
+            renaming <=> root.mouse-renaming;
+            choose(n) => { root.mouse-profile-choose(n); }
+            rename(t) => { root.mouse-profile-rename(t); }
+            add() => { root.mouse-profile-new(); }
+            menu(x, y, h) => { root.mouse-profile-menu(x, y, h); }
+        }
+        // the tab's boxes, in the row of boxes every device page has: on Buttons the Key
+        // library and every button or the chosen one's job; on Lighting the lights, the
+        // effects and the chosen effect's settings; on Performance a box for each of the
+        // mouse's sections (the boxes laid out in Rust say how wide the row made them)
+        mouse-row := BoxRow {
+            visible: root.mouse-tab < 3;
+            x: pws-x + mouse-pro-w;
+            y: low-y;
+            width: pws-w - mouse-pro-w;
+            height: max(self.preferred-height, mouse-band-min);
+            // (as tall as the box that goes with it, beside it or, in a narrow
+            // window, under it)
+            if root.mouse-tab == 0: KeyLibrary {
+                min-width: Size.library;
+                preferred-width: Size.library;
+                max-height: mouse-band-max;
+                preferred-height: max(mouse-band-min, mouse-second-need);
+                layer: 0;
+                layers: root.mouse-layers;
+                placeholder: "Find a button or what it does";
+                reveal-y: root.mouse-lib-reveal-y;
+                reveal-n: root.mouse-lib-reveal-n;
+                groups: root.mouse-lib-groups;
+                query <=> root.mouse-lib-query;
+                toggle(g) => { root.mouse-lib-toggle(g); }
+                find(t) => { root.mouse-lib-find(t); }
+                pick(id) => { root.mouse-row(id); }
+            }
+            if root.mouse-tab == 0 && !root.mouse-chosen: PageBox {
+                min-width: Size.detail;
+                preferred-width: Size.detail;
+                max-height: mouse-band-max;
+                preferred-height: mouse-second-need;
+                title: "All buttons";
+                // its note, and Back to factory Space.pad after it, at the middle of its first line
+                property <length> need: Size.box-head + all-note.preferred-height + Space.pad;
+                init => { root.mouse-all-need = self.need; }
+                changed need => { root.mouse-all-need = self.need; }
+                all-note := Text {
+                    x: Space.pad;
+                    y: Size.box-head;
+                    width: parent.width - 2 * Space.pad - (root.mouse-any-rebound ? all-reset.width + Space.pad : 0);
+                    text: root.mouse-all-note;
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    color: Ink.quiet;
+                    wrap: word-wrap;
+                }
+                all-reset := WordButton {
+                    visible: root.mouse-any-rebound;
+                    x: parent.width - self.width - Space.pad;
+                    y: Size.box-head + (Line.note - self.height) / 2;
+                    text: "Back to factory";
+                    on-box: true;
+                    clicked => { root.mouse-reset-all(); }
+                }
+            }
+            if root.mouse-tab == 0 && root.mouse-chosen: KeyDetail {
+                min-width: Size.detail;
+                preferred-width: Size.detail;
+                max-height: mouse-band-max;
+                preferred-height: mouse-second-need;
+                init => { root.mouse-key-need = self.need; }
+                changed need => { root.mouse-key-need = self.need; }
+                title: root.mouse-title;
+                cap: root.mouse-cap;
+                factory: root.mouse-factory;
+                state: root.mouse-state;
+                rebound: root.mouse-rebound;
+                layer-rebound: false;
+                layer-title: "When pressed";
+                kinds: root.mouse-kinds;
+                kind-icons: root.mouse-kind-icons;
+                kind: root.mouse-kind;
+                job: root.mouse-job;
+                listening: false;
+                recordable: false;
+                closable: false;
+                menu-open: root.mouse-menu-open;
+                note: root.mouse-note;
+                reset => { root.mouse-reset(); }
+                kind-picked(i, x, y, h) => { root.mouse-kind-picked(i, x, y, h); }
+                job-clicked(x, y, h, w) => { root.mouse-job-clicked(x, y, h, w); }
+            }
+            if root.mouse-tab == 1: ListBox {
+                heading: "LIGHTS";
+                min-width: Size.column;
+                preferred-width: Size.column;
+                max-height: mouse-band-max;
+        for r[i] in root.mouse-rows: ListRow {
+            name: r.name;
+            // (a job not the factory's in amber)
+            sub: r.rebound ? "" : r.job;
+            warn: r.rebound ? r.job : "";
+            chosen: r.chosen;
+            // (its color at its right end, Space.row in, the row's words kept clear of it)
+            end: r.swatched ? Space.row + Part.glyph + Space.row : Space.row;
+            clicked => { root.mouse-row(i); }
+            if r.swatched: ColorSquare {
+                x: parent.width - Space.row - self.width;
+                y: (parent.height - self.height) / 2;
+                swatch: r.swatch;
+            }
+        }
+            }
+            if root.mouse-tab == 1: ScrollBox {
+                min-width: Size.effects;
+                preferred-width: Size.effects;
+                max-height: mouse-band-max;
+                preferred-height: mouse-fx-h;
+                need: mouse-fx-h;
+                EffectGrid {
+                    width: parent.width;
+                    height: max(mouse-fx-h, parent.height);
+                    fill: transparent;
+                    init => { root.mouse-fx-w = self.pic-w; root.boxes-resized(); }
+                    changed pic-w => { root.mouse-fx-w = self.pic-w; root.boxes-resized(); }
+                    effects: root.mouse-effects;
+                    moving: root.mouse-effect-moves;
+                    chose(i) => { root.mouse-effect(i); }
+                }
+            }
+            for b[i] in root.mouse-tab == 1 || root.mouse-tab == 2 ? root.mouse-boxes : []: CellBox {
+                b: b;
+                max-height: mouse-band-max;
+                resized(w) => { root.mouse-box-resized(i, w); }
+                pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
+                field-left(id, index, kept) => { root.cell-left(id, index, kept); }
+                slide(id, v) => { root.cell-slide(id, v); }
+                typed(id, index, t) => { root.cell-typed(id, index, t); }
+            }
+        }
+        // Settings: the mouse's own facts, laid out in Rust as a form
+        if root.mouse-tab == 3: Rectangle {
+            x: pws-x;
+            y: low-y;
+            width: root.mouse-w;
+            height: root.mouse-cells-h;
+            for c in root.cells: CellView {
+                c: c;
+                glyph: root.mouse-tile;
+                pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
+                field-left(id, index, kept) => { root.cell-left(id, index, kept); }
+                slide(id, v) => { root.cell-slide(id, v); }
+                typed(id, index, t) => { root.cell-typed(id, index, t); }
+            }
+        }
+    }
+    // the mouse's own bar, every page's: its name, its tabs, and what went wrong
+    PageBar {
+        y: 0;
+        title: root.mouse-name;
+        dot: root.mouse-conn;
+        tabs: ["Buttons", "Lighting", "Performance", "Settings"];
+        tab: root.mouse-tab;
+        tab-chosen(i) => { root.mouse-tab-chosen(i); }
+        status: root.mouse-status != "" ? root.mouse-status : root.mouse-said;
+        status-bad: root.mouse-status != "";
+        undo-shown: root.mouse-status == "" && root.mouse-undo-shown;
+        undo => { root.mouse-undo(); }
+        // the Macro Editor, on Ectomatter's own macros, and the lab, on the
+        // mouse's lights
+        BarButton {
+            commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
+            text: "Macro Editor";
+            clicked => { root.mouse-macro-editor(); }
+        }
+        BarButton {
+            // a flask drawn for this size, its lines on the pixel grid
+            commands: "M5.14 1.14h5.72M6.29 1.14v4.58L2.95 11.93a1.25 1.25 0 0 0 1.1 1.79h7.9a1.25 1.25 0 0 0 1.1-1.79L9.71 5.72V1.14M4.3 10.29h7.4";
+            round: true;
+            text: "";
+            clicked => { root.rail("lab"); }
+        }
+    }
+}
