@@ -85,3 +85,6 @@ Ectomatter, its cores and its plugins are free software under the GNU
 General Public License, version 3 (`LICENSE`): you may share and change
 them under its terms. They come with no warranty. The app draws its windows
 with [Slint](https://slint.dev), which it takes under the same license.
+The libraries it's built from and the typefaces and files it carries from
+others are under their own licenses, named in `REUSE.toml` and listed with
+their texts in the `NOTICES` the install writes.

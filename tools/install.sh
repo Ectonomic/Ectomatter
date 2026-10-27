@@ -11,9 +11,10 @@
 #   PREFIX/lib/udev/rules.d/70-ectomatter.rules: the person at the computer
 #     may open each device a core reaches (made by `ectomatter --udev-rules`
 #     from the cores' manifests)
-#   PREFIX/share/licenses/ectomatter: Ectomatter's license (the GPLv3), each
-#     license in LICENSES/ that some of its dependencies alone come under,
-#     and the typefaces'
+#   PREFIX/share/licenses/ectomatter: Ectomatter's license (the GPLv3), the
+#     license texts in LICENSES/, and NOTICES: each library the app is built
+#     from and each file it carries from others, with its license text
+#     (tools/notices.py); each package's own NOTICES beside its manifest
 #
 #   tools/install.sh [--prefix DIR] [--destdir DIR] [--no-build] [--bin DIR]
 # Builds the release program, the launcher, the cores and the plugins first,
@@ -56,6 +57,7 @@ for kind in cores plugins; do
     (cd "$dir" && find . -path ./module -prune -o -type f ! -name '*.before-*' -print) | while read -r f; do
       install -Dm644 "$dir/$f" "$out/$f"
     done
+    [ ! -f "$dir/module/Cargo.toml" ] || python3 -I tools/notices.py "$dir/module/Cargo.toml" --files "$dir" > "$out/NOTICES"
   done
 done
 install -Dm644 packaging/com.ectonomic.ectomatter.desktop "$root/share/applications/com.ectonomic.ectomatter.desktop"
@@ -68,9 +70,5 @@ for f in LICENSES/*.txt; do
   [ -f "$f" ] || continue
   install -Dm644 "$f" "$licenses/$(basename "$f")"
 done
-for f in apps/ectomatter/ui/fonts/*-OFL.txt crates/ectomatter-draw/typefaces/OFL.txt crates/ectomatter-draw/typefaces/OpenGorton-LICENSE.txt; do
-  install -Dm644 "$f" "$licenses/typefaces/$(basename "$f")"
-done
-install -Dm644 apps/ectomatter/ui/fonts/README.md "$licenses/typefaces/interface.md"
-install -Dm644 crates/ectomatter-draw/typefaces/README.md "$licenses/typefaces/legends.md"
+python3 -I tools/notices.py Cargo.toml > "$licenses/NOTICES"
 echo "installed under $root"

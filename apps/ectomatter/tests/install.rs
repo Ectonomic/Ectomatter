@@ -18,6 +18,53 @@ impl Drop for Scratch {
     }
 }
 
+/// The libraries a project ships, `name version`: every crate from a
+/// registry its crates reach, on every system and with every feature, not
+/// through the tests' own dependencies; and its crates' folders.
+fn shipped(manifest: &Path) -> (Vec<String>, Vec<PathBuf>) {
+    let out = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()))
+        .args(["metadata", "--locked", "--all-features", "--format-version", "1", "--manifest-path"])
+        .arg(manifest)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "cargo metadata: {}", String::from_utf8_lossy(&out.stderr));
+    let md: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let packages: std::collections::HashMap<&str, &serde_json::Value> = md["packages"].as_array().unwrap().iter().map(|p| (p["id"].as_str().unwrap(), p)).collect();
+    let nodes: std::collections::HashMap<&str, &serde_json::Value> = md["resolve"]["nodes"].as_array().unwrap().iter().map(|n| (n["id"].as_str().unwrap(), n)).collect();
+    let members: Vec<&str> = md["workspace_members"].as_array().unwrap().iter().filter_map(|m| m.as_str()).collect();
+    let (mut seen, mut todo) = (std::collections::HashSet::new(), members.clone());
+    while let Some(id) = todo.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        for d in nodes[id]["deps"].as_array().unwrap() {
+            if d["dep_kinds"].as_array().unwrap().iter().any(|k| k["kind"] != "dev") {
+                todo.push(d["pkg"].as_str().unwrap());
+            }
+        }
+    }
+    let mut libraries: Vec<String> = seen.iter().map(|id| packages[id]).filter(|p| !p["source"].is_null()).map(|p| format!("{} {}", p["name"].as_str().unwrap(), p["version"].as_str().unwrap())).collect();
+    libraries.sort();
+    let folders = members.iter().map(|id| Path::new(packages[id]["manifest_path"].as_str().unwrap()).parent().unwrap().to_path_buf()).collect();
+    (libraries, folders)
+}
+
+/// The repository's files under these folders that show another's work as
+/// they are: a typeface, or a file naming its makers' copyright.
+fn carried(folders: &[PathBuf]) -> Vec<String> {
+    let root = repo().canonicalize().unwrap();
+    let out = Command::new("git").arg("-C").arg(&root).args(["ls-files", "-z"]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|f| !f.is_empty() && folders.iter().any(|d| root.join(f).starts_with(d.canonicalize().unwrap())))
+        .filter(|f| {
+            let font = [".ttf", ".otf", ".woff", ".woff2"].iter().any(|x| f.to_lowercase().ends_with(x));
+            font || std::fs::read_to_string(root.join(f)).is_ok_and(|t| t.contains(concat!("<copy", "right>")) || t.contains(concat!("SPDX-File", "CopyrightText")))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
 /// tools/install.sh's layout under /usr, staged in a folder of the test's
 /// own, from the programs this test was built with.
 #[test]
@@ -40,8 +87,20 @@ fn an_install_lays_ectomatter_out_and_it_starts_from_there() {
         let at = usr.join("share/licenses/ectomatter").join(e.file_name());
         assert!(std::fs::read(&at).ok() == std::fs::read(e.path()).ok(), "{} not installed as it is", e.path().display());
     }
+    // the notices: each library the app ships, found from Cargo's own
+    // record of what it's built from, and each file of its crates' folders
+    // that shows another's work, named in NOTICES
+    let notices = std::fs::read_to_string(usr.join("share/licenses/ectomatter/NOTICES")).unwrap_or_default();
+    let (libraries, folders) = shipped(&repo().join("Cargo.toml"));
+    assert!(libraries.len() > 100, "no libraries found: {}", libraries.len());
+    for l in &libraries {
+        assert!(notices.lines().any(|n| n.starts_with(&format!("{l} ")) || n == l), "{l} isn't in the notices");
+    }
+    for f in carried(&folders) {
+        assert!(notices.lines().any(|n| n == f), "{f} isn't in the notices");
+    }
     // every package that comes with Ectomatter, as installed: its manifest
-    // and module, none of its source
+    // and module, none of its source, and its own notices
     for kind in ["cores", "plugins"] {
         for e in std::fs::read_dir(repo().join(kind)).unwrap().flatten() {
             let id = e.file_name().to_string_lossy().into_owned();
@@ -51,6 +110,16 @@ fn an_install_lays_ectomatter_out_and_it_starts_from_there() {
             let at = usr.join("share/ectomatter").join(kind).join(&id);
             assert!(at.join("core.json").is_file() && at.join("core.wasm").is_file(), "{kind}/{id} not installed whole");
             assert!(!at.join("module").exists(), "{kind}/{id}'s source installed");
+            if e.path().join("module/Cargo.toml").is_file() {
+                let notices = std::fs::read_to_string(at.join("NOTICES")).unwrap_or_default();
+                let (libraries, _) = shipped(&e.path().join("module/Cargo.toml"));
+                for l in libraries {
+                    assert!(notices.lines().any(|n| n.starts_with(&format!("{l} ")) || n == l), "{l} isn't in {kind}/{id}'s notices");
+                }
+                for f in carried(&[e.path()]) {
+                    assert!(notices.lines().any(|n| n == f), "{f} isn't in {kind}/{id}'s notices");
+                }
+            }
         }
     }
     // the rules name every core's devices (made from the installed manifests)

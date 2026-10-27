@@ -42,13 +42,14 @@ if [ -z "$lines" ]; then printf '%s\n' "$out" | tail -30; exit 2; fi
 held=$(printf '%s\n' "$lines" | grep -c ' ok$')
 not=$(printf '%s\n' "$lines" | grep -c ' FAILED$')
 printf '%s\n' "$lines" | sed -E 's/^test (.*) \.\.\. ok$/  holds      \1/; s/^test (.*) \.\.\. FAILED$/  not yet    \1/'
-# (every dependency that ships under a license deny.toml approves:
+# (every dependency that ships, and every file carried from others, under a
+# license deny.toml approves:
 # tools/licenses.sh; a crate docs/deferred.md names is a known failure, any
 # other stops the run)
 licenses=$(tools/licenses.sh); case $? in
   0) echo "  holds      every_shipped_dependencys_license_is_approved"; held=$((held + 1)) ;;
   3) echo "  not yet    every_shipped_dependencys_license_is_approved (known failures, docs/deferred.md)"; not=$((not + 1)) ;;
-  *) printf '%s\n' "$licenses"; echo "  FAILS      every_shipped_dependencys_license_is_approved: a crate not approved and not in docs/deferred.md"; exit 1 ;;
+  *) printf '%s\n' "$licenses"; echo "  FAILS      every_shipped_dependencys_license_is_approved: a crate or carried file not approved and not in docs/deferred.md, or a carried file not in REUSE.toml"; exit 1 ;;
 esac
 echo "$held hold, $not don't yet"
 # (a boundary test renamed or gone is a boundary no longer tried)

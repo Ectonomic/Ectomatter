@@ -9,7 +9,8 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 tools/private-words.sh --staged || exit 1
-if git diff --cached --name-only | grep -qE '(^|/)(Cargo\.toml|Cargo\.lock|deny\.toml|core\.json)$|^docs/deferred\.md$|^LICENSES?(/|$)'; then
+if git diff --cached --name-only | grep -qE '(^|/)(Cargo\.toml|Cargo\.lock|deny\.toml|core\.json)$|^docs/deferred\.md$|^LICENSES?(/|$)|^REUSE\.toml$' \
+  || [ -n "$(git diff --cached --name-only --diff-filter=AR)" ]; then
   tools/licenses.sh
-  case $? in 0|3) ;; *) echo "commit stopped: a license isn't approved (deny.toml) or isn't Ectomatter's"; exit 1 ;; esac
+  case $? in 0|3) ;; *) echo "commit stopped: a license isn't approved (deny.toml), isn't Ectomatter's, or a carried file isn't in REUSE.toml"; exit 1 ;; esac
 fi

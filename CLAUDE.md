@@ -63,8 +63,8 @@ This is where they live in this repository.
   `~/.config/ectomatter-dev/private-words`: Grant's own details, which never
   go in. `--history` checks every commit and message.
 - **Licenses.** `tools/licenses.sh` (run by `tools/boundaries.sh` and by
-  the commit hook when a dependency changes; needs `cargo install --locked
-  cargo-deny`) holds the app and every package that ships with it to the
+  the commit hook when a dependency changes or a file is added; needs
+  `cargo install --locked cargo-deny`) holds the app and every package that ships with it to the
   licenses `deny.toml` approves. Adding a dependency, or a license to that
   list, is Grant's call: ask him first, with the dependency's license. A
   crate whose decision waits is named in `docs/deferred.md` as a known
@@ -73,7 +73,14 @@ This is where they live in this repository.
   and package's own license; Slint comes under the same license. A license
   approved for some crates alone is a `deny.toml` exception with its text
   in `LICENSES/`, which `tools/licenses.sh` checks and the install ships
-  (`tests/install.rs`).
+  (`tests/install.rs`). A file carried from others (a typeface, a protocol,
+  icons, data) gets its own table in `REUSE.toml`, its makers and its
+  license, and the license's text in `LICENSES/`: `tools/licenses.sh` finds
+  each file that shows another's work (`tools/notices.py --check`) and stops
+  on one without a table. The install writes `NOTICES` (the app's, and each
+  package's beside its manifest) with `tools/notices.py`: every library and
+  carried file, and its license text; `tests/install.rs` holds it to Cargo's
+  own record of what ships.
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 

@@ -271,15 +271,27 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   there, and nothing says the copy shadows it.
 - No file Ectomatter saves has a version of its own (`files.rs`): a change to
   what one holds is read by its keys alone.
-- The libraries' notices: most of what the app ships is under MIT, Apache,
-  BSD or another permissive license that asks for its notice to go with the
-  program. The install carries Ectomatter's license (the GPLv3) and the
-  typefaces' licenses (`tools/install.sh` lines 65 to 75), and none of the
-  libraries' notices yet. The files carried from others that aren't crates
-  (the KDE protocols in `apps/ectomatter/protocols/`, under MIT-CMU and
-  LGPL-2.1-or-later; Phosphor's glyphs; the weather data's sources,
-  `crates/ectomatter-weather/data/NOTICE.md`) aren't held to `deny.toml` by
-  `tools/licenses.sh`, which reads crates alone.
+- The licenses of the files carried from others wait for Grant's word
+  (`tools/licenses.sh` known failures: `OFL-1.1`, `MIT-CMU`,
+  `LGPL-2.1-or-later`, `Bitstream-Vera`, `LicenseRef-Arev`, `CC-BY-4.0`,
+  `CC0-1.0`, `LicenseRef-EVGA-Z10-Firmware`). `REUSE.toml` records each:
+  the typefaces (OFL-1.1; DejaVu's glyphs under Bitstream-Vera and Arev), KDE's
+  protocols (`apps/ectomatter/protocols/`, MIT-CMU and LGPL-2.1-or-later),
+  the weather regions (`crates/ectomatter-weather/data/`, MIT and MeteoAlarm's
+  CC-BY-4.0), EVGA's E in the Z10's art (`tools/z10-art/from/evga-e.svg`,
+  CC0-1.0 from Wikimedia Commons), and the Z10 screen's letters
+  (`apps/ectomatter/data/z10font.json`), read from EVGA's firmware, which
+  EVGA gives no license for. Until his word they're reported, not stopped.
+- The check finds a file carried from others by what shows it (a typeface,
+  a notice or license in it or in its folder: `tools/notices.py`, `SHOWS`,
+  `FONT`, `NOTICE`); a file copied in with none of that isn't found.
+  `z10font.json` and `lcdfont.json` (Adafruit's, BSD-2-Clause) were found
+  by hand, from where they were made.
+- A library's notice is the license files its crate ships, or the license's
+  own text with its authors from its manifest when it ships none
+  (`tools/notices.py`, `library`); a license file whose name doesn't say
+  its license is taken whole. Nothing reads a crate's copyright from its
+  source files.
 - The source beside each download: Ectomatter is under the GPLv3 (Grant,
   2026-10-27), which asks that
   directions to the source sit beside the program wherever it's offered

@@ -1,0 +1,202 @@
+# Who made each file here, and the license it comes under, in the REUSE
+# format (https://reuse.software/spec-3.3/). Every file is Ectomatter's own
+# unless a later table names it: those are the files carried from others.
+# tools/licenses.sh holds every file that shows another's work (a typeface, a
+# notice or license in it or beside it) to a table here other than the first,
+# each license named to its text (Ectomatter's own in LICENSE, the rest in
+# LICENSES/<id>.txt) and to the licenses deny.toml approves; tools/notices.py
+# writes the notices the install ships from the tables.
+version = 1
+
+[[annotations]]
+path = "**"
+SPDX-FileCopyrightText = "2026 Grant Garrison"
+SPDX-License-Identifier = "GPL-3.0-only"
+
+# KDE's Wayland protocols, built into the window code (kde_output.rs, shadow.rs)
+[[annotations]]
+path = ["apps/ectomatter/protocols/kde-output-device-v2.xml"]
+SPDX-FileCopyrightText = [
+  "2008-2011 Kristian Høgsberg",
+  "2010-2011 Intel Corporation",
+  "2012-2013 Collabora, Ltd.",
+  "2015 Sebastian Kügler <sebas@kde.org>",
+  "2021 Méven Car <meven.car@enioka.com>",
+]
+SPDX-License-Identifier = "MIT-CMU"
+
+[[annotations]]
+path = ["apps/ectomatter/protocols/kde-output-management-v2.xml"]
+SPDX-FileCopyrightText = [
+  "2008-2011 Kristian Høgsberg",
+  "2010-2011 Intel Corporation",
+  "2012-2013 Collabora, Ltd.",
+  "2015 Sebastian Kügler <sebas@kde.org>",
+  "2021 Méven Car <meven.car@enioka.com>",
+  "2023 Xaver Hugl <xaver.hugl@kde.org>",
+]
+SPDX-License-Identifier = "MIT-CMU"
+
+[[annotations]]
+path = ["apps/ectomatter/protocols/kde-shadow.xml"]
+SPDX-FileCopyrightText = "2015 Martin Gräßlin"
+SPDX-License-Identifier = "LGPL-2.1-or-later"
+
+# the interface's typefaces
+[[annotations]]
+path = [
+  "apps/ectomatter/ui/fonts/Barlow-*",
+  "apps/ectomatter/ui/fonts/BarlowSemiCondensed-*",
+  "cores/evga-z10/fonts/BarlowSemiCondensed-SemiBold.ttf",
+  "cores/evga-z10/fonts/OFL.txt",
+  "design/fonts/Barlow-*",
+  "design/fonts/BarlowSemiCondensed-*",
+  "crates/ectomatter-draw/typefaces/Barlow-*",
+]
+SPDX-FileCopyrightText = "2017 The Barlow Project Authors (https://github.com/jpt/barlow)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["apps/ectomatter/ui/fonts/Geist-*", "design/fonts/Geist-*"]
+SPDX-FileCopyrightText = "2024 The Geist Project Authors (https://github.com/vercel/geist-font)"
+SPDX-License-Identifier = "OFL-1.1"
+
+# Phosphor's icons on the rail
+[[annotations]]
+path = [
+  "apps/ectomatter/ui/glyphs/home.svg",
+  "apps/ectomatter/ui/glyphs/settings.svg",
+  "apps/ectomatter/ui/glyphs/library.svg",
+]
+SPDX-FileCopyrightText = "2023 Phosphor Icons (https://phosphoricons.com)"
+SPDX-License-Identifier = "MIT"
+
+# Ectomatter's own, beside the icons above
+[[annotations]]
+path = [
+  "apps/ectomatter/ui/glyphs/keyboard.svg",
+  "apps/ectomatter/ui/glyphs/mouse.svg",
+  "apps/ectomatter/ui/glyphs/mark.svg",
+]
+SPDX-FileCopyrightText = "2026 Grant Garrison"
+SPDX-License-Identifier = "GPL-3.0-only"
+
+# a keyboard screen's 5 by 7 letters, from Adafruit's GFX library (glcdfont.c)
+[[annotations]]
+path = ["apps/ectomatter/data/lcdfont.json", "design/lcdfont.json"]
+SPDX-FileCopyrightText = "2012 Adafruit Industries"
+SPDX-License-Identifier = "BSD-2-Clause"
+
+# the Z10 screen's own letters, read from its firmware
+[[annotations]]
+path = ["apps/ectomatter/data/z10font.json"]
+SPDX-FileCopyrightText = "EVGA Corporation"
+SPDX-License-Identifier = "LicenseRef-EVGA-Z10-Firmware"
+
+# the glyphs typefaces lack, cut from DejaVu Sans Bold and Noto Sans Symbols
+[[annotations]]
+path = [
+  "crates/ectomatter-draw/fonts/KeyGlyphs-Bold.ttf",
+  "crates/ectomatter-draw/fonts/DejaVu-LICENSE.txt",
+  "cores/evga-z10/fonts/Z10Symbols-Bold.ttf",
+  "cores/evga-z10/fonts/DejaVu-LICENSE.txt",
+]
+SPDX-FileCopyrightText = ["2003 Bitstream, Inc.", "2006 Tavmjong Bah"]
+SPDX-License-Identifier = "Bitstream-Vera AND LicenseRef-Arev"
+
+[[annotations]]
+path = [
+  "crates/ectomatter-draw/fonts/KeyGlyphsSymbols-Regular.ttf",
+  "crates/ectomatter-draw/fonts/KeyGlyphsSymbols2-Regular.ttf",
+  "crates/ectomatter-draw/fonts/Noto-OFL.txt",
+]
+SPDX-FileCopyrightText = "2022 The Noto Project Authors (https://github.com/notofonts/symbols)"
+SPDX-License-Identifier = "OFL-1.1"
+
+# the legends' typefaces (crates/ectomatter-draw/typefaces/README.md)
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/BrunoAce-Regular.ttf"]
+SPDX-FileCopyrightText = "2023 The Bruno Ace Project Authors (https://github.com/googlefonts/Bruno-ace)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/Audiowide-Regular.ttf"]
+SPDX-FileCopyrightText = "2012 Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Name \"Audiowide\""
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/Orbitron.ttf"]
+SPDX-FileCopyrightText = "2018 The Orbitron Project Authors (https://github.com/theleagueof/orbitron), with Reserved Font Name \"Orbitron\""
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/Michroma-Regular.ttf"]
+SPDX-FileCopyrightText = "2011 The Michroma Project Authors (https://github.com/googlefonts/Michroma-font)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/Saira.ttf"]
+SPDX-FileCopyrightText = "2020 The Saira Project Authors (https://github.com/Omnibus-Type/Saira)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/Rajdhani-*"]
+SPDX-FileCopyrightText = "2014 Indian Type Foundry (info@indiantypefoundry.com)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/Arimo.ttf"]
+SPDX-FileCopyrightText = "2020 The Arimo Project Authors (https://github.com/googlefonts/arimo)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/Inter.ttf"]
+SPDX-FileCopyrightText = "2016 The Inter Project Authors (https://github.com/rsms/inter)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/Nunito.ttf"]
+SPDX-FileCopyrightText = "2014 The Nunito Project Authors (https://github.com/googlefonts/nunito)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/Jost.ttf"]
+SPDX-FileCopyrightText = "2020 The Jost Project Authors (https://github.com/indestructible-type/Jost)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/JetBrainsMono.ttf"]
+SPDX-FileCopyrightText = "2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/CourierPrime-*"]
+SPDX-FileCopyrightText = "2015 The Courier Prime Project Authors (https://github.com/quoteunquoteapps/CourierPrime)"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/NotoSansJP.ttf", "crates/ectomatter-draw/typefaces/NotoSansKR.ttf"]
+SPDX-FileCopyrightText = "2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name \"Source\""
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/OFL.txt"]
+SPDX-FileCopyrightText = "the typefaces' authors named in it"
+SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = ["crates/ectomatter-draw/typefaces/OpenGorton-*"]
+SPDX-FileCopyrightText = "2020 dakotafelder (https://github.com/dakotafelder/open-gorton)"
+SPDX-License-Identifier = "MIT"
+
+# the weather's warning regions (crates/ectomatter-weather/data/NOTICE.md)
+[[annotations]]
+path = ["crates/ectomatter-weather/data/meteoalarm-regions.json", "crates/ectomatter-weather/data/NOTICE.md"]
+SPDX-FileCopyrightText = ["2025 Niklas Jordan (https://github.com/NiklasJordan/meteoalarm)", "EUMETNET (MeteoAlarm, https://meteoalarm.org)"]
+SPDX-License-Identifier = "MIT AND CC-BY-4.0"
+
+# EVGA's E, from Wikimedia Commons (File:EVGA_Logo.svg), drawn on the Z10's G/PC button
+[[annotations]]
+path = ["tools/z10-art/from/evga-e.svg"]
+SPDX-FileCopyrightText = "EVGA Corporation (the mark); Wikimedia Commons (the drawing)"
+SPDX-License-Identifier = "CC0-1.0"

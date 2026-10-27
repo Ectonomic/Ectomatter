@@ -12,6 +12,11 @@
 # LICENSES/<its id>.txt, which the install ships with the app, and a part
 # of Ectomatter (a crate of the workspace, a package's module or manifest)
 # under another license than Ectomatter's own (Cargo.toml's, LICENSE).
+# The files carried from others are held too (tools/notices.py --check):
+# each file that shows another's work (a typeface, a notice or license in it
+# or beside it) has a table of its own in REUSE.toml, whose licenses have
+# their text in LICENSES/ and are ones deny.toml approves; a license
+# docs/deferred.md names in the same list waits, as a crate does.
 #   tools/licenses.sh          check
 #   tools/licenses.sh --list   each license and the crates under it
 set -uo pipefail
@@ -50,6 +55,18 @@ while read -r part lic; do
   if [ "$lic" != "$own" ]; then
     echo "licenses: $part is under ${lic:-no license}, not Ectomatter's $own"
     bad=1
+  fi
+done < "$tmp"
+# (the files carried from others)
+python3 -I tools/notices.py --check > "$tmp"
+while read -r what id rest; do
+  [ -n "$what" ] || continue
+  if [ "$what" = unapproved ] && is_known "$id"; then
+    echo "licenses: carried under $id, not approved yet (known: docs/deferred.md): $rest"; [ $bad -eq 1 ] || bad=3
+  elif [ "$what" = unapproved ]; then
+    echo "licenses: carried under $id, which deny.toml doesn't approve: $rest"; bad=1
+  else
+    echo "licenses: $what $id${rest:+ $rest} (REUSE.toml)"; bad=1
   fi
 done < "$tmp"
 for m in "${projects[@]}"; do
