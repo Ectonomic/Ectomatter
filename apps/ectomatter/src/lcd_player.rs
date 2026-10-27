@@ -26,7 +26,12 @@ use crate::lcd_stats::Stats;
 const INTERVAL: f64 = 1.0;
 
 pub fn runtime_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })))
+    #[cfg(unix)]
+    let own = || PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() }));
+    // (elsewhere the system's folder for passing files)
+    #[cfg(not(unix))]
+    let own = std::env::temp_dir;
+    std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(own)
 }
 
 // ------------------------------------------------------------------ the keyboard's screen
@@ -100,7 +105,6 @@ impl Sink for CoreSink {
 
 /// The note's signature (when it was written, its size, its inode) and its fields.
 fn read_event(path: &Path) -> (Option<(i128, u64, u64)>, Option<HashMap<String, String>>) {
-    use std::os::unix::fs::MetadataExt;
     let Ok(m) = std::fs::metadata(path) else { return (None, None) };
     let Ok(bytes) = std::fs::read(path) else { return (None, None) };
     let text = String::from_utf8_lossy(&bytes);
@@ -111,7 +115,13 @@ fn read_event(path: &Path) -> (Option<(i128, u64, u64)>, Option<HashMap<String, 
             fields.insert(k.to_string(), v.to_string());
         }
     }
-    let sig = (m.mtime() as i128 * 1_000_000_000 + m.mtime_nsec() as i128, m.size(), m.ino());
+    // (when it was written, its size, and on Unix its inode)
+    let written = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos() as i128);
+    #[cfg(unix)]
+    let ino = std::os::unix::fs::MetadataExt::ino(&m);
+    #[cfg(not(unix))]
+    let ino = 0;
+    let sig = (written, m.len(), ino);
     (Some(sig), Some(fields))
 }
 

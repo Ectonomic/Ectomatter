@@ -1,0 +1,4 @@
+#!/bin/sh
+# A stand-in archiver: makes the archive named, empty.
+for a in "$@"; do case "$a" in *.a|*.lib) : > "$a"; exit 0;; esac; done
+exit 0

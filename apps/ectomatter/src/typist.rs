@@ -12,20 +12,29 @@ use std::time::{Duration, Instant};
 use ectomatter_protocol::{keys, media, Plays};
 use serde_json::Value;
 
+#[cfg(target_os = "linux")]
 // Linux's uinput and input interfaces (linux/uinput.h, linux/input.h)
 const UI_DEV_CREATE: libc::c_ulong = 0x5501;
+#[cfg(target_os = "linux")]
 const UI_DEV_DESTROY: libc::c_ulong = 0x5502;
+#[cfg(target_os = "linux")]
 const UI_DEV_SETUP: libc::c_ulong = 0x405c_5503;
+#[cfg(target_os = "linux")]
 const UI_SET_EVBIT: libc::c_ulong = 0x4004_5564;
 const UI_SET_KEYBIT: libc::c_ulong = 0x4004_5565;
 #[cfg(test)]
 const UI_GET_SYSNAME_64: libc::c_ulong = 0x8040_552c;
+#[cfg(target_os = "linux")]
 const EV_SYN: u16 = 0;
+#[cfg(target_os = "linux")]
 const EV_KEY: u16 = 1;
+#[cfg(target_os = "linux")]
 const SYN_REPORT: u16 = 0;
+#[cfg(target_os = "linux")]
 /// the highest key code the keyboard says it has (KEY_MAX's range for keys)
 const KEYS: u16 = 0x2ff;
 
+#[cfg(target_os = "linux")]
 #[repr(C)]
 struct Setup {
     bustype: u16,
@@ -36,6 +45,7 @@ struct Setup {
     ff_effects_max: u32,
 }
 
+#[cfg(target_os = "linux")]
 #[repr(C)]
 struct Event {
     sec: i64,
@@ -45,11 +55,13 @@ struct Event {
     value: i32,
 }
 
+#[cfg(target_os = "linux")]
 /// The virtual keyboard, while it exists.
 pub struct Keyboard {
     fd: i32,
 }
 
+#[cfg(target_os = "linux")]
 impl Keyboard {
     /// Ectomatter's keyboard, made: one that has every key a step can press.
     pub fn new() -> Result<Keyboard, String> {
@@ -101,6 +113,7 @@ impl Keyboard {
     }
 }
 
+#[cfg(target_os = "linux")]
 impl Drop for Keyboard {
     fn drop(&mut self) {
         unsafe {
@@ -156,6 +169,7 @@ trait Keys {
     fn key(&self, code: u16, down: bool) -> Result<(), String>;
 }
 
+#[cfg(target_os = "linux")]
 impl Keys for Keyboard {
     fn key(&self, code: u16, down: bool) -> Result<(), String> {
         Keyboard::key(self, code, down)
@@ -500,5 +514,28 @@ mod tests {
         unsafe { libc::close(fd) };
         // (the second pass's shift is already down, so the system passes on no second press)
         assert_eq!(got, [(42, 1), (30, 1), (30, 0), (30, 1), (30, 0), (42, 0)], "twice, then the shift let go");
+    }
+}
+
+// Elsewhere: no virtual keyboard yet (docs/deferred.md, stage 5), so a macro
+// that types says it can't.
+#[cfg(not(target_os = "linux"))]
+pub struct Keyboard;
+
+#[cfg(not(target_os = "linux"))]
+impl Keyboard {
+    pub fn new() -> Result<Keyboard, String> {
+        Err("Ectomatter can't type keys on this system yet".into())
+    }
+
+    pub fn sysname(&self) -> Option<String> {
+        None
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+impl Keys for Keyboard {
+    fn key(&self, _: u16, _: bool) -> Result<(), String> {
+        Err("Ectomatter can't type keys on this system yet".into())
     }
 }

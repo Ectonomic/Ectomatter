@@ -52,6 +52,7 @@ impl Nvml {
         self.lib.as_ref()
     }
 
+    #[cfg(target_os = "linux")]
     unsafe fn load() -> Option<NvmlLib> {
         unsafe {
             let h = libc::dlopen(c"libnvidia-ml.so.1".as_ptr(), libc::RTLD_NOW);
@@ -75,6 +76,12 @@ impl Nvml {
                 fan: std::mem::transmute::<*mut libc::c_void, NvmlOne>(p[6]),
             })
         }
+    }
+
+    /// (elsewhere NVIDIA's library isn't loaded yet: docs/deferred.md, stage 5)
+    #[cfg(not(target_os = "linux"))]
+    unsafe fn load() -> Option<NvmlLib> {
+        None
     }
 
     /// The card at a PCI address, as NVML holds it.

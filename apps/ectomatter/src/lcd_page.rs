@@ -1457,7 +1457,14 @@ impl Moment {
     /// The local time at a moment, in seconds since 1970.
     pub fn at(secs: libc::time_t) -> Moment {
         let mut t: libc::tm = unsafe { std::mem::zeroed() };
-        unsafe { libc::localtime_r(&secs, &mut t) };
+        #[cfg(unix)]
+        unsafe {
+            libc::localtime_r(&secs, &mut t)
+        };
+        #[cfg(windows)]
+        unsafe {
+            libc::localtime_s(&mut t, &secs)
+        };
         Moment { hour: t.tm_hour as u32, minute: t.tm_min as u32, weekday: t.tm_wday as u32, day: t.tm_mday as u32, month: t.tm_mon as u32, year: t.tm_year + 1900 }
     }
 }

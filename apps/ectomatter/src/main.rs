@@ -19,6 +19,9 @@
 //!
 //! `ectomatter --hide` starts into the tray, as it starts at login.
 
+// (on systems other than Linux, what only the Wayland shell uses goes unused)
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports, unused_mut))]
+
 // A function that can only call itself is a crash waiting for its caller, so
 // it stops the build rather than warning (one slipped through in 1da0b0b).
 #![deny(unconditional_recursion)]
@@ -48,8 +51,10 @@ mod ink_env;
 mod jobs;
 mod keyboard;
 mod menu_size;
+#[cfg(target_os = "linux")]
 mod kde_output;
 mod launcher;
+#[cfg(target_os = "linux")]
 mod shadow;
 mod shell;
 mod sound;
@@ -109,9 +114,6 @@ use std::time::{Duration, Instant};
 use ectomatter_draw::hdr::sim::{self, Scene, Setup, Simulator, Snapshot};
 use ectomatter_draw::hdr::{Board, Light};
 use front::{Front, WindowAsk};
-use kde_output::client::kde_output_device_mode_v2::KdeOutputDeviceModeV2;
-use kde_output::client::kde_output_device_registry_v2::{self, KdeOutputDeviceRegistryV2};
-use kde_output::client::kde_output_device_v2::{self, KdeOutputDeviceV2};
 use picture::{Lit, Picture};
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
@@ -119,52 +121,6 @@ use adapter::SoftWindow as MinimalSoftwareWindow;
 use slint::platform::software_renderer::{PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Key, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{LogicalPosition, PhysicalSize, SharedString};
-use smithay_client_toolkit::reexports::calloop::{self, EventLoop};
-use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
-use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
-use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
-use smithay_client_toolkit::reexports::client::{delegate_noop, Connection, Dispatch, QueueHandle};
-use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
-use smithay_client_toolkit::data_device_manager::{
-    data_device::{DataDevice, DataDeviceHandler},
-    data_offer::{receive_to_fd, DataOfferHandler, DragOffer},
-    data_source::{CopyPasteSource, DataSourceHandler},
-    DataDeviceManagerState, WritePipe,
-};
-use smithay_client_toolkit::reexports::client::protocol::{wl_data_device::WlDataDevice, wl_data_device_manager::DndAction, wl_data_source::WlDataSource};
-use smithay_client_toolkit::{
-    activation::{ActivationHandler, ActivationState, RequestData},
-    compositor::{CompositorHandler, CompositorState},
-    delegate_activation, delegate_compositor, delegate_data_device, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
-    delegate_xdg_shell, delegate_xdg_window,
-    output::{OutputHandler, OutputState},
-    registry::{ProvidesRegistryState, RegistryState},
-    registry_handlers,
-    seat::{
-        keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers},
-        pointer::{CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer},
-        Capability, SeatHandler, SeatState,
-    },
-    shell::{
-        xdg::{
-            window::{Window, WindowConfigure, WindowDecorations, WindowHandler},
-            XdgShell, XdgSurface,
-        },
-        WaylandSurface,
-    },
-    shm::{
-        slot::{Buffer, SlotPool},
-        Shm, ShmHandler,
-    },
-};
-use wayland_protocols::wp::color_management::v1::client::{
-    wp_color_management_output_v1::{self, WpColorManagementOutputV1},
-    wp_color_management_surface_v1::WpColorManagementSurfaceV1,
-    wp_image_description_info_v1::{self, WpImageDescriptionInfoV1},
-    wp_color_manager_v1::{self, WpColorManagerV1},
-    wp_image_description_creator_params_v1::WpImageDescriptionCreatorParamsV1,
-    wp_image_description_v1::{self, WpImageDescriptionV1},
-};
 
 /// the size the window opens at: under a 1080p screen with a taskbar, and
 /// tall enough that the Keys and Settings tabs show whole under the keyboard,
@@ -192,36 +148,8 @@ const HOME_GROUND: [u8; 3] = tokens::ink::BASE;
 /// light is drawn at the web design's brightness, as approved in WebKit; going
 /// above the desktop's white by the screen's headroom looked overdone.
 const LIGHT_GAIN: f32 = 1.0;
-/// Where a press resizes a window: GRAB past its visible edge (the window's
-/// surface is that much larger on every side, clear, and the compositor is
-/// told where the window itself is, so its shadow and its placement go by
-/// the window), and EDGE in from it; each corner takes CORNER of both edges
-/// next to it, so a corner is as easy to find as an edge.
-const GRAB: u32 = 10;
-const EDGE: f64 = 3.0;
-const CORNER: f64 = 20.0;
 
-/// A window's clear margin round its visible edge, a side at a time, in
-/// logical pixels: none while it is maximized or fills the screen, and none
-/// on a side it is tiled against, where the margin would cover its
-/// neighbor's edge.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct Margins {
-    l: u32,
-    t: u32,
-    r: u32,
-    b: u32,
-}
 
-impl Margins {
-    fn of(c: &WindowConfigure) -> Margins {
-        if c.is_maximized() || c.is_fullscreen() {
-            return Margins::default();
-        }
-        let m = |tiled: bool| if tiled { 0 } else { GRAB };
-        Margins { l: m(c.is_tiled_left()), t: m(c.is_tiled_top()), r: m(c.is_tiled_right()), b: m(c.is_tiled_bottom()) }
-    }
-}
 
 /// Slint, told to draw into our own buffers and to keep time by our clock.
 /// Each window it is asked for is kept, in order, for the window to draw.
@@ -455,54 +383,7 @@ fn devices_described(hosted: &hosted::Hosted) {
     }
 }
 
-/// A key as Slint takes it: its own text, or the name Slint gives a key with none.
-fn key_text(e: &KeyEvent) -> Option<SharedString> {
-    let k = match e.keysym {
-        Keysym::BackSpace => Key::Backspace,
-        Keysym::Tab | Keysym::ISO_Left_Tab => Key::Tab,
-        Keysym::Return | Keysym::KP_Enter => Key::Return,
-        Keysym::Escape => Key::Escape,
-        Keysym::Delete | Keysym::KP_Delete => Key::Delete,
-        Keysym::Left | Keysym::KP_Left => Key::LeftArrow,
-        Keysym::Right | Keysym::KP_Right => Key::RightArrow,
-        Keysym::Up | Keysym::KP_Up => Key::UpArrow,
-        Keysym::Down | Keysym::KP_Down => Key::DownArrow,
-        Keysym::Home | Keysym::KP_Home => Key::Home,
-        Keysym::End | Keysym::KP_End => Key::End,
-        Keysym::Page_Up => Key::PageUp,
-        Keysym::Page_Down => Key::PageDown,
-        Keysym::Shift_L | Keysym::Shift_R => Key::Shift,
-        Keysym::Control_L | Keysym::Control_R => Key::Control,
-        Keysym::Alt_L | Keysym::Alt_R => Key::Alt,
-        Keysym::Super_L | Keysym::Super_R => Key::Meta,
-        _ => {
-            // (with Ctrl held the key's text is a control character, Ctrl+C's
-            // "\u{3}": the key's own letter in its place, which Slint's text
-            // boxes take with Ctrl as copy, cut, paste and select all)
-            let own = e.utf8.clone().filter(|t| !t.is_empty() && !t.chars().any(char::is_control));
-            let t = own.or_else(|| e.keysym.key_char().map(|c| c.to_string()))?;
-            return (!t.is_empty() && !t.chars().any(char::is_control)).then(|| t.into());
-        }
-    };
-    Some(k.into())
-}
 
-#[cfg(test)]
-mod key_tests {
-    use super::*;
-
-    /// A letter with Ctrl held reaches the text boxes as the letter, so
-    /// Ctrl+C copies; typed alone, as typed; a control character never.
-    #[test]
-    fn ctrl_c_reaches_the_text_boxes_as_c() {
-        let key = |keysym, utf8: Option<&str>| key_text(&KeyEvent { time: 0, raw_code: 46, keysym, utf8: utf8.map(str::to_string) });
-        assert_eq!(key(Keysym::c, Some("\u{3}")).as_deref(), Some("c"), "Ctrl+C");
-        assert_eq!(key(Keysym::x, Some("\u{18}")).as_deref(), Some("x"), "Ctrl+X");
-        assert_eq!(key(Keysym::c, Some("c")).as_deref(), Some("c"), "c");
-        assert_eq!(key(Keysym::C, Some("C")).as_deref(), Some("C"), "Shift+C");
-        assert_eq!(key(Keysym::c, None).as_deref(), Some("c"), "c let go");
-    }
-}
 
 /// The typefaces the person's setups and the core's light name, all keys'
 /// and keys' own.
@@ -636,12 +517,12 @@ fn main() {
     }
     // the window's shell: Wayland's on Linux, winit's where asked for
     // (ECTOMATTER_SHELL=winit) and on every other system
-    if std::env::var("ECTOMATTER_SHELL").is_ok_and(|s| s == "winit") || !cfg!(target_os = "linux") {
-        drop(made);
-        shell::winit::run(window, ui, settings, reference, gain);
-    } else {
-        shell::wayland::run(window, made, ui, settings, reference, gain);
+    #[cfg(target_os = "linux")]
+    if !std::env::var("ECTOMATTER_SHELL").is_ok_and(|s| s == "winit") {
+        return shell::wayland::run(window, made, ui, settings, reference, gain);
     }
+    drop(made);
+    shell::winit::run(window, ui, settings, reference, gain);
 }
 
 /// The apps a snapshot's setting names come to the front, in order, as KWin

@@ -59,7 +59,7 @@ pub(crate) struct Session {
     /// what Ectomatter's threads tell the window, taken as the shell is woken
     pub(crate) inbox: Inbox,
     /// KWin's script, which tells Ectomatter the app in front, and when it was last looked at
-    pub(crate) front_bus: Option<zbus::blocking::Connection>,
+    pub(crate) front_bus: Option<front_app::Bus>,
     pub(crate) kwin_looked: Instant,
     /// quitting asked for, when: Ectomatter goes once what changed is saved
     pub(crate) quitting: Option<Instant>,

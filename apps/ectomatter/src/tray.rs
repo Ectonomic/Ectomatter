@@ -4,6 +4,7 @@
 //! and Quit. A click on the icon opens the window; closing the window leaves
 //! Ectomatter in the tray.
 
+#[cfg(target_os = "linux")]
 use ksni::blocking::TrayMethods;
 use crate::shell::Sender;
 
@@ -16,6 +17,7 @@ pub enum TrayAsk {
     Quit,
 }
 
+#[cfg(target_os = "linux")]
 struct Tray {
     tell: Sender<TrayAsk>,
     /// the devices, as they sit on Home's desk: each one's place, its name,
@@ -28,6 +30,7 @@ struct Tray {
     icon: Vec<ksni::Icon>,
 }
 
+#[cfg(target_os = "linux")]
 impl ksni::Tray for Tray {
     fn id(&self) -> String {
         "com.ectonomic.ectomatter".into()
@@ -95,6 +98,7 @@ impl ksni::Tray for Tray {
     }
 }
 
+#[cfg(target_os = "linux")]
 /// The app's icon as the tray takes it: ARGB, straight alpha, big-endian.
 /// Each size a panel asks for is drawn at that size (tools/mark/build_icons.py),
 /// since the ring's line gets heavier as the mark gets smaller; shrinking one big
@@ -124,8 +128,10 @@ fn icon() -> Vec<ksni::Icon> {
         .collect()
 }
 
+#[cfg(target_os = "linux")]
 pub struct Handle(ksni::blocking::Handle<Tray>);
 
+#[cfg(target_os = "linux")]
 impl Handle {
     /// The devices, as they sit on Home's desk, each with whether it is there, for their entries.
     pub fn devices(&self, devices: Vec<(String, String, bool)>) {
@@ -141,6 +147,7 @@ impl Handle {
     }
 }
 
+#[cfg(target_os = "linux")]
 pub fn start(tell: Sender<TrayAsk>) -> Option<Handle> {
     match (Tray { tell, devices: Vec::new(), scenes: Vec::new(), scene: None, icon: icon() }).spawn() {
         Ok(h) => Some(Handle(h)),
@@ -151,6 +158,7 @@ pub fn start(tell: Sender<TrayAsk>) -> Option<Handle> {
     }
 }
 
+#[cfg(target_os = "linux")]
 /// A notice from Ectomatter on the desktop, as other programs give one (the
 /// desktop's notification service), sent on a thread of its own so nothing
 /// waits for it. For what the person needs to know while the window may be
@@ -171,4 +179,25 @@ pub fn notify(title: &str, body: &str) {
             Err(e) => eprintln!("ectomatter: couldn’t tell the desktop {title}: {e}"),
         }
     });
+}
+
+// Elsewhere: no tray yet (closing the window quits), and no notice on the
+// desktop (docs/deferred.md, stage 5).
+#[cfg(not(target_os = "linux"))]
+pub struct Handle;
+
+#[cfg(not(target_os = "linux"))]
+impl Handle {
+    pub fn devices(&self, _: Vec<(String, String, bool)>) {}
+    pub fn scenes(&self, _: Vec<(String, String)>, _: Option<String>) {}
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn start(_: Sender<TrayAsk>) -> Option<Handle> {
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn notify(title: &str, body: &str) {
+    eprintln!("ectomatter: {title}: {body}");
 }

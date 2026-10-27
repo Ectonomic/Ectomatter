@@ -13,7 +13,7 @@ use i_slint_core::window::WindowAdapterInternal;
 use slint::platform::software_renderer::{RepaintBufferType, SoftwareRenderer};
 use slint::platform::{Renderer, WindowAdapter, WindowEvent};
 use slint::{PhysicalSize, Window, WindowSize};
-use smithay_client_toolkit::seat::pointer::CursorIcon;
+use cursor_icon::CursorIcon;
 
 pub struct SoftWindow {
     window: Window,

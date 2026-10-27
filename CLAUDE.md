@@ -43,6 +43,11 @@ This is where they live in this repository.
   frame into HDR10, scRGB or SDR for a wgpu surface; its tests draw offscreen
   on Mesa's lavapipe (Vulkan on the CPU, `VK_ICD_FILENAMES`), so they touch
   no GPU: `cargo test --release -p ectomatter-present`.
+- **Other systems.** `tools/check-systems.sh` type-checks the app for
+  Windows and macOS from Linux (the C code some crates build goes to a
+  stand-in compiler, `tools/cross/`); it failed on a planted Linux-only use.
+  Linux-only code is marked `#[cfg(target_os = "linux")]` with a stand-in
+  beside it elsewhere. Nothing is linked or run there.
 - **Log.** `~/.local/state/com.ectonomic.ectomatter/ectomatter.log`
   (`$XDG_STATE_HOME`), the run before's as `ectomatter.log.1`: the app's
   stderr is the file itself, so the terminal shows only where the log is.

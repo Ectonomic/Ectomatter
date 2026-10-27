@@ -217,14 +217,20 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   compositor as the Wayland shell tells them (wgpu issue #10545).
 - The winit shell was run on Linux under lavapipe (Vulkan on the CPU, no
   GPU), with no cores, and drew Home; nobody has pressed or typed in it, and
-  it hasn't run on Windows or macOS. The app doesn't build there yet: its
-  Linux-only libraries (Wayland's, D-Bus's, the tray's) aren't kept to
-  Linux in `apps/ectomatter/Cargo.toml`, and no cross-check runs here (no
-  cross C compiler for hidapi and ring).
+  it hasn't run on Windows or macOS. It type-checks for both
+  (`tools/check-systems.sh`), but has never been linked for either: the C
+  code of hidapi and ring goes to a stand-in compiler there.
 
-- The tray, file picker, macro typing and recording, the app in front and
-  sound are Linux only and always built (`tray.rs`, `picker.rs`,
-  `typist.rs`, `recording.rs`, `front_app.rs`, `kde_output.rs`, `sound.rs`).
+- On Windows and macOS these do nothing yet, a stand-in in each file's place
+  (`#[cfg(not(target_os = "linux"))]`): the tray (closing quits) and the
+  desktop's notices (`tray.rs`), the file picker (none chosen, `picker.rs`),
+  typing a macro's keys (`typist.rs`), the app in front (`front_app.rs`),
+  NVIDIA's readings (`nvml.rs`), the launcher's wait for a game's changes
+  (`launcher.rs`, `listen_at`), a stop asked for by the system (`main.rs`,
+  `on_term`, Unix's signals), and the time of day as local (`lcd_page.rs`,
+  Windows' `localtime_s`, untried). Recording keys and capturing sound read
+  Linux's devices and programs (`recording.rs`, `sound.rs`) and have no
+  stand-in yet; they build because they find nothing.
   The Wayland shell refuses to open without the compositor's color
   management (`shell/wayland.rs`, `run`); the winit shell doesn't need it.
 

@@ -1,0 +1,10 @@
+#!/bin/sh
+# A stand-in C compiler for `cargo check` across systems: it makes the object
+# file a build script asks for, empty, and nothing else (nothing is linked).
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in -o) out="$2"; shift;; -o*) out="${1#-o}";; esac
+  shift
+done
+[ -n "$out" ] && : > "$out"
+exit 0

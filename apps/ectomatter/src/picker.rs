@@ -3,12 +3,15 @@
 //! way they do in every other program on their desktop. Asked away from the
 //! window's thread; the answer comes back on a channel.
 
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
+#[cfg(target_os = "linux")]
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
+#[cfg(target_os = "linux")]
 /// Ask the desktop for one file, titled `title`, of the types named `kind`
 /// with these patterns; the channel gets its path, or none where the person
 /// closed the picker or the desktop has no portal.
@@ -28,9 +31,18 @@ pub fn open_file(title: &str, kind: &str, patterns: &[&str]) -> mpsc::Receiver<O
 
 /// A folder shown in the desktop's file manager.
 pub fn show_folder(folder: &std::path::Path) {
-    let _ = std::process::Command::new("xdg-open").arg(folder).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+    // (each system's own way to open a folder in its file manager)
+    let opener = if cfg!(target_os = "windows") {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let _ = std::process::Command::new(opener).arg(folder).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
 }
 
+#[cfg(target_os = "linux")]
 fn ask(title: &str, kind: &str, patterns: &[String]) -> zbus::Result<Option<PathBuf>> {
     let conn = zbus::blocking::Connection::session()?;
     // the request's path is known before asking, so its answer cannot be missed
@@ -57,6 +69,7 @@ fn ask(title: &str, kind: &str, patterns: &[String]) -> zbus::Result<Option<Path
     Ok(uris.first().and_then(|u| file_path(u)))
 }
 
+#[cfg(target_os = "linux")]
 /// A file's path from its file:// address, its %-escapes undone.
 fn file_path(uri: &str) -> Option<PathBuf> {
     let rest = uri.strip_prefix("file://")?;
@@ -78,7 +91,7 @@ fn file_path(uri: &str) -> Option<PathBuf> {
     Some(PathBuf::from(std::ffi::OsString::from_vec(out)))
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     #[test]
     fn a_file_s_address_gives_its_path() {
@@ -86,4 +99,13 @@ mod tests {
         assert_eq!(super::file_path("file:///tmp/a%25b.svg"), Some("/tmp/a%b.svg".into()));
         assert_eq!(super::file_path("https://example.com/a.svg"), None);
     }
+}
+
+// Elsewhere: no file picker yet (docs/deferred.md, stage 5): the person is
+// told none was chosen.
+#[cfg(not(target_os = "linux"))]
+pub fn open_file(_: &str, _: &str, _: &[&str]) -> mpsc::Receiver<Option<PathBuf>> {
+    let (tx, rx) = mpsc::channel();
+    let _ = tx.send(None);
+    rx
 }

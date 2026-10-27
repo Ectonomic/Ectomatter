@@ -66,6 +66,7 @@ impl Front {
     }
 }
 
+#[cfg(target_os = "linux")]
 struct Listener {
     tell: Sender<Front>,
 }
@@ -80,6 +81,7 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
+#[cfg(target_os = "linux")]
 #[zbus::interface(name = "com.ectonomic.Ectomatter.FrontApp")]
 impl Listener {
     /// A window come to the front: its class, its title, its desktop file's
@@ -163,6 +165,7 @@ tell(workspace.activeWindow);
     )
 }
 
+#[cfg(target_os = "linux")]
 /// Start hearing which app is in front: Ectomatter on the session bus, told
 /// through `tell`, and its script loaded into KWin. The connection, kept for
 /// as long as Ectomatter runs; none where the bus or KWin isn't there.
@@ -180,10 +183,12 @@ pub fn start(tell: Sender<Front>) -> Option<zbus::blocking::Connection> {
     Some(conn)
 }
 
+#[cfg(target_os = "linux")]
 fn kwin(conn: &zbus::blocking::Connection) -> zbus::Result<zbus::blocking::Proxy<'static>> {
     zbus::blocking::Proxy::new(conn, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting")
 }
 
+#[cfg(target_os = "linux")]
 /// The script written to Ectomatter's data folder and loaded into KWin under
 /// this Ectomatter's own name: in place of one an Ectomatter before left there
 /// (by the name alone, or one whose Ectomatter has gone); one whose Ectomatter is
@@ -224,6 +229,7 @@ fn load(conn: &zbus::blocking::Connection) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 /// This Ectomatter's script heard from once it's loaded, or loaded again (a few
 /// times at most, said in the log).
 /// (KWin's own word on whether a script is loaded can't be taken: on Plasma 6.7 a
@@ -245,6 +251,7 @@ pub fn keep(conn: &zbus::blocking::Connection) {
     }
 }
 
+#[cfg(target_os = "linux")]
 /// This Ectomatter's script taken out of KWin, as Ectomatter quits.
 pub fn stop(conn: &zbus::blocking::Connection) {
     let name = script_name();
@@ -399,3 +406,23 @@ mod tests {
         assert!(script().contains("workspace.windowAdded.connect(opened)"), "and tells of each window as it opens");
     }
 }
+
+/// The bus KWin tells Ectomatter on: its session D-Bus.
+#[cfg(target_os = "linux")]
+pub type Bus = zbus::blocking::Connection;
+
+// Elsewhere: no app in front told yet (docs/deferred.md, stage 5), so no
+// profile follows one.
+#[cfg(not(target_os = "linux"))]
+pub struct Bus;
+
+#[cfg(not(target_os = "linux"))]
+pub fn start(_: Sender<Front>) -> Option<Bus> {
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn keep(_: &Bus) {}
+
+#[cfg(not(target_os = "linux"))]
+pub fn stop(_: &Bus) {}

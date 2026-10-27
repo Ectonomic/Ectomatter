@@ -357,6 +357,7 @@ pub fn install(root: &Path) -> Result<bool, String> {
         if std::fs::read(&p).ok().as_deref() != Some(content) {
             let tmp = dir.join(format!(".{name}.{}.new", std::process::id()));
             std::fs::write(&tmp, content).map_err(|e| e.to_string())?;
+            #[cfg(unix)]
             if name == "ectomatter-launch" {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
@@ -715,7 +716,12 @@ pub fn listen(tell: crate::shell::Sender<Start>) {
     listen_at(&socket(), tell);
 }
 
-/// The same, on the socket at `path` (a test's own).
+/// The same, on the socket at `path` (a test's own). (Elsewhere than Unix
+/// nothing listens yet: Steam's own launcher for Ectomatter runs on Linux.)
+#[cfg(not(unix))]
+fn listen_at(_: &Path, _: crate::shell::Sender<Start>) {}
+
+#[cfg(unix)]
 fn listen_at(path: &Path, tell: crate::shell::Sender<Start>) {
     let path = path.to_path_buf();
     if let Some(d) = path.parent() {
