@@ -560,6 +560,8 @@ impl Front {
                 return Some(c);
             }
         }
-        self.mouse.lit(&crate::mouse::shape().lights[i]).map(|_| self.mouse.color_at(i, now))
+        // (a mouse with fewer lights, or none, as with no mouse's core: none to color)
+        let light = crate::mouse::shape().lights.get(i)?;
+        self.mouse.lit(light).map(|_| self.mouse.color_at(i, now))
     }
 }

@@ -20,6 +20,9 @@
 
 use std::future::Future;
 
+/// The wgpu this presents with, for the shell that makes its surface.
+pub use wgpu;
+
 /// What the surface shows: its color space, as the presenter writes for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {

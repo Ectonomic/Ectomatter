@@ -43,8 +43,56 @@ pub fn quiet_channel<T>() -> (Sender<T>, mpsc::Receiver<T>) {
     channel(&(Arc::new(|| {}) as Wake))
 }
 
+/// A key pressed or let go, as every shell tells it: the text Slint takes
+/// for it (a named key's own character, slint::platform::Key, or what it
+/// types; with Ctrl held, the key's own letter), its code as Linux's input
+/// layer numbers it where the system gives one (evdev; 0 elsewhere), and the
+/// modifiers held.
+pub struct Press {
+    pub text: Option<slint::SharedString>,
+    pub code: u32,
+    pub down: bool,
+    pub ctrl: bool,
+    pub shift: bool,
+}
+
+impl Press {
+    /// Whether it's the key that types `c` (either case) or Slint's named key
+    /// `c` (`Key::Escape.into()` and the like).
+    pub fn is(&self, c: char) -> bool {
+        self.text.as_ref().is_some_and(|t| {
+            let mut chars = t.chars();
+            chars.next().is_some_and(|k| k == c || k.to_lowercase().eq(c.to_lowercase())) && chars.next().is_none()
+        })
+    }
+
+    pub fn is_key(&self, k: slint::platform::Key) -> bool {
+        self.is(char::from(k))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slint::platform::Key;
+
+    fn press(t: &str) -> Press {
+        Press { text: Some(t.into()), code: 0, down: true, ctrl: false, shift: false }
+    }
+
+    #[test]
+    fn a_press_is_its_key_in_either_case_or_by_its_name() {
+        assert!(press("k").is('k') && press("K").is('k') && press("Z").is('z'));
+        assert!(!press("kk").is('k') && !press("j").is('k'));
+        let esc: slint::SharedString = Key::Escape.into();
+        assert!(press(&esc).is_key(Key::Escape) && !press(&esc).is_key(Key::Delete));
+        assert!(!Press { text: None, code: 0, down: true, ctrl: false, shift: false }.is('k'));
+    }
+}
+
 /// A box of a picture, in its pixels: x, y, width and height.
 pub type Rect = (usize, usize, usize, usize);
 
 pub mod session;
 pub mod wayland;
+pub mod winit;

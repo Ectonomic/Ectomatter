@@ -821,6 +821,48 @@ impl Session {
         shell
     }
 
+    /// A key pressed or let go in the main window: Ctrl+Z and Ctrl+Shift+Z
+    /// (or Ctrl+Y) undo a change to a profile or do it again, a key the
+    /// page is recording or naming taken by it, Escape letting the page's
+    /// chosen key or button go, Delete or Backspace taking the pad chosen on
+    /// Home's desk off it, Ctrl and plus, minus or 0 zooming Home's desk in
+    /// edit mode; a box being typed in takes them itself, and anything else
+    /// goes to the page.
+    pub(crate) fn key(&mut self, p: shell::Press) {
+        let down = p.down;
+        if down && p.ctrl && (p.is('z') || p.is('y')) && !self.front.typing() {
+            self.front.asks.borrow_mut().push(front::Ask::Undo(p.shift || p.is('y')));
+            return;
+        }
+        if self.front.typed(p.code, down) {
+            self.front.refresh();
+            return;
+        }
+        if down && p.is_key(Key::Escape) && !self.front.typing() && self.front.escape() {
+            return;
+        }
+        if down && (p.is_key(Key::Delete) || p.is_key(Key::Backspace)) && !self.front.typing() && self.front.desk_delete_key() {
+            return;
+        }
+        if down && p.ctrl && !self.front.typing() {
+            let how = if p.is('=') || p.is('+') {
+                Some(1)
+            } else if p.is('-') {
+                Some(-1)
+            } else if p.is('0') {
+                Some(2)
+            } else {
+                None
+            };
+            if how.is_some_and(|how| self.front.desk_zoom_key(how)) {
+                return;
+            }
+        }
+        if let Some(text) = p.text {
+            self.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
+        }
+    }
+
     /// Quit as the tray's Quit does: each device its own again, and
     /// Ectomatter gone once what changed is saved (`step`).
     pub(crate) fn quit(&mut self) {

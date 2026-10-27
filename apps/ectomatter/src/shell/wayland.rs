@@ -874,71 +874,40 @@ impl App {
 
     /// A key on the keyboard, pressed or let go.
     fn key(&mut self, e: &KeyEvent, down: bool) {
+        let p = shell::Press { text: key_text(e), code: e.raw_code, down, ctrl: self.mods.ctrl, shift: self.mods.shift };
         // Ctrl+Shift+K, anywhere in Ectomatter: the lab, a developer's panel
-        if down && self.mods.ctrl && self.mods.shift && matches!(e.keysym, Keysym::k | Keysym::K) {
+        if down && p.ctrl && p.shift && p.is('k') {
             self.open_lab();
             return;
         }
-        if self.keys_on == Some(LAB) && down && self.mods.ctrl && matches!(e.keysym, Keysym::z | Keysym::Z | Keysym::y | Keysym::Y) {
+        if self.keys_on == Some(LAB) && down && p.ctrl && (p.is('z') || p.is('y')) {
             if let Some(lab) = self.s.front.lab.as_mut().filter(|l| !l.typing()) {
-                lab.undo(self.mods.shift || matches!(e.keysym, Keysym::y | Keysym::Y));
+                lab.undo(p.shift || p.is('y'));
                 return;
             }
         }
         // Escape in the lab shuts what is open over its page, then lets its
         // chosen key or light go, unless a box is being typed in
-        if self.keys_on == Some(LAB) && down && e.keysym == Keysym::Escape {
+        if self.keys_on == Some(LAB) && down && p.is_key(Key::Escape) {
             if let Some(lab) = self.s.front.lab.as_mut().filter(|l| !l.typing()) {
                 if lab.escape() {
                     return;
                 }
             }
         }
-        // Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y) in the main window: undo a change to a profile,
-        // or do it again; a box being typed in takes them itself
-        if self.keys_on.is_none() && down && self.mods.ctrl && matches!(e.keysym, Keysym::z | Keysym::Z | Keysym::y | Keysym::Y) && !self.s.front.typing() {
-            self.s.front.asks.borrow_mut().push(front::Ask::Undo(self.mods.shift || matches!(e.keysym, Keysym::y | Keysym::Y)));
-            return;
-        }
-        if self.keys_on == Some(LAYOUTS) && down && matches!(e.keysym, Keysym::Delete) && !self.s.front.typing_in_layouts() {
+        if self.keys_on == Some(LAYOUTS) && down && p.is_key(Key::Delete) && !self.s.front.typing_in_layouts() {
             if let Some(l) = &self.s.front.layouts {
                 l.delete_key();
             }
             return;
         }
         if let Some(which) = self.keys_on {
-            if let (Some(sw), Some(text)) = (&self.subs[which], key_text(e)) {
+            if let (Some(sw), Some(text)) = (&self.subs[which], p.text) {
                 sw.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
             }
             return;
         }
-        if self.s.front.typed(e.raw_code, down) {
-            self.s.front.refresh();
-            return;
-        }
-        // Escape lets the page's chosen key or button go, unless a box is being typed in
-        if down && e.keysym == Keysym::Escape && !self.s.front.typing() && self.s.front.escape() {
-            return;
-        }
-        // Delete or Backspace takes the pad chosen on Home's desk off it
-        if down && matches!(e.keysym, Keysym::Delete | Keysym::BackSpace) && !self.s.front.typing() && self.s.front.desk_delete_key() {
-            return;
-        }
-        // Ctrl and plus, minus or 0 zoom Home's desk in edit mode
-        if down && self.mods.ctrl && !self.s.front.typing() {
-            let how = match e.keysym {
-                Keysym::equal | Keysym::plus | Keysym::KP_Add => Some(1),
-                Keysym::minus | Keysym::KP_Subtract => Some(-1),
-                Keysym::_0 | Keysym::KP_0 => Some(2),
-                _ => None,
-            };
-            if how.is_some_and(|how| self.s.front.desk_zoom_key(how)) {
-                return;
-            }
-        }
-        if let Some(text) = key_text(e) {
-            self.s.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
-        }
+        self.s.key(p);
     }
 }
 

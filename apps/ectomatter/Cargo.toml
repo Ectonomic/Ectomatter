@@ -10,6 +10,9 @@ bytemuck = "1"
 ectomatter-draw = { path = "../../crates/ectomatter-draw" }
 # the core protocol's shared names and actions
 ectomatter-protocol = { path = "../../crates/ectomatter-protocol" }
+# the winit shell: its window and input, and its frames shown through wgpu (src/shell/winit.rs)
+ectomatter-present = { path = "../../crates/ectomatter-present" }
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "wayland-dlopen", "x11"] }
 # (what a sensor is and how a reading is written: the Sensor Feed plugin finds and reads them)
 ectomatter-sensors = { path = "../../crates/ectomatter-sensors" }
 # the USB devices cores reach, each through Ectomatter (core_host.rs)

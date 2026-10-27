@@ -44,6 +44,11 @@ impl SoftWindow {
         }
     }
 
+    /// Whether Slint has something to draw since the last time.
+    pub fn pending(&self) -> bool {
+        self.needs_redraw.get()
+    }
+
     /// Resize, as the window's own set_size does (the adapter's takes only a WindowSize).
     pub fn set_size(&self, size: impl Into<WindowSize>) {
         self.window.set_size(size);

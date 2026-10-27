@@ -100,6 +100,22 @@ fn ectomatter_starts_without_the_keyboards_core() {
     }
 }
 
+/// Ectomatter starts with no cores at all, nothing but its plugins, and
+/// shows its pages.
+#[test]
+fn ectomatter_starts_with_no_cores() {
+    let s = Scratch::new("no-cores");
+    let cores: Vec<String> = std::fs::read_dir(repo().join("cores")).unwrap().flatten().filter(|e| e.path().join("core.json").exists()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert!(!cores.is_empty(), "the source has cores to leave out");
+    packages(&s.0.join("share"), &cores.iter().map(String::as_str).collect::<Vec<_>>());
+    for place in ["home", "settings", "library", "keyboard", "mouse"] {
+        let (drawn, said) = snapshot(Path::new(env!("CARGO_BIN_EXE_ectomatter")), &s.0, Some(&s.0.join("share")), place);
+        assert!(drawn, "{place} wasn't drawn:\n{said}");
+        assert!(!said.contains("panicked"), "{place}:\n{said}");
+        assert!(!said.contains(" core ("), "{place}: a core was found:\n{said}");
+    }
+}
+
 /// Installed as an install lays it out, `bin/ectomatter` beside
 /// `share/ectomatter`, away from its source, it finds its own packages there.
 #[test]

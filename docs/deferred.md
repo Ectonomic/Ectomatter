@@ -202,10 +202,31 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Stage 5: Windows and macOS
 
-- The window, tray, file picker, macro typing and recording, the app in front
-  and sound are Linux only and always built (`main.rs`, `tray.rs`,
-  `picker.rs`, `typist.rs`, `recording.rs`, `kde_output.rs`, `sound.rs`); the window refuses to open
-  without KWin's color management (`main.rs:1876,1885`).
+- The winit shell (`src/shell/winit.rs`, `ECTOMATTER_SHELL=winit` on Linux,
+  the shell on every other system) shows the main window only. Not in it
+  yet: the windows of their own (the Macro Editor, the lab, the screen
+  layout editor: it says so in the log), the clipboard, drags, closing into
+  the tray (closing quits), the window's rounded corners and shadow.
+- The winit shell takes the desktop's white from the Wayland screens
+  (`main.rs`, `levels`) and gives the screen's peak and the brightest
+  screen's as 1000 nits (`winit.rs`, `draw`); on Windows and macOS they're
+  to come from wgpu's `Surface::display_hdr_info`.
+- On Linux the winit shell's HDR goes through the Vulkan driver's own
+  description of the surface (Mesa's WSI attaches color management itself),
+  not Ectomatter's: the desktop's white and the peak aren't told to the
+  compositor as the Wayland shell tells them (wgpu issue #10545).
+- The winit shell was run on Linux under lavapipe (Vulkan on the CPU, no
+  GPU), with no cores, and drew Home; nobody has pressed or typed in it, and
+  it hasn't run on Windows or macOS. The app doesn't build there yet: its
+  Linux-only libraries (Wayland's, D-Bus's, the tray's) aren't kept to
+  Linux in `apps/ectomatter/Cargo.toml`, and no cross-check runs here (no
+  cross C compiler for hidapi and ring).
+
+- The tray, file picker, macro typing and recording, the app in front and
+  sound are Linux only and always built (`tray.rs`, `picker.rs`,
+  `typist.rs`, `recording.rs`, `front_app.rs`, `kde_output.rs`, `sound.rs`).
+  The Wayland shell refuses to open without the compositor's color
+  management (`shell/wayland.rs`, `run`); the winit shell doesn't need it.
 
 ## Stage 1: installable on Linux
 
@@ -217,5 +238,5 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - License gaps: Slint's attribution, the fonts' licenses.
 - The GitHub repositories exist in the Ectonomic organization
   (Ectonomic/Ectomatter and one per package, `ectomatter-<package id>`,
-  private, empty since 2026-10-26); nothing is in them, and no package's
+  public and empty since 2026-10-26); nothing is in them, and no package's
   manifest names its repository yet.

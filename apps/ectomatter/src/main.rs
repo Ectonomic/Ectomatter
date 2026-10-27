@@ -634,7 +634,14 @@ fn main() {
     if let Some(p) = args.iter().position(|a| a == "--place").and_then(|i| args.get(i + 1)) {
         ui.set_place(p.as_str().into());
     }
-    shell::wayland::run(window, made, ui, settings, reference, gain);
+    // the window's shell: Wayland's on Linux, winit's where asked for
+    // (ECTOMATTER_SHELL=winit) and on every other system
+    if std::env::var("ECTOMATTER_SHELL").is_ok_and(|s| s == "winit") || !cfg!(target_os = "linux") {
+        drop(made);
+        shell::winit::run(window, ui, settings, reference, gain);
+    } else {
+        shell::wayland::run(window, made, ui, settings, reference, gain);
+    }
 }
 
 /// The apps a snapshot's setting names come to the front, in order, as KWin

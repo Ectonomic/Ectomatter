@@ -819,7 +819,7 @@ impl Page {
     pub fn color_at(&self, i: usize, now: Instant) -> [u8; 3] {
         match &self.plays[i] {
             Some((p, from)) => p.at(now.saturating_duration_since(*from)),
-            None => self.lit(&shape().lights[i]).unwrap_or([0; 3]),
+            None => shape().lights.get(i).and_then(|l| self.lit(l)).unwrap_or([0; 3]),
         }
     }
 
