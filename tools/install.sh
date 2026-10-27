@@ -11,7 +11,9 @@
 #   PREFIX/lib/udev/rules.d/70-ectomatter.rules: the person at the computer
 #     may open each device a core reaches (made by `ectomatter --udev-rules`
 #     from the cores' manifests)
-#   PREFIX/share/licenses/ectomatter: Ectomatter's license and the typefaces'
+#   PREFIX/share/licenses/ectomatter: Ectomatter's license, each license in
+#     LICENSES/ that the app as a whole is distributed under (the GPLv3, as
+#     it takes Slint under it), and the typefaces'
 #
 #   tools/install.sh [--prefix DIR] [--destdir DIR] [--no-build] [--bin DIR]
 # Builds the release program, the launcher, the cores and the plugins first,
@@ -62,6 +64,9 @@ mkdir -p "$root/lib/udev/rules.d"
 ECTOMATTER_PACKAGES="$root/share/ectomatter" "$root/bin/ectomatter" --udev-rules 2>/dev/null > "$root/lib/udev/rules.d/70-ectomatter.rules"
 licenses="$root/share/licenses/ectomatter"
 install -Dm644 LICENSE "$licenses/LICENSE"
+for f in LICENSES/*.txt; do
+  install -Dm644 "$f" "$licenses/$(basename "$f")"
+done
 for f in apps/ectomatter/ui/fonts/*-OFL.txt crates/ectomatter-draw/typefaces/OFL.txt crates/ectomatter-draw/typefaces/OpenGorton-LICENSE.txt; do
   install -Dm644 "$f" "$licenses/typefaces/$(basename "$f")"
 done

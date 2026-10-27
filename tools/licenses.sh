@@ -7,7 +7,9 @@
 # result. A crate docs/deferred.md names as a known failure (its line
 # "`tools/licenses.sh` known failures:", each crate in backticks, `name-*` for
 # a family) is one whose decision waits: it's reported, and the check exits
-# 3; any other crate not approved exits 1.
+# 3; any other crate not approved exits 1, as does a license deny.toml
+# approves for some crates alone (its exceptions) whose text isn't in
+# LICENSES/<its id>.txt, which the install ships with the app.
 #   tools/licenses.sh          check
 #   tools/licenses.sh --list   each license and the crates under it
 set -uo pipefail
@@ -28,6 +30,12 @@ known=$(tr '\n' ' ' < docs/deferred.md | sed 's/  */ /g' | grep -oE 'tools/licen
 is_known() { local k; for k in $known; do [[ $1 == $k ]] && return 0; done; return 1; }
 tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
 bad=0
+for id in $(awk '/^\[\[licenses\.exceptions\]\]/{x=1; next} /^\[/{x=0} x && /^allow *=/' deny.toml | grep -oE '"[^"]+"' | tr -d '"' | sort -u); do
+  if [ ! -f "LICENSES/$id.txt" ]; then
+    echo "licenses: deny.toml approves $id for some crates, and its text isn't in LICENSES/$id.txt"
+    bad=1
+  fi
+done
 for m in "${projects[@]}"; do
   name=$(dirname "$m"); [ "$name" = . ] && name=ectomatter || name=${name%/module}
   if [ "${1:-}" = --list ]; then

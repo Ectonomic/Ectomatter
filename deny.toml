@@ -1,10 +1,12 @@
 # The licenses Ectomatter's dependencies may come under (tools/licenses.sh
-# holds the app and every package that comes with it to this list). Each is
-# permissive: it lets Ectomatter, under MIT, ship the dependency inside it
-# with the dependency's notice, and asks nothing of the rest. A dependency
-# under anything else isn't approved until it's added here, which is
-# Grant's call; one that offers a choice (`MIT OR Apache-2.0`) is approved
-# when one of its choices is.
+# holds the app and every package that comes with it to this list). Each in
+# `allow` is permissive: it lets Ectomatter, under MIT, ship the dependency
+# inside it with the dependency's notice, and asks nothing of the rest. A
+# dependency under anything else isn't approved until it's added here,
+# which is Grant's call; one that offers a choice (`MIT OR Apache-2.0`) is
+# approved when one of its choices is. A license approved for some crates
+# alone is an exception at the end, and its text is in LICENSES/ (named by
+# its id), which the install ships with the app.
 [graph]
 # (what ships: not the tests' own dependencies; every feature and every
 # system, so a dependency only Windows or macOS takes is held too)
@@ -28,3 +30,36 @@ allow = [
   "Unlicense",
   "CDLA-Permissive-2.0",
 ]
+
+# Slint, which draws every page and window, under the GNU GPL version 3
+# (Grant, 2026-10-27: Ectomatter will be open source). Ectomatter's own
+# files stay MIT, and the app as a whole is distributed under the GPLv3
+# (LICENSES/GPL-3.0-only.txt). Each of Slint's crates the app takes, by
+# name: a crate a later Slint brings in fails the check until it's added.
+[[licenses.exceptions]]
+allow = ["GPL-3.0-only"]
+crate = "slint"
+[[licenses.exceptions]]
+allow = ["GPL-3.0-only"]
+crate = "slint-build"
+[[licenses.exceptions]]
+allow = ["GPL-3.0-only"]
+crate = "slint-macros"
+[[licenses.exceptions]]
+allow = ["GPL-3.0-only"]
+crate = "i-slint-backend-selector"
+[[licenses.exceptions]]
+allow = ["GPL-3.0-only"]
+crate = "i-slint-common"
+[[licenses.exceptions]]
+allow = ["GPL-3.0-only"]
+crate = "i-slint-compiler"
+[[licenses.exceptions]]
+allow = ["GPL-3.0-only"]
+crate = "i-slint-core"
+[[licenses.exceptions]]
+allow = ["GPL-3.0-only"]
+crate = "i-slint-core-macros"
+[[licenses.exceptions]]
+allow = ["GPL-3.0-only"]
+crate = "i-slint-renderer-software"
