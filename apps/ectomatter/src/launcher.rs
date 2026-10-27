@@ -220,7 +220,7 @@ pub fn close_steam() -> Result<(), String> {
 
 /// How the desktop's menu starts Steam: its entry's command (the person's
 /// own entry, else the system's), its field codes (%U and the like) taken
-/// out, as Grant's starts it with `-pipewire`; else plain `steam`.
+/// out, as one that starts it with `-pipewire` has it; else plain `steam`.
 fn steam_command() -> Vec<String> {
     let data = std::env::var("XDG_DATA_HOME").ok().filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share"));
     [data.join("applications/steam.desktop"), PathBuf::from("/usr/share/applications/steam.desktop")]

@@ -120,7 +120,7 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   - game-helper's session note is read, for its launch steps on the screen
     (`lcd_player.rs`, `Core::new` with `z10-lcd/session`; game-helper's
     `lcd-announce.sh` still writes it when game-helper runs a game, and
-    game-helper is still installed on Grant's computer).
+    game-helper is still installed where it was used).
   - The new sliders code (2026-10-26) was tested offscreen and by unit
     tests, not by moving the Z10's sliders: freeing a slider is now one
     call each (`input/free`) where it was one call for both, and a slider's
@@ -194,19 +194,16 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Before any repository goes public
 
-- The tracked files hold Grant's own details, in tests and comments: his
-  town and its coordinates (`hosted.rs`, the weather tests), his monitors'
-  names and EDIDs (`hosted.rs` `Desk`, `monitors.rs`), his drives' serial
-  numbers (`crates/ectomatter-sensors/src/fake.rs`, `list.rs`), his
-  computer's name (`macro_page.rs`, `jobs.rs`, `setups.rs`, `described.rs`,
-  `picker.rs`, `crates/ectomatter-draw/src/hdr.rs`; "studio" six times in
-  `hosted.rs`), his home folder's path (`plugins/game-configurator/module/src/lib.rs`,
-  `hosted.rs` near line 1043, `picker.rs` near line 85), his OpenRGB
-  profiles and games ("ARC Raiders", "Deepdriver II" in `hosted.rs`). The
-  sensors crate's made-up computer is his (`fake.rs`: his processor, board,
-  cards and two drives' serial numbers); the render tests rename all of it.
-  Found with `git grep` and a review on 2026-10-26. The history holds them
-  too.
+- Grant's own details (his town, his computer's name, his home folder's
+  path, his monitors' names, his drives' serial numbers, his OpenRGB
+  profiles' names) were replaced with made-up ones on 2026-10-27, in the
+  files and through the whole history. `tools/private-words.sh` holds every
+  file (and, with `--history`, every commit) to a list kept outside the
+  repository (`~/.config/ectomatter-dev/private-words`); the commit hook and
+  `tools/boundaries.sh` run it. Still his own: the made-up computer in
+  `crates/ectomatter-sensors/src/fake.rs` copies his parts' models (they
+  test real drivers' names, and a part's model names no one), and the
+  copyright and the keyboard's drawing carry his name, as an author's do.
 
 ## Stage 5: Windows and macOS
 

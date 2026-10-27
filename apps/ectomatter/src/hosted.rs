@@ -575,7 +575,7 @@ impl Hosted {
 mod tests {
     use super::*;
 
-    /// Monitors as a fake computer has them: Grant's two.
+    /// Monitors as a fake computer has them: a wide main one and a small side one.
     pub struct Desk;
 
     impl Computer for Desk {
@@ -774,8 +774,8 @@ mod tests {
     }
 
     /// A computer whose web answers as Open-Meteo, the National Weather
-    /// Service and the place search would (a clear 15 °C morning in Springfield
-    /// Lakes, with a tornado warning in force), and nothing else; and the
+    /// Service and the place search would (a clear 15 °C morning in
+    /// Springfield, Florida, with a tornado warning in force), and nothing else; and the
     /// addresses asked, in order.
     struct Web(std::sync::Mutex<Vec<String>>);
 
@@ -814,7 +814,7 @@ mod tests {
         }
     }
 
-    /// A made-up computer's files (ectomatter_sensors::fake's, Grant's like),
+    /// A made-up computer's files (ectomatter_sensors::fake's),
     /// kept under a folder of its own but seen from / as a computer's are;
     /// and its NVIDIA card as the made-up driver reads it.
     struct Files(std::path::PathBuf, std::sync::Mutex<ectomatter_sensors::fake::FakeNvidia>);
@@ -1105,8 +1105,8 @@ mod tests {
     }
 
     /// A stand-in for OpenRGB's SDK server on its port (OpenRGB's network
-    /// protocol, as its NetworkServer.cpp answers at protocols 5 and 6): Grant's
-    /// devices and profiles, "Studio Low" in use; each profile loaded told back.
+    /// protocol, as its NetworkServer.cpp answers at protocols 5 and 6): a
+    /// desk's devices and profiles, "Studio Low" in use; each profile loaded told back.
     /// None where the port is taken (OpenRGB's own server running).
     pub fn fake_openrgb() -> Option<std::sync::mpsc::Receiver<String>> {
         use std::io::{Read, Write};

@@ -2520,7 +2520,7 @@ mod tests {
         eprintln!("{} keys; fine grid {} x {}, their boxes {} cells; coarse grid {} x {}, their boxes {} cells", snap.keys.len(), snap.fine.w, snap.fine.h, fine, snap.coarse.w, snap.coarse.h, coarse);
         time("compose, every key its own color", &mut |i| b.compose_into(&mut out, &rainbow(i), 0, 254.0, 4.0));
         time("compose, all one color", &mut |_| b.compose_into(&mut out, &white(&b), 0, 254.0, 4.0));
-        // pudding caps, with their milky bands (Grant's Studio)
+        // pudding caps, with their milky bands (a cap set like the pudding sets sold for it)
         let (_t2, d2, mut pb) = board();
         let mut light = d2["light"].clone();
         light["caps"] = serde_json::json!({ "kind": "pudding", "milky": 1.0, "opacity": 0.8, "black": 0.4 });
@@ -2730,7 +2730,7 @@ mod tests {
             let pos = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == label).unwrap()["pos"].as_u64().unwrap() as u32;
             b.keys.iter().position(|k| k.pos == pos).unwrap()
         };
-        let (w, far) = (key("W"), key("Keypad6"));
+        let (w, far) = (key("W"), key("Keypad 6"));
         let frames = |b: &mut Board, l: &Value| {
             b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::from(l, &ids), 2000)));
             (b.compose(&[], 0, 254.0, 1000.0 / 254.0), b.compose(&white(b), 0, 254.0, 1000.0 / 254.0))
@@ -3242,7 +3242,7 @@ mod tests {
         let label = |pos: u32| device["controls"].as_array().unwrap().iter().find(|c| c["pos"].as_u64() == Some(pos as u64)).and_then(|c| c["label"].as_str()).unwrap_or("?").to_string();
         let with: Vec<String> = b.keys.iter().filter(|k| k.second.is_some()).map(|k| label(k.pos)).collect();
         eprintln!("{} keys with a second function: {}", with.len(), with.join(", "));
-        for l in ["1", "5", "Keypad7", "Keypad8", "Keypad2", "F1"] {
+        for l in ["1", "5", "Keypad 7", "Keypad 8", "Keypad 2", "F1"] {
             assert!(with.iter().any(|w| w == l), "{l} has a second function");
         }
         for l in ["Caps Lock", "W", "E1", "Fn", "Tab"] {

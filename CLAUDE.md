@@ -56,6 +56,11 @@ This is where they live in this repository.
   stderr is the file itself, so the terminal shows only where the log is.
   Read the file to check a relaunch. Snapshots and `--read-state` don't
   write it.
+- **Private words.** `tools/private-words.sh` (run by `tools/boundaries.sh`
+  and by the commit hook, `.git/hooks/pre-commit`, which a fresh clone has
+  to be given again) holds the files to a list kept outside the repository,
+  `~/.config/ectomatter-dev/private-words`: Grant's own details, which
+  never go in. `--history` checks every commit and message.
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 
@@ -64,7 +69,7 @@ This is where they live in this repository.
 - Push this repository.
 - Commit Grant's tuning from the lab (`cores/evga-z10/device.json`,
   `cores/steelseries-sensei-310/light.json`) without his word. He had his
-  tuning as of 2026-10-26 shipped as the cores' defaults (d8a03d1); later
+  tuning as of 2026-10-26 shipped as the cores' defaults; later
   tuning waits for him again. Stage explicit paths only; never `git stash`,
   `git checkout -- file` or `git reset --hard`.
 - Commit untracked art, `before-*.svg`, `tools/sensei-310-art/`, untracked

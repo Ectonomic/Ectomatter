@@ -9,7 +9,7 @@
 //! A monitor is known by an id made from its EDID (its maker's code, its
 //! product, serial and week of making), never by the port it's on, which
 //! changes between starts; KDE's own name for it holds the port too, where
-//! its EDID has no serial, as both of Grant's monitors don't.
+//! its EDID has no serial, as many monitors' don't.
 //!
 //! What KDE does with each change, from its source (KWin 6.7.5): a change
 //! names only the monitor it changes, and the others are left as they are;

@@ -47,3 +47,6 @@ echo "$held hold, $not don't yet"
 for t in "${runs[@]}"; do
   printf '%s\n' "$lines" | grep -q "::$t \| $t " || echo "  missing    $t (named here, not run)"
 done
+# (none of the words kept outside the repository, a person's own details, in
+# its files: tools/private-words.sh)
+tools/private-words.sh || exit 1

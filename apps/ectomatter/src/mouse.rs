@@ -1363,8 +1363,8 @@ mod tests {
     /// One of Ectomatter's macros that is only a shortcut (some modifiers and a
     /// key pressed together) goes on a button as those keys, for the mouse to
     /// play itself with Ectomatter closed; anything more, or played another way,
-    /// stays Ectomatter's to play (the button's host slot). Grant's own: New
-    /// tab, Previous tab.
+    /// stays Ectomatter's to play (the button's host slot). For one: New tab,
+    /// Previous tab.
     #[test]
     fn the_mouse_holds_a_macro_that_is_a_shortcut() {
         let _one = crate::library::TESTS.lock().unwrap_or_else(|p| p.into_inner());

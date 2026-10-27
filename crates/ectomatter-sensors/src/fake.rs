@@ -28,7 +28,7 @@ impl Nvidia for FakeNvidia {
     }
 }
 
-/// A made-up computer like Grant's: an AMD processor with two chiplets and four cores of
+/// A made-up computer: an AMD processor with two chiplets and four cores of
 /// two threads, an MSI board's NCT6687 (a temperature reading 193°, fans, voltages), two
 /// sticks of DDR5, two drives, an NVIDIA card, an Intel Arc card and the processor's own
 /// Radeon graphics, an Aquantia Ethernet chip and a MediaTek Wi-Fi card.

@@ -456,7 +456,7 @@ mod tests {
         }
     }
 
-    /// A Steam laid out as Grant's: GE-Proton in compatibilitytools.d asking
+    /// A Steam laid out as a real one is: GE-Proton in compatibilitytools.d asking
     /// for the runtime 4183110, installed in a second library; and the
     /// environment Steam gives a compatibility tool for ARC Raiders.
     fn steam(s: &Scratch) -> BTreeMap<String, String> {

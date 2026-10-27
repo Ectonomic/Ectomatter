@@ -1380,7 +1380,7 @@ pub(crate) mod tests {
     }
 
     /// A fake Sensei 310: it keeps every report sent to it, with when, and
-    /// answers the firmware and settings questions as Grant's mouse did
+    /// answers the firmware and settings questions as a real one did
     /// (firmware 24 01, presets 800 and 1600 with the first in use, both
     /// lights #FF1000).
     pub(crate) struct FakeMouse {
@@ -1732,8 +1732,8 @@ pub(crate) mod tests {
 
     /// A key with modifiers held goes on a button as libratbag puts it there
     /// (its steelseries driver: 0x51, the modifiers' usages in order, then
-    /// the key), so Grant's own desktop bindings, set by game-helper through
-    /// ratbagctl, are the bytes Ectomatter sends for them too.
+    /// the key), so desktop bindings set through ratbagctl
+    /// are the bytes Ectomatter sends for them too.
     #[test]
     fn a_shortcut_goes_on_a_button_as_libratbag_writes_it() {
         let (core, sent, data) = mouse_core("chord");
