@@ -1139,11 +1139,10 @@ mod tests {
     /// are said made.
     #[test]
     fn a_start_waits_for_its_changes() {
-        use smithay_client_toolkit::reexports::calloop::{channel, EventLoop};
         let dir = std::env::temp_dir().join(format!("ectomatter-start-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("start.sock");
-        let (tx, rx) = channel::channel::<Start>();
+        let (tx, rx) = crate::shell::quiet_channel::<Start>();
         listen_at(&path, tx);
         let p = path.clone();
         let launcher = std::thread::spawn(move || {
@@ -1154,18 +1153,7 @@ mod tests {
             BufReader::new(s).read_line(&mut line).unwrap();
             (line, t0.elapsed())
         });
-        let mut ev: EventLoop<Option<Start>> = EventLoop::try_new().unwrap();
-        ev.handle().insert_source(rx, |e, _, got: &mut Option<Start>| {
-            if let channel::Event::Msg(s) = e {
-                *got = Some(s);
-            }
-        }).unwrap();
-        let mut got = None;
-        let t0 = Instant::now();
-        while got.is_none() && t0.elapsed() < Duration::from_secs(10) {
-            ev.dispatch(Some(Duration::from_millis(100)), &mut got).unwrap();
-        }
-        let start = got.expect("the start told");
+        let start = rx.recv_timeout(Duration::from_secs(10)).expect("the start told");
         assert_eq!((start.id.as_str(), start.name.as_str(), start.pid), ("steam_app_1808500", "ARC Raiders", 4242));
         std::thread::sleep(Duration::from_millis(300));
         start.done.send(()).unwrap();

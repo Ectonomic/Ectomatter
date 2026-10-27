@@ -56,6 +56,13 @@ impl Kept {
 /// the tray, and the lab's tuning. A shell holds one, hands it the window's
 /// size, and shows what it composes.
 pub(crate) struct Session {
+    /// what Ectomatter's threads tell the window, taken as the shell is woken
+    pub(crate) inbox: Inbox,
+    /// KWin's script, which tells Ectomatter the app in front, and when it was last looked at
+    pub(crate) front_bus: Option<zbus::blocking::Connection>,
+    pub(crate) kwin_looked: Instant,
+    /// quitting asked for, when: Ectomatter goes once what changed is saved
+    pub(crate) quitting: Option<Instant>,
     /// the display's drawing the keyboard was last lit with
     pub(crate) panel_rev: u64,
 
@@ -603,5 +610,275 @@ mod kept_tests {
         assert!(kept.get(&make(6.0)).is_some_and(|s| Kept::of(&s, &make(6.0))), "the newest found");
         // an LED output of its own is the same picture
         assert!(kept.get(&Setup::alike(Physics { lumens: 1.23, ..make(6.0).all })).is_some());
+    }
+}
+
+/// What Ectomatter's threads tell the main window, each by its own channel:
+/// the keyboards drawn, legends set, the simulation's next picture, the
+/// keyboard's and the mouse's threads, the lock lights, the macros' jobs,
+/// the screen's player, the app in front, games starting and the tray.
+pub(crate) struct Inbox {
+    built: Receiver<(bool, Board)>,
+    legends: Receiver<ectomatter_draw::hdr::Legends>,
+    sim: Receiver<()>,
+    heard: Option<Receiver<device::Heard>>,
+    locks: Option<Receiver<u8>>,
+    mouse: Option<Receiver<mouse::Heard>>,
+    jobs: Receiver<String>,
+    news: Option<Receiver<lcd_player::News>>,
+    front: Receiver<front_app::Front>,
+    starts: Receiver<launcher::Start>,
+    tray: Receiver<tray::TrayAsk>,
+}
+
+use std::sync::mpsc::Receiver;
+
+/// What a step of the session asks of the shell's loop.
+pub(crate) enum Step {
+    /// carry on
+    On,
+    /// stop the loop: Ectomatter is quitting, or starting again
+    Stop,
+}
+
+impl Session {
+    /// Ectomatter started in its main window: every core and plugin that's
+    /// on, the keyboard's and the mouse's threads, the screen's player, the
+    /// macros' jobs, the app in front, the launcher and the tray, each
+    /// telling the window through a sender that calls `wake`.
+    pub(crate) fn start(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: settings::Settings, reference: f64, gain: f32, wake: &shell::Wake) -> Session {
+        let (built_tx, built) = shell::channel::<(bool, Board)>(wake);
+        let build = board_builder(built_tx.clone(), false);
+        let home_build = board_builder(built_tx, true);
+        // the legends, set anew as the lab asks
+        let (legends_tx, legends) = shell::channel::<ectomatter_draw::hdr::Legends>(wake);
+        let set_legends = legends_builder(legends_tx);
+        // each clearer picture of the keys' light, as the simulation has one
+        let (sim_tx, sim) = shell::channel::<()>(wake);
+
+        // every core and plugin that's on, started the one way (hosted.rs); the
+        // keyboard's page talks to the first core describing a keyboard, the
+        // mouse's to the first describing a mouse
+        old_name::move_old_settings(&settings);
+        let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
+        hosted.start_all(&settings);
+        devices_described(&hosted);
+        let keyboard = cores::keyboard().and_then(|k| hosted.drive_id(&k.id));
+        // (the keyboard's core off, Ectomatter leaves the keyboard to other programs)
+        let controlled = cores::keyboard().is_none_or(|c| settings.on(&packages::switch_of(packages::Kind::Core, &c.id)));
+        let z10_core = keyboard.map(|(_, core)| Ok(core));
+        // (whether the keyboard is plugged in, as its core tells, for the screen's player)
+        let z10_there = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let (mut heard, mut locks) = (None, None);
+        let kb = z10_core.clone().map(|core| {
+            let (heard_tx, heard_rx) = shell::channel::<device::Heard>(wake);
+            heard = Some(heard_rx);
+            // the computer's lock lights, as the keyboard shows them
+            let (locks_tx, locks_rx) = shell::channel::<u8>(wake);
+            locks = Some(locks_rx);
+            locks::start(move |bits| {
+                let _ = locks_tx.send(bits);
+            });
+            device::start(core, heard_tx, z10_there.clone())
+        });
+        // the mouse's core, and the mouse's page's thread on it: it meets the
+        // mouse, and writes to it only what the page changes; none while the core
+        // is turned off in Settings, which leaves the mouse alone
+        let mouse_core = hosted.drive("mouse").map(|(_, core)| core);
+        let mut mouse_rx = None;
+        let mouse_ask = mouse_core.clone().map(|m| {
+            let (heard_tx, heard_rx) = shell::channel::<mouse::Heard>(wake);
+            mouse_rx = Some(heard_rx);
+            (mouse::start(m, heard_tx.clone()), heard_tx)
+        });
+        // the keyboard lit by the light setup in use, if it is one of the person's own
+        let lit_by = cores::keyboard().and_then(|core| setups::in_use(&settings, &core.id).map(|s| setups::merged(&core.device_now()["light"], &s.changes)));
+        let mut front = Front::new(ui, hosted, kb, controlled, settings);
+        (front.mouse.ask, front.mouse.tell) = mouse_ask.unzip();
+        // the jobs Ectomatter's macros do as steps (a profile switched, a screen
+        // job), done here as their player reaches them on its own thread
+        let (jobs_tx, jobs) = shell::channel::<String>(wake);
+        front.macro_jobs = Some(jobs_tx);
+        // the screen, played by Ectomatter while it controls the keyboard
+        let mut news = None;
+        if controlled {
+            let (news_tx, news_rx) = shell::channel::<lcd_player::News>(wake);
+            news = Some(news_rx);
+            // (each frame through the keyboard's core, which sends it between its other exchanges)
+            let screen = lcd_player::CoreSink::new(z10_core.clone().and_then(Result::ok), z10_there.clone());
+            let p = lcd_player::Player::start(
+                move |n| {
+                    let _ = news_tx.send(n);
+                },
+                front.settings.on(&crate::cores::keyboard_setting("screen.announce")),
+                front.game_launch(),
+                false,
+                Box::new(screen),
+                front.worker.steps.clone(),
+                front.hosted.readings(),
+            );
+            front.set_player(p);
+        }
+        // the app in front, as KWin tells it, for the profiles that follow one
+        let (front_tx, front_rx) = shell::channel::<front_app::Front>(wake);
+        let front_bus = front_app::start(front_tx);
+        // games started through Ectomatter's launcher in Steam, each waiting for
+        // its changes before it goes on
+        let (starts_tx, starts) = shell::channel::<launcher::Start>(wake);
+        launcher::listen(starts_tx);
+        // the tray, which the window closes into
+        let (tray_tx, tray_rx) = shell::channel::<tray::TrayAsk>(wake);
+        let tray = tray::start(tray_tx);
+        Session {
+            inbox: Inbox { built, legends, sim, heard, locks, mouse: mouse_rx, jobs, news, front: front_rx, starts, tray: tray_rx },
+            front_bus,
+            kwin_looked: Instant::now(),
+            quitting: None,
+            panel_rev: 0,
+            slint,
+            front,
+            pic: Picture::new(reference, ink_env::rgb("stage", STAGE)),
+            gain,
+            board: None,
+            lights: Vec::new(),
+            lit: None,
+            spare: Vec::new(),
+            dim: None,
+            effect_due: Instant::now(),
+            asked: None,
+            build,
+            home_board: None,
+            home_asked: None,
+            home_build,
+            home_share: None,
+            lit_home: false,
+            _mouse: mouse_core,
+            set_legends,
+            full: true,
+            dump: std::env::var_os("ECTOMATTER_DUMP").map(Into::into),
+            check: std::env::var_os("ECTOMATTER_CHECK").is_some(),
+            frames: 0,
+            tray,
+            tray_devices: Vec::new(),
+            tray_scenes: (Vec::new(), None),
+            light: lit_by,
+            light_rev: (0, false),
+            readout_at: None,
+            sim: None,
+            sim_tx,
+            sim_seen: 0,
+            want: None,
+            kept: Kept::default(),
+        }
+    }
+
+    /// What Ectomatter's threads have told the window, taken in, for a
+    /// window `scale` pixels to the point: the tray's asks the shell must
+    /// answer itself (the window shown, a device's page opened).
+    pub(crate) fn take(&mut self, scale: f32) -> Vec<tray::TrayAsk> {
+        while let Ok(l) = self.inbox.legends.try_recv() {
+            self.legends_ready(l);
+        }
+        while let Ok((home, board)) = self.inbox.built.try_recv() {
+            self.built(home, board, scale);
+        }
+        while self.inbox.sim.try_recv().is_ok() {
+            self.sim_ready();
+        }
+        while let Some(h) = self.inbox.heard.as_ref().and_then(|r| r.try_recv().ok()) {
+            self.front.heard(h);
+        }
+        while let Some(b) = self.inbox.locks.as_ref().and_then(|r| r.try_recv().ok()) {
+            self.front.locks(b);
+        }
+        while let Some(h) = self.inbox.mouse.as_ref().and_then(|r| r.try_recv().ok()) {
+            self.front.mouse_heard(h);
+        }
+        while let Ok(id) = self.inbox.jobs.try_recv() {
+            self.front.macro_job(&id);
+        }
+        while let Some(n) = self.inbox.news.as_ref().and_then(|r| r.try_recv().ok()) {
+            self.front.screen_news(n);
+        }
+        while let Ok(f) = self.inbox.front.try_recv() {
+            self.front.front_app(f);
+        }
+        while let Ok(s) = self.inbox.starts.try_recv() {
+            self.front.game_starting(s);
+        }
+        let mut shell = Vec::new();
+        while let Ok(a) = self.inbox.tray.try_recv() {
+            match a {
+                tray::TrayAsk::Scene(id) => {
+                    self.front.set_scene(id, true);
+                    self.front.refresh();
+                    self.full = true;
+                }
+                tray::TrayAsk::Quit => self.quit(),
+                a => shell.push(a),
+            }
+        }
+        shell
+    }
+
+    /// Quit as the tray's Quit does: each device its own again, and
+    /// Ectomatter gone once what changed is saved (`step`).
+    pub(crate) fn quit(&mut self) {
+        self.front.scene_quit();
+        self.front.hand_back();
+        self.front.release_sliders();
+        self.quitting = Some(Instant::now());
+    }
+
+    /// A turn of the shell's loop, before it draws: KWin's script looked at
+    /// every five seconds (in case something took it out), a stop asked for
+    /// (a log out, or kill) quit as the tray's Quit does, what was asked of
+    /// the devices tried again, and Ectomatter stopped once what changed is
+    /// saved (up to four seconds), or started again for a change to what it
+    /// may use, back on that place.
+    pub(crate) fn step(&mut self) -> Step {
+        if self.kwin_looked.elapsed() > Duration::from_secs(5) && self.quitting.is_none() {
+            self.kwin_looked = Instant::now();
+            if let Some(c) = &self.front_bus {
+                front_app::keep(c);
+            }
+        }
+        if TERM.load(std::sync::atomic::Ordering::Relaxed) && self.quitting.is_none() {
+            self.quit();
+        }
+        if let Some(t) = self.quitting {
+            if self.front.flush() || t.elapsed() > Duration::from_secs(4) {
+                // (KWin no longer told to tell a closed Ectomatter)
+                if let Some(c) = &self.front_bus {
+                    front_app::stop(c);
+                }
+                return Step::Stop;
+            }
+        }
+        self.front.retry();
+        if let Some(place) = self.front.restart.take() {
+            // (each device handed back before the new Ectomatter turns the scene on again)
+            self.front.scene_quit();
+            if let Ok(me) = std::env::current_exe() {
+                let _ = std::process::Command::new(me).args(["--place", &place]).spawn();
+            }
+            return Step::Stop;
+        }
+        Step::On
+    }
+
+    /// Ectomatter gone: each device its own again (the new Ectomatter, if it
+    /// started again, turns the scene on), the screen handed back to the
+    /// keyboard's own screens, a setting still being changed written, a
+    /// recording letting the keyboard go, and the keyboard's thread given
+    /// time to send the preview's stop.
+    pub(crate) fn finish(&mut self) {
+        self.front.scene_quit();
+        self.front.quit_screen();
+        self.front.settings.flush(true);
+        if let Some(m) = &mut self.front.macros {
+            m.cancel_recording(&self.front.page);
+        }
+        std::thread::sleep(Duration::from_millis(300));
     }
 }
