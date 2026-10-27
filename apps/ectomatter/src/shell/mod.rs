@@ -7,4 +7,8 @@
 /// device's, a package's, the tray's) tells the window, which wakes it.
 pub use smithay_client_toolkit::reexports::calloop::channel::Sender;
 
+/// A box of a picture, in its pixels: x, y, width and height.
+pub type Rect = (usize, usize, usize, usize);
+
+pub mod session;
 pub mod wayland;

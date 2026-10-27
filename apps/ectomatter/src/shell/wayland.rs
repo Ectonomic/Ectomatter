@@ -6,6 +6,8 @@
 //! still composed here too.
 
 use crate::*;
+use super::session::{Kept, Session};
+use super::Rect;
 
 pub(crate) struct App {
     registry: RegistryState,
@@ -72,54 +74,8 @@ pub(crate) struct App {
     /// squeeze the whole picture to fit the light into a screenshot's range,
     /// so red came out #ED0000 and white #BFBFBF.
     intent: wp_color_manager_v1::RenderIntent,
-    /// the display's drawing the keyboard was last lit with
-    panel_rev: u64,
-
-    slint: Rc<MinimalSoftwareWindow>,
-    front: Front,
-    pic: Picture,
-    gain: f32,
-    /// the keyboard at the size last drawn, and its light
-    board: Option<Board>,
-    lights: Vec<Light>,
-    lit: Option<Rc<Lit>>,
-    /// the last frame's keyboard picture, taken back once nothing shows it,
-    /// for the next to be drawn into rather than made anew
-    spare: Vec<f32>,
-    /// the keys of the area the Lighting page has the pointer over, which the rest of the picture dims around
-    dim: Option<Vec<[f32; 4]>>,
-    /// when a lighting effect's next frame is due, at the rate Settings ›
-    /// Performance asks for
-    effect_due: Instant,
-    asked: Option<(u32, u32)>,
-    build: std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)>,
-    /// the keyboard drawn for Home's desk, on its ground: the size last asked
-    /// for, its builder, and how much of the ground shows in each of its pixels;
-    /// and whether the picture shown is it
-    home_board: Option<Board>,
-    home_asked: Option<(u32, u32)>,
-    home_build: std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)>,
-    home_share: Option<Rc<Vec<f32>>>,
-    lit_home: bool,
-    /// the Sensei 310's core (kept so it keeps running)
-    _mouse: Option<core_host::Core>,
-    /// legends to set as the light asks, away from the window
-    set_legends: std::sync::mpsc::Sender<ectomatter_draw::hdr::LegendsAsk>,
-    /// the whole window needs drawing again, not only what Slint changed
-    full: bool,
-    /// ECTOMATTER_DUMP: a folder to save the frames given to the compositor in
-    dump: Option<PathBuf>,
-    /// ECTOMATTER_CHECK: encode every frame whole too, and say if the
-    /// parts encoded differ from it
-    check: bool,
-    frames: u64,
     /// closed into the tray: the window is unmapped, Ectomatter keeps running
     hidden: bool,
-    tray: Option<tray::Handle>,
-    /// the devices the tray lists, as last told it
-    tray_devices: Vec<(String, String, bool)>,
-    /// the scenes the tray's Scene menu lists (each one's id and name) and the one on
-    tray_scenes: (Vec<(String, String)>, Option<String>),
     /// the windows Slint has made, the Macro Editor's among them
     made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>,
     /// the windows of their own beside the main one (the Macro Editor's, the
@@ -128,63 +84,12 @@ pub(crate) struct App {
     keys_on: Option<usize>,
     /// the keys held down as the keyboard last said, for Ctrl+Shift+K
     mods: Modifiers,
-    /// the light the lab has tuned, which the keyboard is lit by, and
-    /// its change (and whether Hold to compare was held for it)
-    light: Option<serde_json::Value>,
-    light_rev: (u64, bool),
-    readout_at: Option<Instant>,
-    /// the keys' light, simulated from the first keyboard drawn on, its way
-    /// of saying it has a clearer picture, and the picture last taken
-    sim: Option<Simulator>,
-    sim_tx: shell::Sender<()>,
-    sim_seen: u64,
-    /// the simulation the keyboard is to show (how every key is lit), and
-    /// the last few settled pictures, the saved tuning's kept among them
-    want: Option<Setup>,
-    kept: Kept,
+    /// what Ectomatter is doing, apart from the window (shell::session)
+    s: Session,
 }
 
-/// Settled pictures of the keys' light, the last few kept, so going back to
-/// one (an undo, Hold to compare, a choice taken back) shows at once rather
-/// than settling again: each is about 27 MB. The saved tuning's stays.
-#[derive(Default)]
-pub(crate) struct Kept {
-    pictures: Vec<std::sync::Arc<Snapshot>>,
-    pinned: Option<Setup>,
-}
 
-impl Kept {
-    const MOST: usize = 4;
 
-    /// Whether a picture is of this setup, as the simulation runs it.
-    fn of(snap: &Snapshot, setup: &Setup) -> bool {
-        snap.setup.same_paths(&setup.simulated())
-    }
-
-    fn get(&self, want: &Setup) -> Option<std::sync::Arc<Snapshot>> {
-        self.pictures.iter().rev().find(|s| Kept::of(s, want)).cloned()
-    }
-
-    /// Whether the keyboard takes the simulation's new picture. The
-    /// simulation may still be on a make asked of it before the one wanted
-    /// (a slider dragged): its picture is newer than the one shown, so it is
-    /// taken, but never over a picture of the one wanted.
-    fn takes(want: Option<&Setup>, shown: Option<&Snapshot>, snap: &Snapshot) -> bool {
-        want.is_none_or(|w| Kept::of(snap, w) || !shown.is_some_and(|s| Kept::of(s, w)))
-    }
-
-    /// Keep a settled picture, the newest last; past the most kept, the oldest
-    /// goes, but never the saved tuning's.
-    fn keep(&mut self, snap: std::sync::Arc<Snapshot>) {
-        self.pictures.retain(|s| !s.setup.same_paths(&snap.setup));
-        self.pictures.push(snap);
-        while self.pictures.len() > Kept::MOST {
-            let pinned = &self.pinned;
-            let Some(i) = self.pictures.iter().position(|s| !pinned.as_ref().is_some_and(|w| Kept::of(s, w))) else { break };
-            self.pictures.remove(i);
-        }
-    }
-}
 
 /// A window of its own beside the main one: an ordinary SDR window, drawn whole by Slint.
 pub(crate) struct SubWin {
@@ -369,7 +274,7 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
             .handle()
             .insert_source(heard_rx, |e, _, app: &mut App| {
                 if let calloop::channel::Event::Msg(h) = e {
-                    app.front.heard(h);
+                    app.s.front.heard(h);
                 }
             })
             .unwrap();
@@ -379,7 +284,7 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
             .handle()
             .insert_source(locks_rx, |e, _, app: &mut App| {
                 if let calloop::channel::Event::Msg(bits) = e {
-                    app.front.locks(bits);
+                    app.s.front.locks(bits);
                 }
             })
             .unwrap();
@@ -400,7 +305,7 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
             .handle()
             .insert_source(heard_rx, |e, _, app: &mut App| {
                 if let calloop::channel::Event::Msg(h) = e {
-                    app.front.mouse_heard(h);
+                    app.s.front.mouse_heard(h);
                 }
             })
             .unwrap();
@@ -453,52 +358,54 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         levels_peak: 1000.0,
         mastering: false,
         intent: wp_color_manager_v1::RenderIntent::Perceptual,
-        panel_rev: 0,
-        // (none described for the window's screen yet: its first levels are)
         levels: (0.0, 0.0),
-        slint,
-        front: {
-            let mut f = Front::new(ui, hosted, kb, controlled, settings);
-            (f.mouse.ask, f.mouse.tell) = mouse_ask.unzip();
-            f
-        },
-        pic: Picture::new(reference, ink_env::rgb("stage", STAGE)),
-        gain,
-        board: None,
-        lights: Vec::new(),
-        lit: None,
-        spare: Vec::new(),
-        dim: None,
-        effect_due: Instant::now(),
-        asked: None,
-        build,
-        home_board: None,
-        home_asked: None,
-        home_build,
-        home_share: None,
-        lit_home: false,
-        _mouse: mouse,
-        set_legends,
-        full: true,
-        dump: std::env::var_os("ECTOMATTER_DUMP").map(Into::into),
-        check: std::env::var_os("ECTOMATTER_CHECK").is_some(),
-        frames: 0,
         hidden: false,
-        tray: None,
-        tray_devices: Vec::new(),
-        tray_scenes: (Vec::new(), None),
         made,
         subs: [None, None, None],
         keys_on: None,
         mods: Modifiers::default(),
-        light: lit_by,
-        light_rev: (0, false),
-        readout_at: None,
-        sim: None,
-        sim_tx,
-        sim_seen: 0,
-        want: None,
-        kept: Kept::default(),
+        s: Session {
+            panel_rev: 0,
+            // (none described for the window's screen yet: its first levels are)
+            slint,
+            front: {
+                let mut f = Front::new(ui, hosted, kb, controlled, settings);
+                (f.mouse.ask, f.mouse.tell) = mouse_ask.unzip();
+                f
+            },
+            pic: Picture::new(reference, ink_env::rgb("stage", STAGE)),
+            gain,
+            board: None,
+            lights: Vec::new(),
+            lit: None,
+            spare: Vec::new(),
+            dim: None,
+            effect_due: Instant::now(),
+            asked: None,
+            build,
+            home_board: None,
+            home_asked: None,
+            home_build,
+            home_share: None,
+            lit_home: false,
+            _mouse: mouse,
+            set_legends,
+            full: true,
+            dump: std::env::var_os("ECTOMATTER_DUMP").map(Into::into),
+            check: std::env::var_os("ECTOMATTER_CHECK").is_some(),
+            frames: 0,
+            tray: None,
+            tray_devices: Vec::new(),
+            tray_scenes: (Vec::new(), None),
+            light: lit_by,
+            light_rev: (0, false),
+            readout_at: None,
+            sim: None,
+            sim_tx,
+            sim_seen: 0,
+            want: None,
+            kept: Kept::default(),
+        },
     };
     // the jobs Ectomatter's macros do as steps (a profile switched, a screen
     // job), done here as their player reaches them on its own thread
@@ -507,11 +414,11 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         .handle()
         .insert_source(jobs_rx, |e, _, app: &mut App| {
             if let calloop::channel::Event::Msg(id) = e {
-                app.front.macro_job(&id);
+                app.s.front.macro_job(&id);
             }
         })
         .unwrap();
-    app.front.macro_jobs = Some(jobs_tx);
+    app.s.front.macro_jobs = Some(jobs_tx);
     // the tray, which the window closes into
     // the screen, played by Ectomatter while it controls the keyboard
     if controlled {
@@ -520,7 +427,7 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
             .handle()
             .insert_source(news_rx, |e, _, app: &mut App| {
                 if let calloop::channel::Event::Msg(n) = e {
-                    app.front.screen_news(n);
+                    app.s.front.screen_news(n);
                 }
             })
             .unwrap();
@@ -530,14 +437,14 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
             move |n| {
                 let _ = news_tx.send(n);
             },
-            app.front.settings.on(&crate::cores::keyboard_setting("screen.announce")),
-            app.front.game_launch(),
+            app.s.front.settings.on(&crate::cores::keyboard_setting("screen.announce")),
+            app.s.front.game_launch(),
             false,
             Box::new(screen),
-            app.front.worker.steps.clone(),
-            app.front.hosted.readings(),
+            app.s.front.worker.steps.clone(),
+            app.s.front.hosted.readings(),
         );
-        app.front.set_player(p);
+        app.s.front.set_player(p);
     }
     // asked to stop (a log out, or kill): quit as the tray's Quit does, so
     // what changed is saved and the screen handed back
@@ -551,7 +458,7 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         .handle()
         .insert_source(front_rx, |e, _, app: &mut App| {
             if let calloop::channel::Event::Msg(f) = e {
-                app.front.front_app(f);
+                app.s.front.front_app(f);
             }
         })
         .unwrap();
@@ -563,16 +470,16 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         .handle()
         .insert_source(starts_rx, |e, _, app: &mut App| {
             if let calloop::channel::Event::Msg(s) = e {
-                app.front.game_starting(s);
+                app.s.front.game_starting(s);
             }
         })
         .unwrap();
     launcher::listen(starts_tx);
     let (tray_tx, tray_rx) = calloop::channel::channel::<tray::TrayAsk>();
-    app.tray = tray::start(tray_tx);
+    app.s.tray = tray::start(tray_tx);
     // `--hide`: started into the tray, as at login (with no tray to start into,
     // the window shows, since closing it would quit)
-    if std::env::args().any(|a| a == "--hide") && app.tray.is_some() {
+    if std::env::args().any(|a| a == "--hide") && app.s.tray.is_some() {
         app.hide();
     }
     event_loop
@@ -583,17 +490,17 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
                     tray::TrayAsk::Open => app.show(),
                     tray::TrayAsk::Device(d) => {
                         app.show();
-                        app.front.ui.set_place(d.into());
+                        app.s.front.ui.set_place(d.into());
                     }
                     tray::TrayAsk::Scene(id) => {
-                        app.front.set_scene(id, true);
-                        app.front.refresh();
-                        app.full = true;
+                        app.s.front.set_scene(id, true);
+                        app.s.front.refresh();
+                        app.s.full = true;
                     }
                     tray::TrayAsk::Quit => {
-                        app.front.scene_quit();
-                        app.front.hand_back();
-                        app.front.release_sliders();
+                        app.s.front.scene_quit();
+                        app.s.front.hand_back();
+                        app.s.front.release_sliders();
                         // (once what changed is saved: see the loop)
                         app.quitting = Some(Instant::now());
                     }
@@ -632,14 +539,14 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
             }
         }
         if TERM.load(std::sync::atomic::Ordering::Relaxed) && app.quitting.is_none() {
-            app.front.scene_quit();
-            app.front.hand_back();
-            app.front.release_sliders();
+            app.s.front.scene_quit();
+            app.s.front.hand_back();
+            app.s.front.release_sliders();
             app.quitting = Some(Instant::now());
         }
         // quitting: what changed is saved first, for up to four seconds
         if let Some(t) = app.quitting {
-            if app.front.flush() || t.elapsed() > Duration::from_secs(4) {
+            if app.s.front.flush() || t.elapsed() > Duration::from_secs(4) {
                 // (KWin no longer told to tell a closed Ectomatter)
                 if let Some(c) = &front_bus {
                     front_app::stop(c);
@@ -648,19 +555,19 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
                 break;
             }
         }
-        let busy = (app.slint.has_active_animations() && !app.frame_pending)
+        let busy = (app.s.slint.has_active_animations() && !app.frame_pending)
             || app.subs.iter().flatten().any(|m| !m.hidden && m.slint.has_active_animations() && !m.frame_pending);
         // a lighting effect's next frame, 30 a second; none while the window is
         // closed into the tray, where it is not drawn
-        let effect = (app.front.animated() && !app.frame_pending && !app.hidden).then(|| app.effect_due.saturating_duration_since(Instant::now()));
+        let effect = (app.s.front.animated() && !app.frame_pending && !app.hidden).then(|| app.s.effect_due.saturating_duration_since(Instant::now()));
         let wait = if busy {
             Some(Duration::ZERO)
         } else {
-            [slint::platform::duration_until_next_timer_update(), app.front.waiting(), effect].into_iter().flatten().min()
+            [slint::platform::duration_until_next_timer_update(), app.s.front.waiting(), effect].into_iter().flatten().min()
         };
         event_loop.dispatch(wait, &mut app).unwrap();
         slint::platform::update_timers_and_animations();
-        app.front.retry();
+        app.s.front.retry();
         // ECTOMATTER_TRAYTEST: close into the tray once, three seconds in, to check the way back
         if let Some(t) = trial {
             if t.elapsed() > Duration::from_secs(3) {
@@ -670,24 +577,24 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
             }
         }
         // (Ectomatter's own macros don't wait for the keyboard)
-        if let Some(n) = open_macros.filter(|_| macro_lib() == macros::Lib::Ectomatter || app.front.page.dev.is_some()) {
+        if let Some(n) = open_macros.filter(|_| macro_lib() == macros::Lib::Ectomatter || app.s.front.page.dev.is_some()) {
             open_macros = None;
             app.open_macros(macro_lib(), n);
         }
-        if open_lab && app.board.is_some() {
+        if open_lab && app.s.board.is_some() {
             open_lab = false;
             app.open_lab();
         }
         app.act();
         let t = Instant::now();
-        let before = app.frames;
+        let before = app.s.frames;
         app.draw();
         app.draw_sub(MACROS);
         app.draw_sub(LAB);
         app.draw_sub(LAYOUTS);
         // ECTOMATTER_FPS: frames a second and the slowest, to check smoothness without slowing it
         if let Some((since, n, slow)) = &mut fps {
-            if app.frames > before {
+            if app.s.frames > before {
                 *n += 1;
                 *slow = (*slow).max(t.elapsed());
             }
@@ -699,9 +606,9 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
             }
         }
         // started again for a change to what Ectomatter may use, back on that place
-        if let Some(place) = app.front.restart.take() {
+        if let Some(place) = app.s.front.restart.take() {
             // (each device handed back before the new Ectomatter turns the scene on again)
-            app.front.scene_quit();
+            app.s.front.scene_quit();
             if let Ok(me) = std::env::current_exe() {
                 let _ = std::process::Command::new(me).args(["--place", &place]).spawn();
             }
@@ -709,23 +616,48 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         }
     }
     // each device its own again (Ectomatter started again, too: the new one turns the scene on)
-    app.front.scene_quit();
+    app.s.front.scene_quit();
     // the screen handed back to the keyboard's own screens
-    app.front.quit_screen();
+    app.s.front.quit_screen();
     // a setting still being changed is written
-    app.front.settings.flush(true);
+    app.s.front.settings.flush(true);
     // a recording lets the keyboard go
-    if let Some(m) = &mut app.front.macros {
-        m.cancel_recording(&app.front.page);
+    if let Some(m) = &mut app.s.front.macros {
+        m.cancel_recording(&app.s.front.page);
     }
     // the keyboard's thread sends the preview's stop before the window goes
     std::thread::sleep(Duration::from_millis(300));
 }
 
 impl App {
+    /// Draw the window's next frame, if it can take one now.
+    fn draw(&mut self) {
+        let size = (!self.hidden && self.configured && !self.frame_pending).then(|| ((self.size.0 * self.scale) as usize, (self.size.1 * self.scale) as usize));
+        let top = self.top_peak();
+        if let Some(dirty) = self.s.compose(self.scale as f32, size, self.levels_peak, top) {
+            self.present(&dirty);
+        }
+    }
+
+    fn built(&mut self, home: bool, board: Board) {
+        self.s.built(home, board, self.scale as f32);
+        self.draw();
+    }
+
+    fn legends_ready(&mut self, legends: ectomatter_draw::hdr::Legends) {
+        self.s.legends_ready(legends);
+        self.draw();
+    }
+
+    fn sim_ready(&mut self) {
+        if self.s.sim_ready() {
+            self.draw();
+        }
+    }
+
     /// Do what the page asked.
     fn act(&mut self) {
-        let asks = self.front.act();
+        let asks = self.s.front.act();
         for ask in &asks {
             match ask {
                 WindowAsk::Move if !asks.contains(&WindowAsk::Maximize) => {
@@ -734,8 +666,8 @@ impl App {
                     }
                     // the compositor keeps the button's release: tell the page it is up
                     let position = LogicalPosition::new(self.at.0 as f32, self.at.1 as f32);
-                    self.slint.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
-                    self.slint.dispatch_event(WindowEvent::PointerExited);
+                    self.s.slint.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+                    self.s.slint.dispatch_event(WindowEvent::PointerExited);
                 }
                 WindowAsk::Move => {}
                 WindowAsk::Minimize => self.window.set_minimized(),
@@ -748,22 +680,22 @@ impl App {
                 }
                 WindowAsk::Close => self.hide(),
                 WindowAsk::OpenMacros(lib, n) => self.open_macros(*lib, *n),
-                WindowAsk::MacroPlays(n, how) => self.front.macro_plays(*n, *how),
-                WindowAsk::MacroGone(n) => self.front.macro_gone(*n),
-                WindowAsk::MacroSaved(n) => self.front.macro_saved(*n),
+                WindowAsk::MacroPlays(n, how) => self.s.front.macro_plays(*n, *how),
+                WindowAsk::MacroGone(n) => self.s.front.macro_gone(*n),
+                WindowAsk::MacroSaved(n) => self.s.front.macro_saved(*n),
                 WindowAsk::OpenLab => self.open_lab(),
                 WindowAsk::OpenLayouts(i) => self.open_layouts(*i),
                 WindowAsk::ShowSettings => {
                     self.show_settings(None);
-                    self.front.show_sensors();
+                    self.s.front.show_sensors();
                 }
             }
         }
-        let asks = [(MACROS, self.front.act_macros()), (LAB, self.front.act_lab()), (LAYOUTS, self.front.act_layouts())];
+        let asks = [(MACROS, self.s.front.act_macros()), (LAB, self.s.front.act_lab()), (LAYOUTS, self.s.front.act_layouts())];
         // the editor's window changed under a resting pointer (a block dropped or deleted
         // where it is): what is under the pointer now shows its hover and its cursor. Not
         // while a button is held, as a drag's own moves keep it up to date then
-        if self.front.layouts_rehover() {
+        if self.s.front.layouts_rehover() {
             if let Some(sw) = self.subs[LAYOUTS].as_ref().filter(|sw| sw.inside && !sw.held && !sw.hidden) {
                 sw.slint.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(sw.at.0 as f32, sw.at.1 as f32) });
             }
@@ -793,12 +725,12 @@ impl App {
                     WindowAsk::ShowSettings => {
                         let from = sw.window.wl_surface().clone();
                         self.show_settings(Some(from));
-                        self.front.show_sensors();
+                        self.s.front.show_sensors();
                     }
                     // (what the Macro Editor's changes mean for the mouse's buttons)
-                    WindowAsk::MacroPlays(n, how) => self.front.macro_plays(n, how),
-                    WindowAsk::MacroGone(n) => self.front.macro_gone(n),
-                    WindowAsk::MacroSaved(n) => self.front.macro_saved(n),
+                    WindowAsk::MacroPlays(n, how) => self.s.front.macro_plays(n, how),
+                    WindowAsk::MacroGone(n) => self.s.front.macro_gone(n),
+                    WindowAsk::MacroSaved(n) => self.s.front.macro_saved(n),
                     WindowAsk::OpenMacros(..) | WindowAsk::OpenLab | WindowAsk::OpenLayouts(_) => {}
                 }
             }
@@ -831,126 +763,84 @@ impl App {
 
     /// Open the Macro Editor's window, made the first time, on a macro.
     fn open_macros(&mut self, lib: macros::Lib, n: u32) {
-        if self.front.macros.is_none() {
+        if self.s.front.macros.is_none() {
             let ui = MacroWindow::new().unwrap();
             let _ = slint::ComponentHandle::window(&ui);
             slint::ComponentHandle::show(&ui).unwrap();
-            self.front.macros = Some(macro_page::MacroPage::new(ui, glyph(include_str!("../../ui/glyphs/mark.svg"), 16, false)));
+            self.s.front.macros = Some(macro_page::MacroPage::new(ui, glyph(include_str!("../../ui/glyphs/mark.svg"), 16, false)));
             self.subs[MACROS] = Some(self.make_sub("Macro Editor", MACRO_SIZE, MACRO_MIN_SIZE));
         } else {
             self.show_sub(MACROS);
         }
-        self.front.macros_elsewhere();
-        if let Some(m) = &mut self.front.macros {
-            m.open(&self.front.page, lib, (n > 0).then_some(n));
+        self.s.front.macros_elsewhere();
+        if let Some(m) = &mut self.s.front.macros {
+            m.open(&self.s.front.page, lib, (n > 0).then_some(n));
         }
     }
 
     /// Open the screen layout editor's window, made the first time, on layout `i` of the Library.
     fn open_layouts(&mut self, i: usize) {
-        if self.front.layouts.is_none() {
+        if self.s.front.layouts.is_none() {
             let ui = LayoutWindow::new().unwrap();
             let name = cores::keyboard().map_or("", |c| c.name());
             ui.set_device_name(name.into());
             let _ = slint::ComponentHandle::window(&ui);
             slint::ComponentHandle::show(&ui).unwrap();
-            self.front.layouts = Some(layout_page::LayoutPage::new(ui, glyph(include_str!("../../ui/glyphs/mark.svg"), 16, false)));
+            self.s.front.layouts = Some(layout_page::LayoutPage::new(ui, glyph(include_str!("../../ui/glyphs/mark.svg"), 16, false)));
             self.subs[LAYOUTS] = Some(self.make_sub(&format!("{name} / Screen layouts"), LAYOUT_SIZE, LAYOUT_MIN_SIZE));
         } else {
             self.show_sub(LAYOUTS);
         }
-        self.front.open_layouts(i);
-    }
-
-    /// The light the keyboard is lit by: the lab's, if it has tuned
-    /// one, or that of the setup in use (the core's, or one of the person's own).
-    fn light_now(&self) -> serde_json::Value {
-        self.light.clone().or_else(|| cores::keyboard().map(|c| c.device_now()["light"].clone())).unwrap_or_default()
+        self.s.front.open_layouts(i);
     }
 
     /// Open the lab, made the first time, on the light the keyboard is
     /// lit by; or, from the mouse's page, on the mouse's lights (made anew
     /// when it was open on the other device).
     fn open_lab(&mut self) {
-        let mouse = self.front.ui.get_place() == "mouse";
-        if self.front.lab.as_ref().is_some_and(|l| l.windows() != mouse) {
-            self.front.lab = None;
+        let mouse = self.s.front.ui.get_place() == "mouse";
+        if self.s.front.lab.as_ref().is_some_and(|l| l.windows() != mouse) {
+            self.s.front.lab = None;
             self.subs[LAB] = None;
         }
-        if self.front.lab.is_none() {
+        if self.s.front.lab.is_none() {
             let (light, device, core, name) = if mouse {
-                let Some(d) = mouse_lab_device(&self.front) else { return };
+                let Some(d) = mouse_lab_device(&self.s.front) else { return };
                 let name = format!("{} / {}", d.name, d.lab());
-                (self.front.mouse_light_model(), d, mouse::shape().core.clone(), name)
+                (self.s.front.mouse_light_model(), d, mouse::shape().core.clone(), name)
             } else {
                 let Some(core) = cores::keyboard() else { return };
-                let d = lab_device(core, self.board.as_ref());
+                let d = lab_device(core, self.s.board.as_ref());
                 let name = format!("{} / {}", d.name, d.lab());
-                (self.light_now(), d, core.id.clone(), name)
+                (self.s.light_now(), d, core.id.clone(), name)
             };
             let ui = LabWindow::new().unwrap();
             let _ = slint::ComponentHandle::window(&ui);
             slint::ComponentHandle::show(&ui).unwrap();
-            let setup = setups::in_use(&self.front.settings, &core).map(|s| s.id);
-            self.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../../ui/glyphs/mark.svg"), 16, false), light, device, setup));
+            let setup = setups::in_use(&self.s.front.settings, &core).map(|s| s.id);
+            self.s.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../../ui/glyphs/mark.svg"), 16, false), light, device, setup));
             self.subs[LAB] = Some(self.make_sub(&name, LAB_SIZE, LAB_MIN_SIZE));
         } else {
             self.show_sub(LAB);
         }
-        self.front.ui.set_lab_open(true);
-        self.readout();
-    }
-
-    /// Tell the lab what is on the keyboard now, in whole nits, at
-    /// most four times a second (an effect changes it every frame).
-    fn readout(&mut self) {
-        if self.readout_at.is_some_and(|t| t.elapsed() < Duration::from_millis(250)) {
-            return;
-        }
-        // (the mouse's lab: its lights' brightest now)
-        if self.front.lab.as_ref().is_some_and(|l| l.windows()) {
-            self.readout_at = Some(Instant::now());
-            let (lights, reference) = (self.front.mouse_brightest(), self.pic.reference());
-            let peak = (self.gain as f64 * reference).round();
-            if let Some(l) = &mut self.front.lab {
-                l.set_readout(lab::Readout { peak, white: reference.round(), lights, settled: true, ..Default::default() });
-            }
-            return;
-        }
-        let (Some(l), Some(b)) = (self.front.lab.as_mut().filter(|l| !l.windows()), &self.board) else { return };
-        self.readout_at = Some(Instant::now());
-        let reference = self.pic.reference();
-        let p = b.peaks(&self.lights, reference as f32, self.gain);
-        let (photons, settled) = b.sim_progress().unwrap_or((0, false));
-        l.set_readout(lab::Readout {
-            legend: (p.legend as f64).round(),
-            reach: (p.clean as f64).round(),
-            deck: tenth(p.deck),
-            skirt: tenth(p.skirt),
-            chassis: tenth(p.chassis),
-            lcd: (b.lcd_nits() as f64).min(self.gain as f64 * reference).round(),
-            peak: (self.gain as f64 * reference).round(),
-            white: reference.round(),
-            photons,
-            settled,
-            lights: [0.0; 2],
-        });
+        self.s.front.ui.set_lab_open(true);
+        self.s.readout();
     }
 
     /// Close a window of its own; it is kept, to open again as it was. The
     /// Macro Editor's lets a recording go.
     fn hide_sub(&mut self, which: usize) {
         if which == MACROS {
-            if let Some(m) = &mut self.front.macros {
-                m.cancel_recording(&self.front.page);
+            if let Some(m) = &mut self.s.front.macros {
+                m.cancel_recording(&self.s.front.page);
             }
         }
         if which == LAB {
-            self.front.ui.set_lab_open(false);
+            self.s.front.ui.set_lab_open(false);
         }
         // the screen layout editor closed: the keyboard's screen plays the playlist again
         if which == LAYOUTS {
-            self.front.layouts_closed();
+            self.s.front.layouts_closed();
         }
         let Some(sw) = &mut self.subs[which] else { return };
         sw.window.wl_surface().attach(None, 0, 0);
@@ -1023,7 +913,7 @@ impl App {
         mw.buffers[i].0.attach_to(surface).unwrap();
         mw.window.commit();
         mw.frame_pending = true;
-        if let Some(dir) = &self.dump {
+        if let Some(dir) = &self.s.dump {
             let rgba: Vec<u8> = mw.px.iter().flat_map(|p| [p.red, p.green, p.blue, p.alpha]).collect();
             let name = ["macros", "lab", "layouts"][which];
             let _ = std::fs::write(dir.join(format!("{name}.raw")), rgba);
@@ -1065,17 +955,17 @@ impl App {
                     }
                 }
                 if which == MACROS {
-                    if let Some(m) = &mut self.front.macros {
+                    if let Some(m) = &mut self.s.front.macros {
                         m.pressed_at(x as f32, y as f32);
                     }
                 }
                 if which == LAYOUTS {
-                    if let Some(l) = &mut self.front.layouts {
+                    if let Some(l) = &mut self.s.front.layouts {
                         l.pressed_at(x as f32, y as f32);
                     }
                 }
                 if which == LAB {
-                    if let Some(l) = &mut self.front.lab {
+                    if let Some(l) = &mut self.s.front.lab {
                         l.pressed_at(x as f32, y as f32);
                     }
                 }
@@ -1113,7 +1003,7 @@ impl App {
             return;
         }
         // (as bright as the keys' light can go here, as Settings › HDR lets it)
-        let glow = front::gain_for(&self.front.settings.get("hdr").unwrap_or_default(), white, self.levels_peak) as f64 * white;
+        let glow = front::gain_for(&self.s.front.settings.get("hdr").unwrap_or_default(), white, self.levels_peak) as f64 * white;
         eprintln!("ectomatter: the screen's white is now {white} nits; the light goes to {glow:.0}");
         describe(&self.cm, qh, white, self.levels_peak, self.mastering, PictureTag(white, self.levels_peak));
     }
@@ -1141,10 +1031,10 @@ impl App {
     /// brought forward with the press just made in another of Ectomatter's windows (`from`),
     /// as the compositor lets a window be raised only with a press.
     fn show_settings(&mut self, from: Option<wl_surface::WlSurface>) {
-        self.front.ui.set_place("settings".into());
-        self.front.refresh();
+        self.s.front.ui.set_place("settings".into());
+        self.s.front.refresh();
         self.show();
-        self.full = true;
+        self.s.full = true;
         if let (Some(a), Some(seat), Some(surface)) = (&self.activation, &self.seat, from) {
             a.request_token(&self.qh, RequestData { app_id: Some("com.ectonomic.ectomatter".into()), seat_and_serial: Some((seat.clone(), self.press)), surface: Some(surface) });
         }
@@ -1153,12 +1043,12 @@ impl App {
     /// Close the window into the tray: without its buffer the window is
     /// unmapped, and Ectomatter carries on. With no tray, closing quits.
     fn hide(&mut self) {
-        self.front.hand_back();
+        self.s.front.hand_back();
         // (a scene being set, unkept: the scene on plays again)
-        self.front.cancel_scene_form();
-        if self.tray.is_none() {
-            self.front.scene_quit();
-            self.front.release_sliders();
+        self.s.front.cancel_scene_form();
+        if self.s.tray.is_none() {
+            self.s.front.scene_quit();
+            self.s.front.release_sliders();
             self.quitting = Some(Instant::now());
             return;
         }
@@ -1166,7 +1056,7 @@ impl App {
         self.window.commit();
         self.hidden = true;
         // (out of sight, the screen plays again rather than show the keyboard's own)
-        self.front.set_hidden(true);
+        self.s.front.set_hidden(true);
         self.configured = false;
         self.frame_pending = false;
         self.buffers.clear();
@@ -1180,8 +1070,8 @@ impl App {
         }
         eprintln!("ectomatter: shown again from the tray");
         self.hidden = false;
-        self.front.set_hidden(false);
-        self.full = true;
+        self.s.front.set_hidden(false);
+        self.s.full = true;
         self.window.commit();
         // (one hidden before it was first shown, as at login, has its size already: the
         // compositor sends nothing new, so it's drawn now)
@@ -1190,405 +1080,9 @@ impl App {
         }
     }
 
-    /// The keyboard came back drawn at a size, for its page or (`home`) for
-    /// Home's desk: light it, by the lab's light if it has tuned one.
-    fn built(&mut self, home: bool, mut board: Board) {
-        // its shadow round it, on the box it sits in or on the desk
-        if let Some(s) = &board.cast {
-            let (img, m) = (shadow_image(s, board.w, board.h), s.margin as f32 / self.scale as f32);
-            if home {
-                self.front.ui.set_desk_kb_shadow(img);
-                self.front.ui.set_desk_kb_shadow_m(m);
-            } else {
-                self.front.ui.set_board_shadow(img);
-                self.front.ui.set_board_shadow_margin(m);
-            }
-        }
-        // the lab, open before the device was first drawn, takes its caps
-        if let (Some(l), Some(core)) = (self.front.lab.as_mut().filter(|l| !l.has_caps() && !home && !l.windows()), cores::keyboard()) {
-            l.set_caps(lab_device(core, Some(&board)).caps);
-        }
-        if let Some(l) = &self.light {
-            board.set_light(l);
-        }
-        let now = self.light_now();
-        self.front.light_caps(&now);
-        // (drawn from the core as it was read: the legends the light asks for now)
-        if let Some(ask) = board.legends_for(&self.light_now()) {
-            let _ = self.set_legends.send(ask);
-        }
-        // The keys' light, simulated from the first keyboard drawn on, for
-        // every size (the simulation is in the art's units). Its first
-        // picture, the light straight from the LEDs, is waited for, a tenth
-        // of a second or so, so the keys don't show dark first.
-        if self.sim.is_none() {
-            let tx = std::sync::Mutex::new(self.sim_tx.clone());
-            let s = Simulator::new(Scene::of(&board), board.setup(&self.light_now()), Box::new(move || {
-                let _ = tx.lock().map(|t| t.send(()));
-            }));
-            let t = Instant::now();
-            s.wait(Duration::from_millis(1500));
-            eprintln!("ectomatter: the keys' light simulated, its first picture in {:?}", t.elapsed());
-            self.sim = Some(s);
-        }
-        let want = board.setup(&self.light_now());
-        if let Some(snap) = self.kept.get(&want) {
-            board.set_sim(snap);
-        } else if let Some(s) = &self.sim {
-            // (the simulation's latest, though it may be of the make before:
-            // the keyboard drawn new has none to keep instead)
-            s.set(&want);
-            if let Some(snap) = s.latest() {
-                self.sim_seen = s.version();
-                board.set_sim(snap);
-            }
-        }
-        self.want = Some(want);
-        if home {
-            self.home_share = Some(Rc::new(board.ground_share()));
-            self.home_board = Some(board);
-        } else {
-            self.board = Some(board);
-        }
-        self.relight();
-        self.full = true;
-        self.draw();
-    }
-
-    /// Home's keyboard, drawn for its size on the desk once the desk has
-    /// settled, ahead of Home's opening too, no larger than its page's (closer,
-    /// its last picture is stretched).
-    fn ask_home_board(&mut self) {
-        let Some((kw, kh)) = self.front.desk_keyboard_size().filter(|_| self.front.desk_settled()) else { return };
-        let s = self.scale as f32;
-        let page = (self.front.ui.get_board_width() * s).round().max(1.0);
-        // (its place's size in pixels as keyboard_place rounds it, so the
-        // picture fits it exactly)
-        let (pw, ph) = ((kw * s).round().max(1.0), (kh * s).round().max(1.0));
-        let (hw, hh) = if pw <= page { (pw as u32, ph as u32) } else { (page as u32, (page * kh / kw.max(1.0)).round().max(1.0) as u32) };
-        if self.home_board.as_ref().map(|b| (b.w, b.h)) != Some((hw, hh)) && self.home_asked != Some((hw, hh)) {
-            self.home_asked = Some((hw, hh));
-            let _ = self.home_build.send((hw, hh, self.light_now(), s));
-        }
-    }
-
-    /// Whether the picture the window shows is Home's keyboard: Home is up
-    /// with a keyboard on its desk.
-    fn shows_home(&self) -> bool {
-        self.front.desk_keyboard().is_some()
-    }
-
-    /// The keyboard the window shows lit again: the page's, or Home's on the
-    /// desk (dark while it isn't plugged in).
-    fn relight(&mut self) {
-        let home = self.shows_home();
-        let board = if home { self.home_board.as_ref() } else { self.board.as_ref() };
-        let Some(b) = board else {
-            if home {
-                self.lit = None;
-                self.lit_home = true;
-            }
-            return;
-        };
-        let lights = if home && !self.front.desk_keyboard_on() { &[][..] } else { &self.lights[..] };
-        let px = light(b, lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(b.w, b.lcd().dot));
-        self.lit = Some(Rc::new(Lit { px, w: b.w as usize, h: b.h as usize }));
-        self.lit_home = home;
-    }
-
-    /// Legends set as the light asks: put them on the keyboard, and light it again.
-    fn legends_ready(&mut self, legends: ectomatter_draw::hdr::Legends) {
-        // (set for one size: the keyboard of that size takes them)
-        let light = self.light_now();
-        // (each that takes them: the page's and Home's may be drawn at one size)
-        for board in [self.board.as_mut(), self.home_board.as_mut()].into_iter().flatten() {
-            if board.takes(&legends) {
-                board.set_legends(legends.clone());
-                // (the light may have changed again while they were set)
-                if let Some(ask) = board.legends_for(&light) {
-                    let _ = self.set_legends.send(ask);
-                }
-            }
-        }
-        self.relight();
-        self.full = true;
-        self.draw();
-    }
-
-    /// The simulation has a clearer picture of the keys' light: light the keyboard by it.
-    fn sim_ready(&mut self) {
-        let Some(s) = &self.sim else { return };
-        let version = s.version();
-        let Some(snap) = s.latest() else { return };
-        if version == self.sim_seen || (self.board.is_none() && self.home_board.is_none()) {
-            return;
-        }
-        self.sim_seen = version;
-        // (each keyboard, the page's and the desk's, lit by the same simulation)
-        let mut taken = false;
-        for board in [self.board.as_mut(), self.home_board.as_mut()].into_iter().flatten() {
-            if Kept::takes(self.want.as_ref(), board.sim(), &snap) {
-                board.set_sim(snap.clone());
-                taken = true;
-            }
-        }
-        if !taken {
-            return;
-        }
-        if snap.settled {
-            self.kept.keep(snap.clone());
-        }
-        self.relight();
-        self.readout_at = None;
-        self.readout();
-        self.draw();
-    }
-
-    /// How long between a lighting effect's frames: 30 a second, which
-    /// shows an effect smoothly and keeps Ectomatter light on the computer
-    /// (the keyboard plays the effect itself; the window only copies it).
-    fn effect_frame(&self) -> Duration {
-        Duration::from_secs_f64(1.0 / 30.0)
-    }
-
-    fn draw(&mut self) {
-        // the keys' light as bright as Settings › HDR lets it go on this screen, and
-        // Peak nits' slider from this screen's white to the brightest screen's peak
-        self.front.screen_peak = self.levels_peak;
-        self.front.levels = (self.pic.reference(), self.top_peak());
-        let g = self.front.light_gain(self.pic.reference());
-        if (g - self.gain).abs() > 1e-3 {
-            self.gain = g;
-            self.relight();
-        }
-        // (the tray's devices, as they sit on Home's desk, each told whether it is there)
-        if let Some(t) = &self.tray {
-            let devices: Vec<(String, String, bool)> = self.front.devices_in_order().into_iter().map(|(place, name, _, on)| (place, name, on)).collect();
-            if devices != self.tray_devices {
-                self.tray_devices = devices.clone();
-                t.devices(devices);
-            }
-            let scenes = (self.front.scenes().into_iter().map(|s| (s.id, s.name)).collect::<Vec<_>>(), self.front.scene_id());
-            if scenes != self.tray_scenes {
-                self.tray_scenes = scenes.clone();
-                t.scenes(scenes.0, scenes.1);
-            }
-        }
-        // (asked for whether or not this frame is drawn: a window out of sight
-        // gets no frames, and the keyboard should be ready when Home opens)
-        self.ask_home_board();
-        if self.hidden || !self.configured || self.frame_pending {
-            return;
-        }
-        let (w, h) = ((self.size.0 * self.scale) as usize, (self.size.1 * self.scale) as usize);
-        if self.pic.w != w || self.pic.h != h {
-            self.pic.resize(w, h);
-            self.full = true;
-        }
-        // where the keyboard shows: in its page's box, or on Home's desk (nothing
-        // there till Home's keyboard is drawn)
-        let s = self.scale as f32;
-        let home = self.front.desk_keyboard();
-        let rect = keyboard_place(&self.front, self.home_board.is_some(), s);
-        // the knobs and the display's glass for the keyboard's size as drawn,
-        // before the page is drawn, so they move with it in the same frame; on
-        // the desk, shown at its size there
-        let drawn = home.and_then(|_| self.home_board.as_ref().map(|b| (b.w, b.h))).unwrap_or((rect.2 as u32, rect.3 as u32));
-        self.front.board_size(drawn.0, drawn.1, s);
-        if home.is_some() && drawn.0 > 0 {
-            self.front.ui.set_desk_kb_k(rect.2 as f32 / drawn.0 as f32);
-        }
-        // the lab's tuning, when it has changed
-        let mut relit = false;
-        let mut relit_caps = false;
-        // (the mouse takes the lab's tuning of its lights itself)
-        if let Some(l) = self.front.lab.as_ref().filter(|l| l.windows() && (l.rev, l.comparing) != self.light_rev) {
-            self.light_rev = (l.rev, l.comparing);
-            let shown = l.shown().clone();
-            self.front.set_mouse_light(shown);
-        }
-        if let Some(lab) = self.front.lab.as_ref().filter(|l| !l.windows()) {
-            let rev = (lab.rev, lab.comparing);
-            if rev != self.light_rev {
-                self.light_rev = rev;
-                self.light = Some(lab.shown().clone());
-                // (both keyboards, the page's and the desk's)
-                if let Some(l) = &self.light {
-                    for b in [self.board.as_mut(), self.home_board.as_mut()].into_iter().flatten() {
-                        // the keys drawn again only if their picture changes now; how
-                        // the light falls shows with the simulation's next picture,
-                        // or at once from a picture kept of it
-                        relit |= b.set_light(l);
-                        // the legends, as the light asks for them, when they are set
-                        if let Some(ask) = b.legends_for(l) {
-                            let _ = self.set_legends.send(ask);
-                        }
-                    }
-                }
-                let setups = match (self.board.as_ref().or(self.home_board.as_ref()), &self.light) {
-                    (Some(b), Some(l)) => Some((b.setup(l), b.setup(lab.saved()))),
-                    _ => None,
-                };
-                if let Some((want, pinned)) = setups {
-                    self.kept.pinned = Some(pinned);
-                    let changed = self.want.as_ref().is_none_or(|w| !w.same_paths(&want));
-                    if changed {
-                        if let Some(snap) = self.kept.get(&want) {
-                            for b in [self.board.as_mut(), self.home_board.as_mut()].into_iter().flatten() {
-                                b.set_sim(snap.clone());
-                            }
-                            relit = true;
-                            if let Some(s) = &self.sim {
-                                s.rest();
-                            }
-                        } else if let Some(s) = &self.sim {
-                            s.set(&want);
-                        }
-                    }
-                    self.want = Some(want);
-                }
-                self.readout_at = None;
-                // (the caps' colors, for what is printed over the keys)
-                relit_caps = true;
-            }
-        }
-        if relit_caps {
-            let now = self.light_now();
-            self.front.light_caps(&now);
-            self.front.refresh();
-        }
-        // the keys' light, or the display's text, when it has changed
-        if let Some(b) = if home.is_some() { self.home_board.as_ref() } else { self.board.as_ref() } {
-            let _ = self.front.overlays.panel_for(b.w, b.lcd().dot);
-            // the glass's sheen as the core sets it
-            let glass = b.lcd().glass;
-            if (glass - self.front.overlays.glass_opacity).abs() > 1e-4 {
-                self.front.overlays.glass_opacity = glass;
-                self.front.show_overlays();
-            }
-        }
-        let panel_moved = self.front.overlays.panel_rev != self.panel_rev || relit;
-        self.panel_rev = self.front.overlays.panel_rev;
-        // a lighting effect's next frame only when it is due, 30 a second;
-        // anything else as it changes
-        let effect = self.front.animated();
-        let due = !effect || Instant::now() >= self.effect_due;
-        let lights = if due { self.front.lights() } else { None };
-        if effect && lights.is_some() {
-            self.effect_due = Instant::now() + self.effect_frame();
-        }
-        // the last frame's picture, kept until the picture shows the new one
-        let mut shown_before = None;
-        // the area the pointer is over on the Lighting page: the rest of the keyboard dims
-        let dim = if home.is_none() { self.board.as_ref().and_then(|b| self.front.dim_rects(b.w)) } else { None };
-        let dim_moved = dim != self.dim;
-        // (Home's keyboard, or the page's again, in place of the other)
-        let switched = self.lit_home != home.is_some();
-        if lights.is_some() || panel_moved || dim_moved || switched {
-            if let Some(l) = lights {
-                self.lights = l;
-            }
-            self.dim = dim;
-            let on_home = home.is_some();
-            match if on_home { self.home_board.as_ref() } else { self.board.as_ref() } {
-                Some(board) => {
-                    let mut px = std::mem::take(&mut self.spare);
-                    // (a keyboard not plugged in shows dark on the desk)
-                    let lights = if on_home && !self.front.desk_keyboard_on() { &[][..] } else { &self.lights[..] };
-                    light_into(&mut px, board, lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
-                    if let Some(rects) = &self.dim {
-                        dim_around(&mut px, board.w as usize, rects, board.chassis());
-                    }
-                    shown_before = self.lit.replace(Rc::new(Lit { px, w: board.w as usize, h: board.h as usize }));
-                }
-                None if on_home => shown_before = self.lit.take(),
-                None => {}
-            }
-            self.lit_home = on_home;
-            self.readout();
-        }
-        let full = self.full;
-        let mut dirty = Vec::new();
-        let pic = &mut self.pic;
-        self.slint.draw_if_needed(|r| {
-            if full {
-                r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
-            }
-            let region = r.render(&mut pic.ui, w);
-            if full {
-                r.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
-            }
-            // the whole of what Slint changed: its list of rectangles has been
-            // seen to leave out pixels it drew (the title bar's buttons)
-            let (o, sz) = (region.bounding_box_origin(), region.bounding_box_size());
-            if sz.width > 0 && sz.height > 0 {
-                dirty.push((o.x.max(0) as usize, o.y.max(0) as usize, sz.width as usize, sz.height as usize));
-            }
-        });
-
-        if lay_ground(&mut self.pic, &self.front.ui, self.scale as f32) {
-            self.full = true;
-        }
-        // the page's keyboard drawn for the window's size even while another
-        // page shows, so the keyboard is there, whole, the moment its page opens
-        let ui = &self.front.ui;
-        let want = ((ui.get_board_width() * s).round().max(1.0) as u32, (ui.get_board_height() * s).round().max(1.0) as u32);
-        if want.0 > 1 && self.board.as_ref().map(|b| (b.w, b.h)) != Some(want) && self.asked != Some(want) {
-            self.asked = Some(want);
-            let _ = self.build.send((want.0, want.1, self.light_now(), self.scale as f32));
-        }
-        // (the knobs and glass for the keyboard as drawn, as above)
-        self.front.board_size(drawn.0, drawn.1, s);
-        self.front.ui.set_board_ready(self.lit.is_some());
-        // the keyboard where it shows, in its page's box or on Home's desk (the
-        // one drawn at its size there, or the last one stretched to it while that
-        // size is drawn), and what Home's desk lays on the ground round it and under it
-        let share = if home.is_some() { self.home_share.clone() } else { None };
-        dirty.extend(lay_keyboard(&mut self.pic, &self.front, self.home_board.is_some(), self.lit.as_ref(), share, s));
-        // the mouse in its page's hole, lit as it shows now (and the lab tuning it told)
-        let laid = lay_mouse(&mut self.pic, &mut self.front, s);
-        if !laid.is_empty() && self.front.lab.as_ref().is_some_and(|l| l.windows()) {
-            self.readout();
-        }
-        dirty.extend(laid);
-        // the last frame's picture taken back, now nothing shows it, for the next
-        if let Some(old) = shown_before {
-            if let Ok(l) = Rc::try_unwrap(old) {
-                self.spare = l.px;
-            }
-        }
-
-        if self.full {
-            self.pic.encode_all();
-            dirty = vec![(0, 0, w, h)];
-        } else if dirty.is_empty() {
-            return;
-        } else {
-            self.pic.encode_many(&dirty);
-            if self.check {
-                let parts = self.pic.out.clone();
-                self.pic.encode_all();
-                let w = self.pic.w;
-                let (mut n, mut bb) = (0, (usize::MAX, usize::MAX, 0, 0));
-                for (i, (a, b)) in parts.iter().zip(&self.pic.out).enumerate() {
-                    if a != b {
-                        n += 1;
-                        let (x, y) = (i % w, i / w);
-                        bb = (bb.0.min(x), bb.1.min(y), bb.2.max(x), bb.3.max(y));
-                    }
-                }
-                if n > 0 {
-                    eprintln!("ectomatter: CHECK frame {}: {n} pixels differ from a whole encode, in x {}..{} y {}..{}; encoded {:?}; keyboard at {:?}", self.frames, bb.0, bb.2, bb.1, bb.3, dirty, self.pic.keyboard_rect());
-                }
-            }
-        }
-        self.full = false;
-        self.present(&dirty);
-    }
-
     /// Hand the picture to the compositor, inside the window's clear margin.
     fn present(&mut self, dirty: &[(usize, usize, usize, usize)]) {
-        let (w, h) = (self.pic.w, self.pic.h);
+        let (w, h) = (self.s.pic.w, self.s.pic.h);
         let s = self.scale as usize;
         let m = self.margins;
         let (ml, mt) = (m.l as usize * s, m.t as usize * s);
@@ -1598,7 +1092,7 @@ impl App {
         if fresh {
             canvas.fill(0);
         }
-        let src: &[u8] = bytemuck::cast_slice(&self.pic.out);
+        let src: &[u8] = bytemuck::cast_slice(&self.s.pic.out);
         for &(x, y, rw, rh) in &todo {
             let (x1, y1) = ((x + rw).min(w), (y + rh).min(h));
             for row in y.min(y1)..y1 {
@@ -1621,10 +1115,10 @@ impl App {
         self.buffers[i].0.attach_to(surface).unwrap();
         self.window.commit();
         self.frame_pending = true;
-        self.frames += 1;
-        if let Some(dir) = &self.dump {
-            let _ = std::fs::write(dir.join("frame.raw"), bytemuck::cast_slice::<[u16; 4], u8>(&self.pic.out));
-            let _ = std::fs::write(dir.join("frame.txt"), format!("{} {} {} {}\n", w, h, self.frames, self.pic.reference()));
+        self.s.frames += 1;
+        if let Some(dir) = &self.s.dump {
+            let _ = std::fs::write(dir.join("frame.raw"), bytemuck::cast_slice::<[u16; 4], u8>(&self.s.pic.out));
+            let _ = std::fs::write(dir.join("frame.txt"), format!("{} {} {} {}\n", w, h, self.s.frames, self.s.pic.reference()));
         }
     }
 
@@ -1652,7 +1146,7 @@ impl App {
             return;
         }
         if self.keys_on == Some(LAB) && down && self.mods.ctrl && matches!(e.keysym, Keysym::z | Keysym::Z | Keysym::y | Keysym::Y) {
-            if let Some(lab) = self.front.lab.as_mut().filter(|l| !l.typing()) {
+            if let Some(lab) = self.s.front.lab.as_mut().filter(|l| !l.typing()) {
                 lab.undo(self.mods.shift || matches!(e.keysym, Keysym::y | Keysym::Y));
                 return;
             }
@@ -1660,7 +1154,7 @@ impl App {
         // Escape in the lab shuts what is open over its page, then lets its
         // chosen key or light go, unless a box is being typed in
         if self.keys_on == Some(LAB) && down && e.keysym == Keysym::Escape {
-            if let Some(lab) = self.front.lab.as_mut().filter(|l| !l.typing()) {
+            if let Some(lab) = self.s.front.lab.as_mut().filter(|l| !l.typing()) {
                 if lab.escape() {
                     return;
                 }
@@ -1668,12 +1162,12 @@ impl App {
         }
         // Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y) in the main window: undo a change to a profile,
         // or do it again; a box being typed in takes them itself
-        if self.keys_on.is_none() && down && self.mods.ctrl && matches!(e.keysym, Keysym::z | Keysym::Z | Keysym::y | Keysym::Y) && !self.front.typing() {
-            self.front.asks.borrow_mut().push(front::Ask::Undo(self.mods.shift || matches!(e.keysym, Keysym::y | Keysym::Y)));
+        if self.keys_on.is_none() && down && self.mods.ctrl && matches!(e.keysym, Keysym::z | Keysym::Z | Keysym::y | Keysym::Y) && !self.s.front.typing() {
+            self.s.front.asks.borrow_mut().push(front::Ask::Undo(self.mods.shift || matches!(e.keysym, Keysym::y | Keysym::Y)));
             return;
         }
-        if self.keys_on == Some(LAYOUTS) && down && matches!(e.keysym, Keysym::Delete) && !self.front.typing_in_layouts() {
-            if let Some(l) = &self.front.layouts {
+        if self.keys_on == Some(LAYOUTS) && down && matches!(e.keysym, Keysym::Delete) && !self.s.front.typing_in_layouts() {
+            if let Some(l) = &self.s.front.layouts {
                 l.delete_key();
             }
             return;
@@ -1684,35 +1178,36 @@ impl App {
             }
             return;
         }
-        if self.front.typed(e.raw_code, down) {
-            self.front.refresh();
+        if self.s.front.typed(e.raw_code, down) {
+            self.s.front.refresh();
             return;
         }
         // Escape lets the page's chosen key or button go, unless a box is being typed in
-        if down && e.keysym == Keysym::Escape && !self.front.typing() && self.front.escape() {
+        if down && e.keysym == Keysym::Escape && !self.s.front.typing() && self.s.front.escape() {
             return;
         }
         // Delete or Backspace takes the pad chosen on Home's desk off it
-        if down && matches!(e.keysym, Keysym::Delete | Keysym::BackSpace) && !self.front.typing() && self.front.desk_delete_key() {
+        if down && matches!(e.keysym, Keysym::Delete | Keysym::BackSpace) && !self.s.front.typing() && self.s.front.desk_delete_key() {
             return;
         }
         // Ctrl and plus, minus or 0 zoom Home's desk in edit mode
-        if down && self.mods.ctrl && !self.front.typing() {
+        if down && self.mods.ctrl && !self.s.front.typing() {
             let how = match e.keysym {
                 Keysym::equal | Keysym::plus | Keysym::KP_Add => Some(1),
                 Keysym::minus | Keysym::KP_Subtract => Some(-1),
                 Keysym::_0 | Keysym::KP_0 => Some(2),
                 _ => None,
             };
-            if how.is_some_and(|how| self.front.desk_zoom_key(how)) {
+            if how.is_some_and(|how| self.s.front.desk_zoom_key(how)) {
                 return;
             }
         }
         if let Some(text) = key_text(e) {
-            self.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
+            self.s.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
         }
     }
 }
+
 
 impl CompositorHandler for App {
     fn scale_factor_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, factor: i32) {
@@ -1724,16 +1219,16 @@ impl CompositorHandler for App {
             mw.full = true;
             // the lab's legends drawn again at the screen's own pixels
             if which == LAB {
-                if let Some(l) = &mut self.front.lab {
+                if let Some(l) = &mut self.s.front.lab {
                     l.refresh();
                 }
             }
             return;
         }
         self.scale = factor.max(1) as u32;
-        self.slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: self.scale as f32 });
-        self.slint.set_size(PhysicalSize::new(self.size.0 * self.scale, self.size.1 * self.scale));
-        self.full = true;
+        self.s.slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: self.scale as f32 });
+        self.s.slint.set_size(PhysicalSize::new(self.size.0 * self.scale, self.size.1 * self.scale));
+        self.s.full = true;
     }
     fn transform_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: wl_output::Transform) {}
     fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, _: u32) {
@@ -1826,16 +1321,16 @@ impl WindowHandler for App {
             mw.configured = true;
             // the page laid out again for the window's width: the macro's chain wraps at it
             if which == MACROS {
-                if let Some(m) = &mut self.front.macros {
+                if let Some(m) = &mut self.s.front.macros {
                     m.ui.set_is_maximized(maximized);
-                    m.refresh(&self.front.page);
+                    m.refresh(&self.s.front.page);
                 }
             } else if which == LAYOUTS {
-                if let Some(l) = &mut self.front.layouts {
+                if let Some(l) = &mut self.s.front.layouts {
                     l.ui.set_is_maximized(maximized);
                 }
-                self.front.show_layouts();
-            } else if let Some(l) = &mut self.front.lab {
+                self.s.front.show_layouts();
+            } else if let Some(l) = &mut self.s.front.lab {
                 l.ui.set_is_maximized(maximized);
                 l.refresh();
             }
@@ -1846,20 +1341,20 @@ impl WindowHandler for App {
         let h = configure.new_size.1.map_or(self.size.1, NonZeroU32::get);
         if (w, h) != self.size || !self.configured {
             self.size = (w, h);
-            self.slint.set_size(PhysicalSize::new(w * self.scale, h * self.scale));
-            self.full = true;
+            self.s.slint.set_size(PhysicalSize::new(w * self.scale, h * self.scale));
+            self.s.full = true;
         }
         let maximized = configure.is_maximized();
         if maximized != self.maximized {
             self.maximized = maximized;
-            self.front.ui.set_is_maximized(maximized);
+            self.s.front.ui.set_is_maximized(maximized);
         }
         // (a new margin: every buffer drawn anew, its margin cleared)
         let m = Margins::of(&configure);
         if m != self.margins {
             self.margins = m;
             self.buffers.clear();
-            self.full = true;
+            self.s.full = true;
         }
         window.xdg_surface().set_window_geometry(m.l as i32, m.t as i32, w as i32, h as i32);
         self.configured = true;
@@ -1903,13 +1398,13 @@ impl KeyboardHandler for App {
         self.keys_on = self.which_sub(surface);
         match self.keys_on.and_then(|w| self.subs[w].as_ref()) {
             Some(sw) => sw.slint.dispatch_event(WindowEvent::WindowActiveChanged(true)),
-            None => self.slint.dispatch_event(WindowEvent::WindowActiveChanged(true)),
+            None => self.s.slint.dispatch_event(WindowEvent::WindowActiveChanged(true)),
         }
     }
     fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, surface: &wl_surface::WlSurface, _: u32) {
         match self.which_sub(surface).and_then(|w| self.subs[w].as_ref()) {
             Some(sw) => sw.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
-            None => self.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
+            None => self.s.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
         }
         self.keys_on = None;
     }
@@ -1959,13 +1454,13 @@ impl PointerHandler for App {
             match e.kind {
                 PointerEventKind::Enter { .. } => {
                     self.cursor = None;
-                    self.slint.dispatch_event(WindowEvent::PointerMoved { position });
+                    self.s.slint.dispatch_event(WindowEvent::PointerMoved { position });
                 }
                 PointerEventKind::Leave { .. } => {
-                    self.slint.dispatch_event(WindowEvent::PointerExited);
+                    self.s.slint.dispatch_event(WindowEvent::PointerExited);
                 }
                 PointerEventKind::Motion { .. } => {
-                    self.slint.dispatch_event(WindowEvent::PointerMoved { position });
+                    self.s.slint.dispatch_event(WindowEvent::PointerMoved { position });
                 }
                 PointerEventKind::Press { button: b, serial, .. } => {
                     self.press = serial;
@@ -1975,16 +1470,16 @@ impl PointerHandler for App {
                             continue;
                         }
                     }
-                    self.front.pressed_at(x as f32, y as f32);
-                    self.slint.dispatch_event(WindowEvent::PointerPressed { position, button: button(b) });
+                    self.s.front.pressed_at(x as f32, y as f32);
+                    self.s.slint.dispatch_event(WindowEvent::PointerPressed { position, button: button(b) });
                 }
                 PointerEventKind::Release { button: b, .. } => {
-                    self.slint.dispatch_event(WindowEvent::PointerReleased { position, button: button(b) });
+                    self.s.slint.dispatch_event(WindowEvent::PointerReleased { position, button: button(b) });
                     // (the cursor asked for again at once: see sub_pointer)
-                    self.slint.dispatch_event(WindowEvent::PointerMoved { position });
+                    self.s.slint.dispatch_event(WindowEvent::PointerMoved { position });
                 }
                 PointerEventKind::Axis { horizontal, vertical, .. } => {
-                    self.slint.dispatch_event(WindowEvent::PointerScrolled {
+                    self.s.slint.dispatch_event(WindowEvent::PointerScrolled {
                         position,
                         delta_x: -horizontal.absolute as f32,
                         delta_y: -vertical.absolute as f32,
@@ -2001,7 +1496,7 @@ impl PointerHandler for App {
                 Some(ResizeEdge::Right) => CursorIcon::EResize,
                 Some(ResizeEdge::Top) => CursorIcon::NResize,
                 Some(ResizeEdge::Bottom) => CursorIcon::SResize,
-                _ => self.slint.pointer(),
+                _ => self.s.slint.pointer(),
             };
             self.set_cursor(icon);
         }
@@ -2038,14 +1533,14 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
             let PictureTag(reference, peak) = *tag;
             app.cm_surface.set_image_description(desc, app.intent);
             app.levels = (reference, peak);
-            app.pic.set_reference(reference);
-            app.gain = LIGHT_GAIN;
-            if let Some(board) = &app.board {
-                let lit = light(board, &app.lights, app.front.page.locks, app.gain, app.pic.reference(), app.front.overlays.panel_for(board.w, board.lcd().dot));
-                app.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
+            app.s.pic.set_reference(reference);
+            app.s.gain = LIGHT_GAIN;
+            if let Some(board) = &app.s.board {
+                let lit = light(board, &app.s.lights, app.s.front.page.locks, app.s.gain, app.s.pic.reference(), app.s.front.overlays.panel_for(board.w, board.lcd().dot));
+                app.s.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
-            app.full = true;
-            app.slint.request_redraw();
+            app.s.full = true;
+            app.s.slint.request_redraw();
         }
     }
 }
@@ -2279,7 +1774,6 @@ pub(crate) fn edge_cursor(e: Option<ResizeEdge>) -> Option<CursorIcon> {
 
 
 /// A rectangle of a picture, in its pixels: x, y, width, height.
-pub(crate) type Rect = (usize, usize, usize, usize);
 
 /// A free buffer of the pool `bw` by `bh` for a picture `w` by `h` inside
 /// the window's margin (made if none is free), what of the picture in it is
@@ -2354,49 +1848,3 @@ mod edge_tests {
     }
 }
 
-#[cfg(test)]
-mod kept_tests {
-    use super::*;
-    use ectomatter_draw::hdr::sim::Physics;
-
-    /// The device's keys to simulate, and a make of their light for each beam.
-    fn scene() -> (Scene, impl Fn(f32) -> Setup) {
-        let core = cores::keyboard().expect("the keyboard's core");
-        let (device, tree) = (core.device_now(), core.tree());
-        let board = Board::new(&tree, &device, ink_env::rgb("stage", STAGE), 632, 253).unwrap();
-        let base = Physics::from(&device["light"]);
-        (Scene::of(&board), move |beam: f32| Setup::alike(Physics { beam, led: 7.0, ..base }))
-    }
-
-    /// A picture of another make than the one wanted is taken while the
-    /// keyboard shows an older one (a slider dragged), but never over a
-    /// picture of the one wanted.
-    #[test]
-    fn a_picture_on_the_way_is_taken_but_not_over_the_one_wanted() {
-        let (scene, make) = scene();
-        let (a, b, c) = (make(1.0), make(2.0), make(3.0));
-        let pa = Simulator::settle(&scene, &a, 200);
-        let pb = Simulator::settle(&scene, &b, 200);
-        assert!(Kept::takes(Some(&c), Some(&pa), &pb), "on the way to the one wanted");
-        assert!(Kept::takes(Some(&c), None, &pb), "on a keyboard with none");
-        assert!(!Kept::takes(Some(&a), Some(&pa), &pb), "not over the one wanted");
-        assert!(Kept::takes(Some(&a), Some(&pa), &pa), "the one wanted, clearer");
-    }
-
-    /// The last few settled pictures are kept, the newest found first; past
-    /// the most kept the oldest goes, but never the saved tuning's.
-    #[test]
-    fn pictures_are_kept_but_the_saved_one_stays() {
-        let (scene, make) = scene();
-        let mut kept = Kept { pinned: Some(make(1.0)), ..Kept::default() };
-        for beam in [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0] {
-            kept.keep(std::sync::Arc::new(Simulator::settle(&scene, &make(beam), 200)));
-        }
-        assert_eq!(kept.pictures.len(), Kept::MOST, "as many as are kept");
-        assert!(kept.get(&make(1.0)).is_some(), "the saved tuning's stays");
-        assert!(kept.get(&make(2.0)).is_none() && kept.get(&make(3.0)).is_none(), "the oldest others go");
-        assert!(kept.get(&make(6.0)).is_some_and(|s| Kept::of(&s, &make(6.0))), "the newest found");
-        // an LED output of its own is the same picture
-        assert!(kept.get(&Setup::alike(Physics { lumens: 1.23, ..make(6.0).all })).is_some());
-    }
-}
