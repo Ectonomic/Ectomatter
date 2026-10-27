@@ -2183,11 +2183,12 @@ impl LabPage {
             };
             return;
         }
-        let path = self.device.path.clone();
-        let result = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| {
+        // (into the core's own file run from the source folder; else into the
+        // person's own copy of it, the core's left as it came)
+        let (from, to) = (crate::cores::tuning_read(&self.device.core, &self.device.path), crate::cores::tuning_written(&self.device.core, &self.device.path));
+        let result = std::fs::read_to_string(&from).map_err(|e| e.to_string()).and_then(|s| {
             let out = saved_into(&s, &self.light, self.device.light_at)?;
-            let tmp = path.with_extension("json.tmp");
-            std::fs::write(&tmp, &out).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
+            crate::files::write_whole(&to, out.as_bytes()).map_err(|e| e.to_string())
         });
         self.status = match result {
             Ok(()) => {

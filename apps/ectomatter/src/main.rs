@@ -41,6 +41,7 @@ mod device;
 mod display;
 mod devices;
 mod ecto_settings;
+mod files;
 mod form;
 mod front;
 mod front_app;

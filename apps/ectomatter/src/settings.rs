@@ -20,9 +20,7 @@ pub struct Settings {
 
 impl Settings {
     pub fn load(path: PathBuf) -> Settings {
-        let data = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
+        let data = crate::files::read_json(&path)
             .filter(Value::is_object)
             .unwrap_or_else(|| Value::Object(Map::new()));
         Settings { path, data: Mutex::new(data), unsaved: Mutex::new(None) }
@@ -107,11 +105,29 @@ impl Settings {
             return Ok(());
         }
         let d = self.data.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(&*d)?)?;
-        std::fs::rename(&tmp, &self.path)
+        crate::files::write_json(&self.path, &d)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A settings file that can't be read is kept aside as it was, not
+    /// written over by the next change (files.rs).
+    #[test]
+    fn a_damaged_settings_file_outlives_the_next_change() {
+        let d = std::env::temp_dir().join(format!("ectomatter-settings-damaged-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("settings.json");
+        std::fs::write(&p, b"{ \"scenes\": [ cut off").unwrap();
+        let s = Settings::load(p.clone());
+        s.set("rail_open", Value::Bool(true)).unwrap();
+        let kept: Vec<_> = std::fs::read_dir(&d).unwrap().flatten().map(|e| e.path()).filter(|q| q.to_string_lossy().contains(".damaged-")).collect();
+        assert_eq!(kept.len(), 1, "the damaged file kept");
+        assert_eq!(std::fs::read(&kept[0]).unwrap(), b"{ \"scenes\": [ cut off");
+        assert_eq!(Settings::load(p).get("rail_open"), Some(Value::Bool(true)));
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

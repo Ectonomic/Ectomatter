@@ -32,8 +32,9 @@ impl Core {
         let manifest = crate::core_host::Manifest::read(folder)?;
         let file = manifest.spec.device_file.as_deref().ok_or_else(|| format!("the {} core names no device description", manifest.id))?;
         let path = std::env::var_os("ECTOMATTER_CORE_DEVICE").map(PathBuf::from).unwrap_or_else(|| folder.join(file));
-        let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let device = ectomatter_draw::jsonc::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        let read = tuning_read(&manifest.id, &path);
+        let text = std::fs::read_to_string(&read).map_err(|e| format!("{}: {e}", read.display()))?;
+        let device = ectomatter_draw::jsonc::parse(&text).map_err(|e| format!("{}: {e}", read.display()))?;
         let art_path = folder.join(device["art"].as_str().ok_or("its device description names no art")?);
         let art = std::fs::read_to_string(&art_path).map_err(|e| format!("{}: {e}", art_path.display()))?;
         Ok(Core { id: manifest.id, folder: folder.to_path_buf(), device, path, art, described: OnceLock::new() })
@@ -85,7 +86,7 @@ impl Core {
     /// Its device description as its file has it now, which the lab
     /// may have saved into since it was read.
     pub fn device_now(&self) -> serde_json::Value {
-        std::fs::read_to_string(&self.path).ok().and_then(|t| ectomatter_draw::jsonc::parse(&t).ok()).unwrap_or_else(|| self.device.clone())
+        std::fs::read_to_string(tuning_read(&self.id, &self.path)).ok().and_then(|t| ectomatter_draw::jsonc::parse(&t).ok()).unwrap_or_else(|| self.device.clone())
     }
 }
 
@@ -120,6 +121,38 @@ fn find_home() -> PathBuf {
         .or_else(|| has(&installed).then(|| installed.clone()))
         .or_else(|| system.split(':').map(|d| Path::new(d).join("ectomatter")).find(|d| has(d)))
         .unwrap_or(installed)
+}
+
+/// Whether Ectomatter runs from its source folder (its packages found there,
+/// as a build from it finds them): a developer's, where the lab's tuning is
+/// saved into each core's own file and ships as the core's default.
+pub fn from_source() -> bool {
+    let h = home();
+    h.join("Cargo.toml").is_file() && h.join("apps/ectomatter").is_dir()
+}
+
+/// Where the lab keeps a core's file it tunes (its device's description, or
+/// a mouse's light): the core's own file, run from the source folder; else a
+/// copy in the person's own data folder, the core's file left as it came.
+pub fn tuning_written(core: &str, shipped: &Path) -> PathBuf {
+    tuning_at(from_source(), &crate::data_dir(), core, shipped)
+}
+
+/// The same, for Ectomatter run from its source folder or not (`source`),
+/// with the person's data folder `data`.
+fn tuning_at(source: bool, data: &Path, core: &str, shipped: &Path) -> PathBuf {
+    if source {
+        return shipped.to_path_buf();
+    }
+    let name = shipped.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    data.join("tuning").join(core).join(name)
+}
+
+/// Where a core's file the lab tunes is read from: the person's own copy,
+/// where the lab has saved one, else the core's.
+pub fn tuning_read(core: &str, shipped: &Path) -> PathBuf {
+    let own = tuning_written(core, shipped);
+    if own.is_file() { own } else { shipped.to_path_buf() }
 }
 
 /// Where the cores that come with Ectomatter are.
@@ -186,4 +219,22 @@ fn described_alone(p: &crate::packages::Package) -> serde_json::Value {
     let d = crate::core_host::described_alone(&p.dir, std::time::Duration::from_secs(60));
     assert!(d.is_object(), "the keyboard's core describes it");
     d
+}
+
+#[cfg(test)]
+mod tuning_tests {
+    use super::*;
+
+    /// The lab's tuning goes into the core's own file run from the source
+    /// folder, and into the person's own folder otherwise, never into an
+    /// installed core's.
+    #[test]
+    fn an_installed_cores_tuning_is_kept_in_the_persons_folder() {
+        let shipped = Path::new("/usr/share/ectomatter/cores/evga-z10/device.json");
+        let data = Path::new("/home/someone/.local/share/com.ectonomic.ectomatter");
+        assert_eq!(tuning_at(true, data, "evga-z10", shipped), shipped);
+        let own = tuning_at(false, data, "evga-z10", shipped);
+        assert_eq!(own, data.join("tuning/evga-z10/device.json"));
+        assert!(!own.starts_with("/usr"), "never into the installed core");
+    }
 }

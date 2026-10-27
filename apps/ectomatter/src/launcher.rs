@@ -326,9 +326,7 @@ fn change_files(root: &Path, switches: &[Switch], backups: &Path) -> Result<Path
 
 /// A file written whole beside itself, then moved over it.
 fn replace(p: &Path, text: &str) -> Result<(), String> {
-    let tmp = p.with_extension("vdf.ectomatter");
-    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, p).map_err(|e| e.to_string())
+    crate::files::write_whole(p, text.as_bytes()).map_err(|e| e.to_string())
 }
 
 /// Now, as a folder's name sorts by it (20261023-142501).
@@ -687,9 +685,7 @@ pub fn write_recipe(name: &str, recipe: &Value) -> Result<(), String> {
         return Ok(());
     }
     // (written whole beside it, then moved over it: a game starting never reads half a recipe)
-    let tmp = dir.join(format!(".{name}.{}.json", std::process::id()));
-    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
+    crate::files::write_whole(&p, text.as_bytes()).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------- the games' starts

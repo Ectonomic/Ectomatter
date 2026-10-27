@@ -1328,7 +1328,7 @@ impl Page {
 /// that says nothing of it.
 pub fn light_model(desc: &Value) -> Value {
     match &desc["light"] {
-        Value::String(file) => std::fs::read_to_string(shape().folder.join(file)).ok().and_then(|t| ectomatter_draw::jsonc::parse(&t).ok()).unwrap_or(Value::Null),
+        Value::String(file) => std::fs::read_to_string(crate::cores::tuning_read(&shape().core, &shape().folder.join(file))).ok().and_then(|t| ectomatter_draw::jsonc::parse(&t).ok()).unwrap_or(Value::Null),
         v => v.clone(),
     }
 }

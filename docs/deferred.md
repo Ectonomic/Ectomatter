@@ -237,10 +237,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 ## Stage 1: installable on Linux
 
 - No install layout, release build of the cores, udev rule or desktop entry.
-- The lab saves into the source folder (`lab.rs:2181`), over what the core
-  ships.
-- A damaged settings file is read as empty and replaced (`settings.rs:22`).
-  Safe writes are copied in nine places; no saved file has a version.
+- Installed (not run from the source folder), the lab saves a core's tuning
+  as a whole copy of the core's file in the person's data folder
+  (`cores.rs`, `tuning_written`), and the core is read from that copy from
+  then on: an update to the core's own file isn't seen while a copy is
+  there, and nothing says the copy shadows it.
+- No file Ectomatter saves has a version of its own (`files.rs`): a change to
+  what one holds is read by its keys alone.
 - License gaps: Slint's attribution, the fonts' licenses.
 - The GitHub repositories exist in the Ectonomic organization
   (Ectonomic/Ectomatter and one per package, `ectomatter-<package id>`,

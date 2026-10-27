@@ -59,7 +59,7 @@ pub fn path_for(device: &str) -> Option<PathBuf> {
 impl Store {
     /// A device's profiles as they were kept, if any were.
     pub fn load(path: Option<PathBuf>) -> Option<Store> {
-        let v: Value = serde_json::from_slice(&std::fs::read(path.as_ref()?).ok()?).ok()?;
+        let v: Value = crate::files::read_json(path.as_ref()?)?;
         let list: Vec<Profile> = v["profiles"]
             .as_array()?
             .iter()
@@ -109,12 +109,8 @@ impl Store {
                 v
             })
             .collect();
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let tmp = path.with_extension("json.tmp");
-        if std::fs::write(&tmp, serde_json::to_vec_pretty(&json!({ "active": self.active, "profiles": profiles })).unwrap_or_default()).is_ok() {
-            let _ = std::fs::rename(&tmp, path);
+        if let Err(e) = crate::files::write_json(path, &json!({ "active": self.active, "profiles": profiles })) {
+            eprintln!("ectomatter: the profiles weren’t saved: {e}");
         }
     }
 

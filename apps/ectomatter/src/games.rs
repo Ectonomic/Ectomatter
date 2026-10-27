@@ -111,7 +111,7 @@ fn kept_at() -> (Option<PathBuf>, Option<PathBuf>) {
 impl Library {
     pub fn load() -> Library {
         let (read, write) = kept_at();
-        let v = read.and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(|v| v.is_object()).unwrap_or_else(|| json!({}));
+        let v = read.and_then(|p| crate::files::read_json(&p)).filter(|v| v.is_object()).unwrap_or_else(|| json!({}));
         Library { path: write, v, steam: None }
     }
 
@@ -123,12 +123,8 @@ impl Library {
 
     fn save(&self) {
         let Some(p) = &self.path else { return };
-        if let Some(dir) = p.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let tmp = p.with_extension("json.tmp");
-        if std::fs::write(&tmp, serde_json::to_vec_pretty(&self.v).unwrap_or_default()).is_ok() {
-            let _ = std::fs::rename(&tmp, p);
+        if let Err(e) = crate::files::write_json(p, &self.v) {
+            eprintln!("ectomatter: the Library's choices weren’t saved: {e}");
         }
     }
 

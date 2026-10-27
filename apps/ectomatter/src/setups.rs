@@ -76,8 +76,7 @@ pub fn write(core: &str, device: &str, lab: &str, s: &Setup, note: Note) -> Resu
     let folder = dir(core);
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let path = folder.join(format!("{}.json", s.id));
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, file_text(device, lab, s, note)).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
+    crate::files::write_whole(&path, file_text(device, lab, s, note).as_bytes()).map_err(|e| e.to_string())
 }
 
 /// A setup's file as a person reads it: what it is and how it works, at

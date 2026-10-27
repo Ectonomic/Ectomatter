@@ -90,7 +90,7 @@ impl Journal {
     /// The record as it was left, from where it's kept (none, for a check
     /// or a test, which keeps nothing).
     pub fn load(path: Option<PathBuf>) -> Journal {
-        let v: Value = path.as_ref().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+        let v: Value = path.as_ref().and_then(|p| crate::files::read_json(p)).unwrap_or(Value::Null);
         let sessions = v["sessions"]
             .as_array()
             .into_iter()
@@ -116,12 +116,8 @@ impl Journal {
             "game": { "id": s.game.id, "name": s.game.name, "pid": s.game.pid, "since": s.game.since },
             "changes": s.changes.iter().map(Change::to_value).collect::<Vec<_>>(),
         })).collect::<Vec<_>>() });
-        if let Some(dir) = p.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let tmp = p.with_extension("json.tmp");
-        if std::fs::write(&tmp, serde_json::to_vec_pretty(&v).unwrap_or_default()).is_ok() {
-            let _ = std::fs::rename(&tmp, p);
+        if let Err(e) = crate::files::write_json(p, &v) {
+            eprintln!("ectomatter: what's to be put back wasn’t saved: {e}");
         }
     }
 }

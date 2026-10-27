@@ -15,7 +15,7 @@ const RENAMED: [(&str, &str); 2] = [("recent_colours", "recent_colors"), ("recen
 /// All of it, each thing kept under an old name read under its name now (and saved so the
 /// next time anything is).
 fn all() -> Map<String, Value> {
-    renamed(std::fs::read(path()).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default())
+    renamed(crate::files::read_json(&path()).and_then(|v| v.as_object().cloned()).unwrap_or_default())
 }
 
 /// What the window kept, each thing under an old name moved to its name now (where nothing
@@ -41,12 +41,8 @@ pub fn set(key: &str, value: Value) {
     let mut m = all();
     m.insert(key.into(), value);
     let p = path();
-    if let Some(dir) = p.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let tmp = p.with_extension("json.tmp");
-    if std::fs::write(&tmp, serde_json::to_vec_pretty(&Value::Object(m)).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&tmp, &p);
+    if let Err(e) = crate::files::write_json(&p, &Value::Object(m)) {
+        eprintln!("ectomatter: the window's state wasn’t saved: {e}");
     }
 }
 

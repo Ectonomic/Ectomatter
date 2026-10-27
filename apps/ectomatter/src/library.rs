@@ -23,8 +23,7 @@ fn with<R>(f: impl FnOnce(&mut Map<String, Value>) -> R) -> R {
     let mut g = MACROS.lock().unwrap_or_else(|p| p.into_inner());
     let m = g.get_or_insert_with(|| {
         path()
-            .and_then(|p| std::fs::read(p).ok())
-            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|p| crate::files::read_json(&p))
             .and_then(|v| v["macros"].as_object().cloned())
             .unwrap_or_default()
     });
@@ -33,12 +32,8 @@ fn with<R>(f: impl FnOnce(&mut Map<String, Value>) -> R) -> R {
 
 fn keep(m: &Map<String, Value>) {
     let Some(p) = path() else { return };
-    if let Some(dir) = p.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let tmp = p.with_extension("json.tmp");
-    if std::fs::write(&tmp, serde_json::to_vec_pretty(&json!({ "macros": m })).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&tmp, &p);
+    if let Err(e) = crate::files::write_json(&p, &json!({ "macros": m })) {
+        eprintln!("ectomatter: Ectomatter's macros weren’t saved: {e}");
     }
 }
 
