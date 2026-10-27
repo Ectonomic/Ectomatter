@@ -12,6 +12,8 @@ ectomatter-draw = { path = "../../crates/ectomatter-draw" }
 ectomatter-protocol = { path = "../../crates/ectomatter-protocol" }
 # the winit shell: its window and input, and its frames shown through wgpu (src/shell/winit.rs)
 ectomatter-present = { path = "../../crates/ectomatter-present" }
+# the winit shell's windows of their own, drawn on the CPU
+softbuffer = "0.4.8"
 # the cursors both shells name (the Wayland toolkit's and winit's are this crate's)
 cursor-icon = "1.2"
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "wayland-dlopen", "x11"] }

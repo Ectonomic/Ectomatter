@@ -58,6 +58,11 @@ impl Kept {
 pub(crate) struct Session {
     /// what Ectomatter's threads tell the window, taken as the shell is woken
     pub(crate) inbox: Inbox,
+    /// the Slint windows made, in order (the main window first), and those of
+    /// the windows of their own (the Macro Editor's, the lab's, the screen
+    /// layout editor's), once each is opened
+    pub(crate) made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>,
+    pub(crate) windows: [Option<Rc<MinimalSoftwareWindow>>; 3],
     /// KWin's script, which tells Ectomatter the app in front, and when it was last looked at
     pub(crate) front_bus: Option<front_app::Bus>,
     pub(crate) kwin_looked: Instant,
@@ -633,6 +638,21 @@ pub(crate) struct Inbox {
 
 use std::sync::mpsc::Receiver;
 
+/// A window of its own to open, on what.
+pub(crate) enum Open {
+    Macros(macros::Lib, u32),
+    Layouts(usize),
+    Lab,
+}
+
+/// A window of its own opened: its Slint window made, for the shell to make
+/// the system's window for (titled, at its size, no smaller than its
+/// least), or one made before, to show again.
+pub(crate) enum Opened {
+    New { window: Rc<MinimalSoftwareWindow>, title: String, size: (u32, u32), min: (u32, u32) },
+    Again,
+}
+
 /// What a step of the session asks of the shell's loop.
 pub(crate) enum Step {
     /// carry on
@@ -646,7 +666,7 @@ impl Session {
     /// on, the keyboard's and the mouse's threads, the screen's player, the
     /// macros' jobs, the app in front, the launcher and the tray, each
     /// telling the window through a sender that calls `wake`.
-    pub(crate) fn start(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: settings::Settings, reference: f64, gain: f32, wake: &shell::Wake) -> Session {
+    pub(crate) fn start(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, ui: AppWindow, settings: settings::Settings, reference: f64, gain: f32, wake: &shell::Wake) -> Session {
         // asked to stop (a log out, or kill): quit as the tray's Quit does, so
         // what changed is saved and the screen handed back (`step`), in every
         // shell
@@ -738,6 +758,8 @@ impl Session {
         let (tray_tx, tray_rx) = shell::channel::<tray::TrayAsk>(wake);
         let tray = tray::start(tray_tx);
         Session {
+            made,
+            windows: [None, None, None],
             inbox: Inbox { built, legends, sim, heard, locks, mouse: mouse_rx, jobs, news, front: front_rx, starts, tray: tray_rx },
             front_bus,
             kwin_looked: Instant::now(),
@@ -868,6 +890,167 @@ impl Session {
         }
         if let Some(text) = p.text {
             self.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
+        }
+    }
+
+    /// A window of its own opened, made the first time: the Macro Editor on a
+    /// macro, the screen layout editor on a layout of the Library, or the lab
+    /// on the light the keyboard is lit by (or, from the mouse's page, on the
+    /// mouse's lights, made anew when it was open on the other device). Which
+    /// window it is, and whether the shell is to make its window or show it
+    /// again; none where there's nothing to open it on.
+    pub(crate) fn open(&mut self, what: Open) -> Option<(usize, Opened)> {
+        let mark = || glyph(include_str!("../../ui/glyphs/mark.svg"), 16, false);
+        let opened = |s: &mut Session, which: usize, title: String, size: (u32, u32), min: (u32, u32)| {
+            let window = s.made.borrow().last().cloned().expect("the window's adapter");
+            window.set_size(PhysicalSize::new(size.0, size.1));
+            s.windows[which] = Some(window.clone());
+            Opened::New { window, title, size, min }
+        };
+        match what {
+            Open::Macros(lib, n) => {
+                let made = if self.front.macros.is_none() {
+                    let ui = MacroWindow::new().unwrap();
+                    let _ = slint::ComponentHandle::window(&ui);
+                    slint::ComponentHandle::show(&ui).unwrap();
+                    self.front.macros = Some(macro_page::MacroPage::new(ui, mark()));
+                    opened(self, MACROS, "Macro Editor".into(), MACRO_SIZE, MACRO_MIN_SIZE)
+                } else {
+                    Opened::Again
+                };
+                self.front.macros_elsewhere();
+                if let Some(m) = &mut self.front.macros {
+                    m.open(&self.front.page, lib, (n > 0).then_some(n));
+                }
+                Some((MACROS, made))
+            }
+            Open::Layouts(i) => {
+                let made = if self.front.layouts.is_none() {
+                    let ui = LayoutWindow::new().unwrap();
+                    let name = cores::keyboard().map_or("", |c| c.name());
+                    ui.set_device_name(name.into());
+                    let _ = slint::ComponentHandle::window(&ui);
+                    slint::ComponentHandle::show(&ui).unwrap();
+                    self.front.layouts = Some(layout_page::LayoutPage::new(ui, mark()));
+                    opened(self, LAYOUTS, format!("{name} / Screen layouts"), LAYOUT_SIZE, LAYOUT_MIN_SIZE)
+                } else {
+                    Opened::Again
+                };
+                self.front.open_layouts(i);
+                Some((LAYOUTS, made))
+            }
+            Open::Lab => {
+                let mouse = self.front.ui.get_place() == "mouse";
+                if self.front.lab.as_ref().is_some_and(|l| l.windows() != mouse) {
+                    self.front.lab = None;
+                    self.windows[LAB] = None;
+                }
+                let made = if self.front.lab.is_none() {
+                    let (light, device, core, name) = if mouse {
+                        let d = mouse_lab_device(&self.front)?;
+                        let name = format!("{} / {}", d.name, d.lab());
+                        (self.front.mouse_light_model(), d, mouse::shape().core.clone(), name)
+                    } else {
+                        let core = cores::keyboard()?;
+                        let d = lab_device(core, self.board.as_ref());
+                        let name = format!("{} / {}", d.name, d.lab());
+                        (self.light_now(), d, core.id.clone(), name)
+                    };
+                    let ui = LabWindow::new().unwrap();
+                    let _ = slint::ComponentHandle::window(&ui);
+                    slint::ComponentHandle::show(&ui).unwrap();
+                    let setup = setups::in_use(&self.front.settings, &core).map(|s| s.id);
+                    self.front.lab = Some(lab::LabPage::new(ui, mark(), light, device, setup));
+                    opened(self, LAB, name, LAB_SIZE, LAB_MIN_SIZE)
+                } else {
+                    Opened::Again
+                };
+                self.front.ui.set_lab_open(true);
+                self.readout();
+                Some((LAB, made))
+            }
+        }
+    }
+
+    /// A window of its own closed (kept, to open again as it was): the Macro
+    /// Editor's lets a recording go, the lab's tells the page, and the screen
+    /// layout editor's has the keyboard's screen play its playlist again.
+    pub(crate) fn closed(&mut self, which: usize) {
+        if which == MACROS {
+            if let Some(m) = &mut self.front.macros {
+                m.cancel_recording(&self.front.page);
+            }
+        }
+        if which == LAB {
+            self.front.ui.set_lab_open(false);
+        }
+        if which == LAYOUTS {
+            self.front.layouts_closed();
+        }
+    }
+
+    /// A key pressed or let go in one of Ectomatter's windows (`on`: none for
+    /// the main window, else which window of its own): Ctrl+Shift+K anywhere
+    /// asks for the lab; in the lab, Ctrl+Z and Ctrl+Y undo and redo and
+    /// Escape shuts what's open over its page; in the screen layout editor,
+    /// Delete deletes the block chosen; unless a box is being typed in. Else
+    /// the key goes to its window (the main window's: `key`). Whether the
+    /// lab is asked for.
+    pub(crate) fn key_in(&mut self, on: Option<usize>, p: shell::Press) -> bool {
+        let down = p.down;
+        if down && p.ctrl && p.shift && p.is('k') {
+            return true;
+        }
+        if on == Some(LAB) && down && p.ctrl && (p.is('z') || p.is('y')) {
+            if let Some(lab) = self.front.lab.as_mut().filter(|l| !l.typing()) {
+                lab.undo(p.shift || p.is('y'));
+                return false;
+            }
+        }
+        if on == Some(LAB) && down && p.is_key(Key::Escape) {
+            if let Some(lab) = self.front.lab.as_mut().filter(|l| !l.typing()) {
+                if lab.escape() {
+                    return false;
+                }
+            }
+        }
+        if on == Some(LAYOUTS) && down && p.is_key(Key::Delete) && !self.front.typing_in_layouts() {
+            if let Some(l) = &self.front.layouts {
+                l.delete_key();
+            }
+            return false;
+        }
+        match on {
+            Some(which) => {
+                if let (Some(w), Some(text)) = (&self.windows[which], p.text) {
+                    w.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
+                }
+            }
+            None => self.key(p),
+        }
+        false
+    }
+
+    /// A press in a window of its own, at (x, y), told to its page first (for
+    /// what it does on a press, such as a drag's start).
+    pub(crate) fn pressed_in(&mut self, which: usize, x: f32, y: f32) {
+        match which {
+            MACROS => {
+                if let Some(m) = &mut self.front.macros {
+                    m.pressed_at(x, y);
+                }
+            }
+            LAYOUTS => {
+                if let Some(l) = &mut self.front.layouts {
+                    l.pressed_at(x, y);
+                }
+            }
+            LAB => {
+                if let Some(l) = &mut self.front.lab {
+                    l.pressed_at(x, y);
+                }
+            }
+            _ => {}
         }
     }
 

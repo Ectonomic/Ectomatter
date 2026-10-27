@@ -564,8 +564,7 @@ fn main() {
     if !std::env::var("ECTOMATTER_SHELL").is_ok_and(|s| s == "winit") {
         return shell::wayland::run(window, made, ui, settings, reference, gain);
     }
-    drop(made);
-    shell::winit::run(window, ui, settings, reference, gain);
+    shell::winit::run(window, made, ui, settings, reference, gain);
 }
 
 /// The apps a snapshot's setting names come to the front, in order, as KWin

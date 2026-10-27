@@ -9,7 +9,8 @@
 //! is the one used (it describes the picture's HDR to the compositor
 //! itself, which a Vulkan swapchain there can't yet: docs/deferred.md).
 //! The windows of their own (the Macro Editor, the lab, the screen layout
-//! editor), the clipboard and drags aren't in this shell yet.
+//! editor) are windows of winit's too, in SDR as the Wayland shell has them,
+//! drawn through softbuffer. The clipboard and drags aren't in this shell yet.
 
 use std::sync::Arc;
 
@@ -21,7 +22,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
 use winit::window::{ResizeDirection, Window, WindowId};
 
-use super::session::{self, Session};
+use super::session::{self, Opened, Session};
 use crate::*;
 
 /// The window and what draws into it, once the system has given it.
@@ -35,9 +36,35 @@ struct Shown {
     presenter: Presenter,
 }
 
+/// A window of its own (the Macro Editor's, the lab's, the screen layout
+/// editor's): its window, what draws into it, its Slint window and the
+/// pixels Slint drew; the pointer on it, whether a button is held there,
+/// whether it's closed (kept, to open again as it was), and whether it's to
+/// be drawn whole.
+struct Sub {
+    window: Arc<Window>,
+    surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
+    slint: Rc<MinimalSoftwareWindow>,
+    px: Vec<PremultipliedRgbaColor>,
+    at: (f64, f64),
+    held: bool,
+    hidden: bool,
+    full: bool,
+}
+
 struct App {
     s: Session,
     shown: Option<Shown>,
+    /// the windows of their own, once opened, softbuffer's hold on the
+    /// display they draw through, and which window has the keys (none, the
+    /// main one)
+    subs: [Option<Sub>; 3],
+    soft: Option<softbuffer::Context<Arc<Window>>>,
+    keys_on: Option<usize>,
+    lab_asked: bool,
+    /// ECTOMATTER_OPEN_MACROS=N and ECTOMATTER_OPEN_LAB: a window of its own
+    /// opened at the start, to check it, as the Wayland shell does
+    open_macros: Option<u32>,
     /// the pointer's place in the window's logical pixels, and the modifiers held
     at: (f64, f64),
     mods: ModifiersState,
@@ -61,14 +88,14 @@ struct App {
 /// How far in from the window's edge a press resizes it, in logical pixels.
 const RESIZE_GRAB: f64 = 6.0;
 
-pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: settings::Settings, reference: f64, gain: f32) {
+pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, ui: AppWindow, settings: settings::Settings, reference: f64, gain: f32) {
     let event_loop = EventLoop::<()>::with_user_event().build().expect("a winit event loop");
     let proxy = event_loop.create_proxy();
     let wake: shell::Wake = Arc::new(move || {
         let _ = proxy.send_event(());
     });
-    let session = Session::start(slint, ui, settings, reference, gain, &wake);
-    let mut app = App { s: session, shown: None, at: (0.0, 0.0), mods: ModifiersState::default(), reference, peak: 1000.0, unit: 80.0, exit: false, poke: true, redraw_asked: false, occluded: false, fps: std::env::var_os("ECTOMATTER_FPS").map(|_| (Instant::now(), 0, Duration::ZERO)) };
+    let session = Session::start(slint, made, ui, settings, reference, gain, &wake);
+    let mut app = App { s: session, shown: None, subs: [None, None, None], soft: None, keys_on: None, lab_asked: std::env::var_os("ECTOMATTER_OPEN_LAB").is_some(), open_macros: std::env::var("ECTOMATTER_OPEN_MACROS").ok().and_then(|v| v.parse().ok()), at: (0.0, 0.0), mods: ModifiersState::default(), reference, peak: 1000.0, unit: 80.0, exit: false, poke: true, redraw_asked: false, occluded: false, fps: std::env::var_os("ECTOMATTER_FPS").map(|_| (Instant::now(), 0, Duration::ZERO)) };
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("ectomatter: the window's loop stopped: {e}");
     }
@@ -235,11 +262,13 @@ impl App {
         })
     }
 
-    /// What the pages ask of the window: moved, minimized, maximized, closed.
-    fn act(&mut self) {
+    /// What the pages ask of the window: moved, minimized, maximized, closed,
+    /// a window of its own opened; and what the windows of their own ask of
+    /// theirs.
+    fn act(&mut self, el: &ActiveEventLoop) {
         let asks = self.s.front.act();
-        let Some(sh) = &self.shown else { return };
         for ask in &asks {
+            let Some(sh) = &self.shown else { return };
             match ask {
                 WindowAsk::Move if !asks.contains(&WindowAsk::Maximize) => {
                     let _ = sh.window.drag_window();
@@ -255,9 +284,9 @@ impl App {
                     // (no tray to close into in this shell yet: closing quits)
                     self.s.quit();
                 }
-                WindowAsk::OpenMacros(..) | WindowAsk::OpenLab | WindowAsk::OpenLayouts(_) => {
-                    eprintln!("ectomatter: the windows of their own aren't in the winit shell yet");
-                }
+                WindowAsk::OpenMacros(lib, n) => self.open(el, session::Open::Macros(*lib, *n)),
+                WindowAsk::OpenLab => self.open(el, session::Open::Lab),
+                WindowAsk::OpenLayouts(i) => self.open(el, session::Open::Layouts(*i)),
                 WindowAsk::MacroPlays(n, how) => self.s.front.macro_plays(*n, *how),
                 WindowAsk::MacroGone(n) => self.s.front.macro_gone(*n),
                 WindowAsk::MacroSaved(n) => self.s.front.macro_saved(*n),
@@ -267,6 +296,232 @@ impl App {
                 }
             }
         }
+        let asks = [(MACROS, self.s.front.act_macros()), (LAB, self.s.front.act_lab()), (LAYOUTS, self.s.front.act_layouts())];
+        for (which, asks) in asks {
+            for ask in asks {
+                let Some(sw) = &mut self.subs[which] else { break };
+                match ask {
+                    WindowAsk::Move => {
+                        let _ = sw.window.drag_window();
+                        let position = LogicalPosition::new(sw.at.0 as f32, sw.at.1 as f32);
+                        sw.slint.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+                        sw.slint.dispatch_event(WindowEvent::PointerExited);
+                        sw.held = false;
+                    }
+                    WindowAsk::Minimize => sw.window.set_minimized(true),
+                    WindowAsk::Maximize => sw.window.set_maximized(!sw.window.is_maximized()),
+                    WindowAsk::Close => self.hide_sub(which),
+                    WindowAsk::ShowSettings => {
+                        if let Some(sh) = &self.shown {
+                            sh.window.focus_window();
+                        }
+                        self.s.front.show_sensors();
+                    }
+                    WindowAsk::MacroPlays(n, how) => self.s.front.macro_plays(n, how),
+                    WindowAsk::MacroGone(n) => self.s.front.macro_gone(n),
+                    WindowAsk::MacroSaved(n) => self.s.front.macro_saved(n),
+                    WindowAsk::OpenMacros(..) | WindowAsk::OpenLab | WindowAsk::OpenLayouts(_) => {}
+                }
+            }
+        }
+    }
+
+    /// A window of its own opened: made the first time (a window of winit's,
+    /// frameless as Ectomatter's are, drawn through softbuffer), shown again
+    /// after.
+    fn open(&mut self, el: &ActiveEventLoop, what: session::Open) {
+        match self.s.open(what) {
+            Some((which, Opened::New { window: slint, title, size, min })) => {
+                let attrs = Window::default_attributes().with_title(title).with_decorations(false).with_inner_size(LogicalSize::new(size.0, size.1)).with_min_inner_size(LogicalSize::new(min.0, min.1));
+                let made = el.create_window(attrs).map_err(|e| e.to_string()).and_then(|w| {
+                    let window = Arc::new(w);
+                    if self.soft.is_none() {
+                        self.soft = Some(softbuffer::Context::new(window.clone()).map_err(|e| e.to_string())?);
+                    }
+                    let surface = softbuffer::Surface::new(self.soft.as_ref().unwrap(), window.clone()).map_err(|e| e.to_string())?;
+                    Ok((window, surface))
+                });
+                match made {
+                    Ok((window, surface)) => {
+                        let scale = window.scale_factor() as f32;
+                        slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: scale });
+                        let px = window.inner_size();
+                        slint.set_size(PhysicalSize::new(px.width.max(1), px.height.max(1)));
+                        window.request_redraw();
+                        self.subs[which] = Some(Sub { window, surface, slint, px: Vec::new(), at: (0.0, 0.0), held: false, hidden: false, full: true });
+                    }
+                    Err(e) => eprintln!("ectomatter: a window of its own couldn't be made: {e}"),
+                }
+            }
+            Some((which, Opened::Again)) => {
+                if let Some(sw) = &mut self.subs[which] {
+                    sw.hidden = false;
+                    sw.full = true;
+                    sw.window.set_visible(true);
+                    sw.window.focus_window();
+                    sw.window.request_redraw();
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// A window of its own closed: out of sight, kept to open again as it was.
+    fn hide_sub(&mut self, which: usize) {
+        self.s.closed(which);
+        if let Some(sw) = &mut self.subs[which] {
+            sw.window.set_visible(false);
+            sw.hidden = true;
+        }
+        if self.keys_on == Some(which) {
+            self.keys_on = None;
+        }
+    }
+
+    /// A window of its own drawn, where Slint has something new for it.
+    fn draw_sub(&mut self, which: usize) {
+        let Some(sw) = &mut self.subs[which] else { return };
+        let size = sw.window.inner_size();
+        let (w, h) = (size.width as usize, size.height as usize);
+        let (Some(nw), Some(nh)) = (std::num::NonZeroU32::new(size.width), std::num::NonZeroU32::new(size.height)) else { return };
+        if sw.hidden {
+            return;
+        }
+        if sw.px.len() != w * h {
+            sw.px = vec![PremultipliedRgbaColor::default(); w * h];
+            sw.full = true;
+        }
+        let full = sw.full;
+        let px = &mut sw.px;
+        let drew = sw.slint.draw_if_needed(|r| {
+            if full {
+                r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+            }
+            r.render(px, w);
+            if full {
+                r.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
+            }
+        });
+        if !drew && !full {
+            return;
+        }
+        sw.full = false;
+        if sw.surface.resize(nw, nh).is_err() {
+            return;
+        }
+        let Ok(mut buf) = sw.surface.buffer_mut() else { return };
+        // (softbuffer's pixels are 0RGB; Ectomatter's windows of their own are opaque)
+        for (d, p) in buf.iter_mut().zip(&sw.px) {
+            *d = (p.red as u32) << 16 | (p.green as u32) << 8 | p.blue as u32;
+        }
+        sw.window.pre_present_notify();
+        let _ = buf.present();
+        // ECTOMATTER_DUMP: the window's pixels, as the Wayland shell saves them
+        if let Some(dir) = &self.s.dump {
+            let rgba: Vec<u8> = sw.px.iter().flat_map(|p| [p.red, p.green, p.blue, p.alpha]).collect();
+            let name = ["macros", "lab", "layouts"][which];
+            let _ = std::fs::write(dir.join(format!("{name}.raw")), rgba);
+            let _ = std::fs::write(dir.join(format!("{name}.txt")), format!("{w} {h}\n"));
+        }
+    }
+
+    /// Which window of its own a window is, if one.
+    fn which_sub(&self, id: WindowId) -> Option<usize> {
+        self.subs.iter().position(|s| s.as_ref().is_some_and(|s| s.window.id() == id))
+    }
+
+    /// What happens in a window of its own: its size, its pointer, its keys,
+    /// its being closed.
+    fn sub_event(&mut self, which: usize, event: Event) {
+        let Some(sw) = &mut self.subs[which] else { return };
+        let scale = sw.window.scale_factor();
+        match event {
+            Event::CloseRequested => self.hide_sub(which),
+            Event::Resized(size) => {
+                if size.width > 0 && size.height > 0 {
+                    sw.slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: scale as f32 });
+                    sw.slint.set_size(PhysicalSize::new(size.width, size.height));
+                    sw.full = true;
+                    sw.window.request_redraw();
+                }
+            }
+            Event::ScaleFactorChanged { .. } => {
+                sw.slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: scale as f32 });
+                sw.full = true;
+            }
+            Event::RedrawRequested => self.draw_sub(which),
+            Event::Focused(true) => self.keys_on = Some(which),
+            Event::CursorMoved { position, .. } => {
+                let p: winit::dpi::LogicalPosition<f64> = position.to_logical(scale);
+                sw.at = (p.x, p.y);
+                sw.slint.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(p.x as f32, p.y as f32) });
+                sw.window.set_cursor(sw.slint.pointer());
+            }
+            Event::CursorLeft { .. } => sw.slint.dispatch_event(WindowEvent::PointerExited),
+            Event::MouseInput { state, button, .. } => {
+                let position = LogicalPosition::new(sw.at.0 as f32, sw.at.1 as f32);
+                let b = pointer_button(button);
+                match state {
+                    ElementState::Pressed => {
+                        sw.held = true;
+                        let (x, y) = (sw.at.0 as f32, sw.at.1 as f32);
+                        self.s.pressed_in(which, x, y);
+                        if let Some(sw) = &self.subs[which] {
+                            sw.slint.dispatch_event(WindowEvent::PointerPressed { position, button: b });
+                        }
+                    }
+                    ElementState::Released => {
+                        sw.held = false;
+                        sw.slint.dispatch_event(WindowEvent::PointerReleased { position, button: b });
+                        sw.slint.dispatch_event(WindowEvent::PointerMoved { position });
+                    }
+                }
+            }
+            Event::MouseWheel { delta, .. } => {
+                let (dx, dy) = scroll(delta, scale);
+                let position = LogicalPosition::new(sw.at.0 as f32, sw.at.1 as f32);
+                sw.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: dx, delta_y: dy });
+            }
+            Event::ModifiersChanged(m) => self.mods = m.state(),
+            Event::KeyboardInput { event, .. } => self.key(Some(which), &event),
+            _ => {}
+        }
+    }
+
+    /// A key in one of Ectomatter's windows, the session's to take.
+    fn key(&mut self, on: Option<usize>, event: &winit::event::KeyEvent) {
+        use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+        let p = shell::Press {
+            text: key_text(&event.logical_key, &event.key_without_modifiers()),
+            code: key_code(&event.physical_key),
+            down: event.state == ElementState::Pressed,
+            ctrl: self.mods.control_key(),
+            shift: self.mods.shift_key(),
+        };
+        // (Ctrl+Shift+K: the lab, opened on the loop's next turn, which can make windows)
+        if self.s.key_in(on, p) {
+            self.lab_asked = true;
+        }
+    }
+}
+
+/// A button as Slint names it.
+fn pointer_button(b: MouseButton) -> PointerEventButton {
+    match b {
+        MouseButton::Left => PointerEventButton::Left,
+        MouseButton::Right => PointerEventButton::Right,
+        MouseButton::Middle => PointerEventButton::Middle,
+        MouseButton::Back => PointerEventButton::Back,
+        MouseButton::Forward => PointerEventButton::Forward,
+        MouseButton::Other(_) => PointerEventButton::Other,
+    }
+}
+
+/// A wheel's turn in logical pixels, as Slint takes it.
+fn scroll(delta: MouseScrollDelta, scale: f64) -> (f32, f32) {
+    match delta {
+        MouseScrollDelta::LineDelta(x, y) => (x * 40.0, y * 40.0),
+        MouseScrollDelta::PixelDelta(PhysicalPosition { x, y }) => ((x / scale) as f32, (y / scale) as f32),
     }
 }
 
@@ -450,10 +705,14 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: Event) {
+    fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: Event) {
         let scale = self.scale();
         if !matches!(event, Event::RedrawRequested) {
             self.poke = true;
+        }
+        if let Some(which) = self.which_sub(id) {
+            self.sub_event(which, event);
+            return;
         }
         match event {
             Event::CloseRequested => self.s.quit(),
@@ -489,14 +748,7 @@ impl ApplicationHandler for App {
             Event::CursorLeft { .. } => self.s.slint.dispatch_event(WindowEvent::PointerExited),
             Event::MouseInput { state, button, .. } => {
                 let position = LogicalPosition::new(self.at.0 as f32, self.at.1 as f32);
-                let b = match button {
-                    MouseButton::Left => PointerEventButton::Left,
-                    MouseButton::Right => PointerEventButton::Right,
-                    MouseButton::Middle => PointerEventButton::Middle,
-                    MouseButton::Back => PointerEventButton::Back,
-                    MouseButton::Forward => PointerEventButton::Forward,
-                    MouseButton::Other(_) => PointerEventButton::Other,
-                };
+                let b = pointer_button(button);
                 match state {
                     ElementState::Pressed => {
                         if b == PointerEventButton::Left {
@@ -515,25 +767,13 @@ impl ApplicationHandler for App {
                 }
             }
             Event::MouseWheel { delta, .. } => {
-                let (dx, dy) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (x * 40.0, y * 40.0),
-                    MouseScrollDelta::PixelDelta(PhysicalPosition { x, y }) => ((x / scale) as f32, (y / scale) as f32),
-                };
+                let (dx, dy) = scroll(delta, scale);
                 let position = LogicalPosition::new(self.at.0 as f32, self.at.1 as f32);
                 self.s.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: dx, delta_y: dy });
             }
             Event::ModifiersChanged(m) => self.mods = m.state(),
-            Event::KeyboardInput { event, .. } => {
-                use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
-                let p = shell::Press {
-                    text: key_text(&event.logical_key, &event.key_without_modifiers()),
-                    code: key_code(&event.physical_key),
-                    down: event.state == ElementState::Pressed,
-                    ctrl: self.mods.control_key(),
-                    shift: self.mods.shift_key(),
-                };
-                self.s.key(p);
-            }
+            Event::KeyboardInput { event, .. } => self.key(None, &event),
+            Event::Focused(true) => self.keys_on = None,
             _ => {}
         }
         if self.exit {
@@ -548,7 +788,20 @@ impl ApplicationHandler for App {
             return;
         }
         slint::platform::update_timers_and_animations();
-        self.act();
+        // (Ectomatter's own macros don't wait for the keyboard)
+        if let Some(n) = self.open_macros.filter(|_| macro_lib() == macros::Lib::Ectomatter || self.s.front.page.dev.is_some()) {
+            self.open_macros = None;
+            self.open(el, session::Open::Macros(macro_lib(), n));
+        }
+        if self.lab_asked && (self.s.board.is_some() || self.s.front.ui.get_place() == "mouse") {
+            self.lab_asked = false;
+            self.open(el, session::Open::Lab);
+        }
+        self.act(el);
+        // each window of its own drawn again where Slint has something new for it
+        for sw in self.subs.iter().flatten().filter(|sw| !sw.hidden && (sw.slint.pending() || sw.slint.has_active_animations())) {
+            sw.window.request_redraw();
+        }
         // a lighting effect's next frame, 30 a second; Slint's timers; or
         // what Ectomatter waits for. Out of sight, or with a redraw already
         // asked for and not yet given, neither an animation nor an effect is

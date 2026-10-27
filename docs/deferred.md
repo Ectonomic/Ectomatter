@@ -207,10 +207,11 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 ## Stage 5: Windows and macOS
 
 - The winit shell (`src/shell/winit.rs`, `ECTOMATTER_SHELL=winit` on Linux,
-  the shell on every other system) shows the main window only. Not in it
-  yet: the windows of their own (the Macro Editor, the lab, the screen
-  layout editor: it says so in the log), the clipboard, drags, closing into
-  the tray (closing quits), the window's rounded corners and shadow.
+  the shell on every other system) has the main window and the windows of
+  their own (drawn in SDR through softbuffer, as the Wayland shell's are in
+  SDR). Not in it yet: the clipboard, drags, closing into the tray (closing
+  quits), the windows' rounded corners and shadow, and a resize from a
+  window of its own's edges.
 - The winit shell takes the screen's white and peak from wgpu's
   `display_hdr_info` where the system says (Windows, macOS), once, as the
   window opens (`winit.rs`, `show`): not again when the window moves to

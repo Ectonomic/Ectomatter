@@ -70,7 +70,7 @@ const CORNER: f64 = 20.0;
 /// on a side it is tiled against, where the margin would cover its
 /// neighbor's edge.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct Margins {
+pub(crate) struct Margins {
     l: u32,
     t: u32,
     r: u32,
@@ -187,8 +187,6 @@ pub(crate) struct App {
     intent: wp_color_manager_v1::RenderIntent,
     /// closed into the tray: the window is unmapped, Ectomatter keeps running
     hidden: bool,
-    /// the windows Slint has made, the Macro Editor's among them
-    made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>,
     /// the windows of their own beside the main one (the Macro Editor's, the
     /// lab's), once opened, and which of them has the keyboard's focus
     subs: [Option<SubWin>; 3],
@@ -332,7 +330,7 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
     // Ectomatter's threads tell the window through senders that ping this loop
     let (ping, ping_source) = calloop::ping::make_ping().expect("a ping for the window's loop");
     let wake: shell::Wake = std::sync::Arc::new(move || ping.ping());
-    let session = Session::start(slint, ui, settings, reference, gain, &wake);
+    let session = Session::start(slint, made, ui, settings, reference, gain, &wake);
     let mut app = App {
         registry: RegistryState::new(&globals),
         seats: SeatState::new(&globals, &qh),
@@ -378,7 +376,6 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         intent: wp_color_manager_v1::RenderIntent::Perceptual,
         levels: (0.0, 0.0),
         hidden: false,
-        made,
         subs: [None, None, None],
         keys_on: None,
         mods: Modifiers::default(),
@@ -442,11 +439,11 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         // (Ectomatter's own macros don't wait for the keyboard)
         if let Some(n) = open_macros.filter(|_| macro_lib() == macros::Lib::Ectomatter || app.s.front.page.dev.is_some()) {
             open_macros = None;
-            app.open_macros(macro_lib(), n);
+            app.open(session::Open::Macros(macro_lib(), n));
         }
         if open_lab && app.s.board.is_some() {
             open_lab = false;
-            app.open_lab();
+            app.open(session::Open::Lab);
         }
         app.act();
         let t = Instant::now();
@@ -522,12 +519,12 @@ impl App {
                     }
                 }
                 WindowAsk::Close => self.hide(),
-                WindowAsk::OpenMacros(lib, n) => self.open_macros(*lib, *n),
+                WindowAsk::OpenMacros(lib, n) => self.open(session::Open::Macros(*lib, *n)),
                 WindowAsk::MacroPlays(n, how) => self.s.front.macro_plays(*n, *how),
                 WindowAsk::MacroGone(n) => self.s.front.macro_gone(*n),
                 WindowAsk::MacroSaved(n) => self.s.front.macro_saved(*n),
-                WindowAsk::OpenLab => self.open_lab(),
-                WindowAsk::OpenLayouts(i) => self.open_layouts(*i),
+                WindowAsk::OpenLab => self.open(session::Open::Lab),
+                WindowAsk::OpenLayouts(i) => self.open(session::Open::Layouts(*i)),
                 WindowAsk::ShowSettings => {
                     self.show_settings(None);
                     self.s.front.show_sensors();
@@ -581,9 +578,7 @@ impl App {
     }
 
     /// A window of its own beside the main one, for the Slint window made last.
-    fn make_sub(&mut self, title: &str, size: (u32, u32), min: (u32, u32)) -> SubWin {
-        let slint = self.made.borrow().last().cloned().expect("the window's adapter");
-        slint.set_size(PhysicalSize::new(size.0, size.1));
+    fn make_sub(&mut self, slint: Rc<MinimalSoftwareWindow>, title: &str, size: (u32, u32), min: (u32, u32)) -> SubWin {
         let surface = self.compositor.create_surface(&self.qh);
         let window = self._xdg.create_window(surface, WindowDecorations::RequestClient, &self.qh);
         window.set_title(title);
@@ -604,87 +599,21 @@ impl App {
         }
     }
 
-    /// Open the Macro Editor's window, made the first time, on a macro.
-    fn open_macros(&mut self, lib: macros::Lib, n: u32) {
-        if self.s.front.macros.is_none() {
-            let ui = MacroWindow::new().unwrap();
-            let _ = slint::ComponentHandle::window(&ui);
-            slint::ComponentHandle::show(&ui).unwrap();
-            self.s.front.macros = Some(macro_page::MacroPage::new(ui, glyph(include_str!("../../ui/glyphs/mark.svg"), 16, false)));
-            self.subs[MACROS] = Some(self.make_sub("Macro Editor", MACRO_SIZE, MACRO_MIN_SIZE));
-        } else {
-            self.show_sub(MACROS);
-        }
-        self.s.front.macros_elsewhere();
-        if let Some(m) = &mut self.s.front.macros {
-            m.open(&self.s.front.page, lib, (n > 0).then_some(n));
+    /// A window of its own opened: made the first time, shown again after.
+    fn open(&mut self, what: session::Open) {
+        match self.s.open(what) {
+            Some((which, session::Opened::New { window, title, size, min })) => self.subs[which] = Some(self.make_sub(window, &title, size, min)),
+            Some((which, session::Opened::Again)) => self.show_sub(which),
+            None => {}
         }
     }
 
-    /// Open the screen layout editor's window, made the first time, on layout `i` of the Library.
-    fn open_layouts(&mut self, i: usize) {
-        if self.s.front.layouts.is_none() {
-            let ui = LayoutWindow::new().unwrap();
-            let name = cores::keyboard().map_or("", |c| c.name());
-            ui.set_device_name(name.into());
-            let _ = slint::ComponentHandle::window(&ui);
-            slint::ComponentHandle::show(&ui).unwrap();
-            self.s.front.layouts = Some(layout_page::LayoutPage::new(ui, glyph(include_str!("../../ui/glyphs/mark.svg"), 16, false)));
-            self.subs[LAYOUTS] = Some(self.make_sub(&format!("{name} / Screen layouts"), LAYOUT_SIZE, LAYOUT_MIN_SIZE));
-        } else {
-            self.show_sub(LAYOUTS);
-        }
-        self.s.front.open_layouts(i);
-    }
 
-    /// Open the lab, made the first time, on the light the keyboard is
-    /// lit by; or, from the mouse's page, on the mouse's lights (made anew
-    /// when it was open on the other device).
-    fn open_lab(&mut self) {
-        let mouse = self.s.front.ui.get_place() == "mouse";
-        if self.s.front.lab.as_ref().is_some_and(|l| l.windows() != mouse) {
-            self.s.front.lab = None;
-            self.subs[LAB] = None;
-        }
-        if self.s.front.lab.is_none() {
-            let (light, device, core, name) = if mouse {
-                let Some(d) = mouse_lab_device(&self.s.front) else { return };
-                let name = format!("{} / {}", d.name, d.lab());
-                (self.s.front.mouse_light_model(), d, mouse::shape().core.clone(), name)
-            } else {
-                let Some(core) = cores::keyboard() else { return };
-                let d = lab_device(core, self.s.board.as_ref());
-                let name = format!("{} / {}", d.name, d.lab());
-                (self.s.light_now(), d, core.id.clone(), name)
-            };
-            let ui = LabWindow::new().unwrap();
-            let _ = slint::ComponentHandle::window(&ui);
-            slint::ComponentHandle::show(&ui).unwrap();
-            let setup = setups::in_use(&self.s.front.settings, &core).map(|s| s.id);
-            self.s.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../../ui/glyphs/mark.svg"), 16, false), light, device, setup));
-            self.subs[LAB] = Some(self.make_sub(&name, LAB_SIZE, LAB_MIN_SIZE));
-        } else {
-            self.show_sub(LAB);
-        }
-        self.s.front.ui.set_lab_open(true);
-        self.s.readout();
-    }
 
     /// Close a window of its own; it is kept, to open again as it was. The
     /// Macro Editor's lets a recording go.
     fn hide_sub(&mut self, which: usize) {
-        if which == MACROS {
-            if let Some(m) = &mut self.s.front.macros {
-                m.cancel_recording(&self.s.front.page);
-            }
-        }
-        if which == LAB {
-            self.s.front.ui.set_lab_open(false);
-        }
-        // the screen layout editor closed: the keyboard's screen plays the playlist again
-        if which == LAYOUTS {
-            self.s.front.layouts_closed();
-        }
+        self.s.closed(which);
         let Some(sw) = &mut self.subs[which] else { return };
         sw.window.wl_surface().attach(None, 0, 0);
         sw.window.commit();
@@ -797,21 +726,7 @@ impl App {
                         return;
                     }
                 }
-                if which == MACROS {
-                    if let Some(m) = &mut self.s.front.macros {
-                        m.pressed_at(x as f32, y as f32);
-                    }
-                }
-                if which == LAYOUTS {
-                    if let Some(l) = &mut self.s.front.layouts {
-                        l.pressed_at(x as f32, y as f32);
-                    }
-                }
-                if which == LAB {
-                    if let Some(l) = &mut self.s.front.lab {
-                        l.pressed_at(x as f32, y as f32);
-                    }
-                }
+                self.s.pressed_in(which, x as f32, y as f32);
                 mw.slint.dispatch_event(WindowEvent::PointerPressed { position, button: pointer_button(b) });
             }
             PointerEventKind::Release { button: b, .. } => {
@@ -982,39 +897,9 @@ impl App {
     /// A key on the keyboard, pressed or let go.
     fn key(&mut self, e: &KeyEvent, down: bool) {
         let p = shell::Press { text: key_text(e), code: e.raw_code, down, ctrl: self.mods.ctrl, shift: self.mods.shift };
-        // Ctrl+Shift+K, anywhere in Ectomatter: the lab, a developer's panel
-        if down && p.ctrl && p.shift && p.is('k') {
-            self.open_lab();
-            return;
+        if self.s.key_in(self.keys_on, p) {
+            self.open(session::Open::Lab);
         }
-        if self.keys_on == Some(LAB) && down && p.ctrl && (p.is('z') || p.is('y')) {
-            if let Some(lab) = self.s.front.lab.as_mut().filter(|l| !l.typing()) {
-                lab.undo(p.shift || p.is('y'));
-                return;
-            }
-        }
-        // Escape in the lab shuts what is open over its page, then lets its
-        // chosen key or light go, unless a box is being typed in
-        if self.keys_on == Some(LAB) && down && p.is_key(Key::Escape) {
-            if let Some(lab) = self.s.front.lab.as_mut().filter(|l| !l.typing()) {
-                if lab.escape() {
-                    return;
-                }
-            }
-        }
-        if self.keys_on == Some(LAYOUTS) && down && p.is_key(Key::Delete) && !self.s.front.typing_in_layouts() {
-            if let Some(l) = &self.s.front.layouts {
-                l.delete_key();
-            }
-            return;
-        }
-        if let Some(which) = self.keys_on {
-            if let (Some(sw), Some(text)) = (&self.subs[which], p.text) {
-                sw.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
-            }
-            return;
-        }
-        self.s.key(p);
     }
 }
 
