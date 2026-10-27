@@ -1,0 +1,370 @@
+// The Library (games_page.rs): the games and apps on three tabs, each
+// game's or app's own page, and Every game's; its bar stays put over what
+// scrolls, as a device's does.
+// The window binds each property and callback here to its own of the same
+// name (app.slint, `library-page`).
+
+import { Space, Radius, Font, Line, Size, Part, Ink } from "tokens.slint";
+import { EmptyState, Glyph, PageBar, HintRow, WordButton, LinkButton, FieldBox, StarButton, DropField, BarButton, PageBox, Cell, CellView, AnchorHead } from "../system/system.slint";
+import { LibCover, LibApp, LibToc, LibFact, LibCoverView } from "shared.slint";
+
+export component LibraryPage inherits Rectangle {
+    callback cell-left(int, int, bool);
+    callback cell-pick(int, int, length, length, length, length);
+    callback cell-slide(int, float);
+    callback cell-typed(int, int, string);
+    callback gl-add();
+    in property <[LibApp]> gl-apps;
+    callback gl-back();
+    in property <[Cell]> gl-cells;
+    in property <[LibCover]> gl-covers;
+    in property <string> gl-empty;
+    in property <string> gl-empty-sub;
+    in property <bool> gl-every;
+    callback gl-every-page();
+    in property <[LibFact]> gl-facts;
+    in property <length> gl-facts-w;
+    in property <bool> gl-fav;
+    callback gl-find(string);
+    in property <string> gl-find-hint;
+    in property <bool> gl-has-hero;
+    in property <image> gl-hero;
+    in property <string> gl-hint;
+    in property <string> gl-name;
+    callback gl-open(int);
+    in property <length> gl-page-h;
+    callback gl-play();
+    in property <bool> gl-playable;
+    in-out property <string> gl-query;
+    in property <bool> gl-removable;
+    callback gl-remove();
+    in property <string> gl-said;
+    in property <bool> gl-said-bad;
+    in property <string> gl-sort;
+    callback gl-sort-menu(length, length, length, length);
+    in property <length> gl-sort-w;
+    callback gl-star(int);
+    callback gl-star-page();
+    in property <string> gl-store;
+    callback gl-store-menu(length, length, length, length);
+    in property <length> gl-store-w;
+    in property <int> gl-tab;
+    callback gl-tab-chosen(int);
+    in property <[LibToc]> gl-toc;
+    in property <string> gl-toc-foot;
+    callback gl-toc-jump(int);
+    in property <length> gl-toc-top;
+    in property <length> gl-toc-w;
+    in property <length> gl-toc-x;
+    callback gl-undo();
+    in property <bool> gl-undo-shown;
+    in property <int> gl-view;
+    in-out property <length> head-end;
+    in property <image> keyboard-glyph;
+    in property <image> mouse-glyph;
+    in property <[image]> package-glyphs;
+    in-out property <string> place;
+    in-out property <length> pws-w;
+    in-out property <length> pws-x;
+    in property <[image]> scene-chips;
+    in property <image> scene-glyph;
+    in-out property gl-flick-content-height <=> gl-flick.content-height;
+    in-out property gl-flick-content-y <=> gl-flick.content-y;
+    in-out property gl-flick-height <=> gl-flick.height;
+
+    gl-flick := Flickable {
+        y: Size.bar;
+        height: parent.height - Size.bar;
+        content-height: root.gl-page-h;
+        mouse-drag-pan-enabled: false;
+        // what to do here, and beside it the find box and, on the games' tabs, the
+        // store and the order
+        HintRow {
+            x: pws-x;
+            width: pws-w;
+            text: root.gl-hint;
+            shorten: true;
+            // the find box, and on the games' tabs the store and the order, on the
+            // hint line at a button's height
+            if root.gl-view == 0: HorizontalLayout {
+                cross-axis-self-alignment: center;
+                height: Size.button;
+                spacing: Space.inline;
+                FieldBox {
+                    width: Size.find;
+                    height: Size.button;
+                    glyph: Glyph.find;
+                    placeholder: root.gl-find-hint;
+                    text <=> root.gl-query;
+                    edited => { root.gl-find(self.text); }
+                    escape => { self.stop-typing(); }
+                }
+                if root.gl-tab < 2: DropField {
+                    width: root.gl-store-w;
+                    height: Size.button;
+                    text: root.gl-store;
+                    clicked(x, y, h) => { root.gl-store-menu(x, y, h, self.width); }
+                }
+                if root.gl-tab < 2: DropField {
+                    width: root.gl-sort-w;
+                    height: Size.button;
+                    text: root.gl-sort;
+                    clicked(x, y, h) => { root.gl-sort-menu(x, y, h, self.width); }
+                }
+            }
+        }
+        for c[i] in root.gl-covers: LibCoverView {
+            c: c;
+            open => { root.gl-open(i); }
+            star => { root.gl-star(i); }
+        }
+        // the Apps tab: a row for each app, in a box of their own, Space.inline in from it
+        // as a list's rows in a box are: its icon, its name and what changes for it, where
+        // it's from, and the way on to its page
+        if root.gl-view == 0 && root.gl-apps.length > 0: PageBox {
+            x: pws-x;
+            y: head-end;
+            width: pws-w;
+            height: root.gl-apps.length * Size.app + 2 * Space.inline;
+            for a[i] in root.gl-apps: Rectangle {
+                x: Space.inline;
+                y: Space.inline + i * Size.app;
+                width: parent.width - 2 * Space.inline;
+                height: Size.app;
+                border-radius: Radius.control;
+                background: row-ta.has-hover ? Ink.hover-box : transparent;
+                property <length> words-x: Space.row + Size.app-icon + Space.row;
+                property <length> onward-x: self.width - Part.field-pad - Part.chevron;
+                if a.has-icon: Image {
+                    x: Space.row;
+                    y: (parent.height - self.height) / 2;
+                    width: Size.app-icon;
+                    height: Size.app-icon;
+                    source: a.icon;
+                }
+                if !a.has-icon: Rectangle {
+                    x: Space.row;
+                    y: (parent.height - self.height) / 2;
+                    width: Size.app-icon;
+                    height: Size.app-icon;
+                    border-radius: Radius.control;
+                    background: Ink.well;
+                }
+                VerticalLayout {
+                    x: parent.words-x;
+                    width: parent.width - parent.words-x - from-t.width - Space.row - (parent.width - parent.onward-x);
+                    alignment: center;
+                    spacing: Space.list;
+                    Text {
+                        text: a.name;
+                        font-family: Font.ui;
+                        font-size: Font.name;
+                        font-weight: Font.medium;
+                        color: Ink.ink;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: a.sub;
+                        font-family: Font.ui;
+                        font-size: Font.note;
+                        color: Ink.quiet;
+                        overflow: elide;
+                    }
+                }
+                from-t := Text {
+                    x: parent.onward-x - Space.row - self.width;
+                    width: min(self.preferred-width, parent.width / 3);
+                    height: parent.height;
+                    text: a.from;
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    color: Ink.quiet;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                Path {
+                    x: parent.onward-x;
+                    y: (parent.height - self.height) / 2;
+                    width: Part.chevron;
+                    height: Part.chevron;
+                    viewbox-width: 12;
+                    viewbox-height: 12;
+                    commands: Glyph.onward;
+                    fill: transparent;
+                    stroke: Ink.quiet;
+                    stroke-width: 1.6px; // art: the chevron's stroke
+                    stroke-line-cap: round;
+                }
+                row-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.gl-open(i); }
+                }
+            }
+        }
+        // nothing to show: what's missing, and the way to it, in the page's middle
+        if root.gl-view == 0 && root.gl-empty != "": EmptyState {
+            x: (parent.width - self.width) / 2;
+            y: max(head-end + Space.section, (gl-flick.height - self.preferred-height) / 2);
+            width: min(Size.empty, pws-w);
+            height: self.preferred-height;
+            title: root.gl-empty;
+            text: root.gl-empty-sub;
+        }
+        // a page of its own: the game's picture, then its sections
+        if root.gl-view == 1 && root.gl-has-hero: Rectangle {
+            x: pws-x;
+            y: head-end;
+            width: pws-w;
+            height: Size.hero;
+            border-radius: Radius.box;
+            background: Ink.box;
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: root.gl-hero;
+            }
+            for f in root.gl-facts: Text {
+                x: parent.width - Space.margin - root.gl-facts-w + f.x;
+                y: parent.height - Space.margin - Line.note;
+                height: Line.note;
+                text: f.text;
+                font-family: Font.ui;
+                font-size: Font.note;
+                font-weight: f.strong ? Font.medium : Font.regular;
+                color: f.strong ? Ink.ink : Ink.dim;
+                vertical-alignment: center;
+            }
+        }
+        // (a device's glyph at the rail's own size, drawn for it, not a larger one shrunk)
+        for c in root.gl-cells: CellView {
+            c: c;
+            glyph: root.keyboard-glyph;
+            glyph2: root.mouse-glyph;
+            glyphs: root.package-glyphs;
+            glyph3: root.scene-glyph;
+            chips: root.scene-chips;
+            pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
+            field-left(id, index, kept) => { root.cell-left(id, index, kept); }
+            slide(id, v) => { root.cell-slide(id, v); }
+            typed(id, index, t) => { root.cell-typed(id, index, t); }
+        }
+    }
+    // On this page: each section's name and what it changes for this game, beside the
+    // sections; it scrolls with the page until it reaches the top, then stays in view
+    if root.gl-view == 1 && root.gl-toc.length > 0: Rectangle {
+        x: root.gl-toc-x;
+        y: Size.bar + max(Space.pad, root.gl-toc-top + gl-flick.content-y);
+        width: root.gl-toc-w;
+        height: toc-col.preferred-height;
+        // its heading in capitals, as a list's, its words level with the entries'
+        toc-col := VerticalLayout {
+            spacing: 0;
+            HorizontalLayout {
+                padding-left: Space.row;
+                AnchorHead { text: "ON THIS PAGE"; }
+            }
+            for t[i] in root.gl-toc: Rectangle {
+                height: toc-words.preferred-height;
+                border-radius: Radius.control;
+                background: toc-ta.has-hover ? Ink.box : transparent;
+                toc-words := VerticalLayout {
+                    padding-left: Space.row;
+                    padding-right: Space.row;
+                    padding-top: Space.inline;
+                    padding-bottom: Space.inline;
+                    spacing: Space.list;
+                    Text {
+                        text: t.name;
+                        font-family: Font.ui;
+                        font-size: Font.text;
+                        font-weight: Font.medium;
+                        color: Ink.dim;
+                    }
+                    Text {
+                        text: t.sub;
+                        font-family: Font.ui;
+                        font-size: Font.note;
+                        color: t.set ? Ink.soft : Ink.quiet;
+                        wrap: word-wrap;
+                    }
+                }
+                toc-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.gl-toc-jump(i); }
+                }
+            }
+            if root.gl-toc-foot != "": Rectangle { height: Space.row; }
+            if root.gl-toc-foot != "": HorizontalLayout {
+                padding-left: Space.row;
+                padding-right: Space.row;
+                Text {
+                    text: root.gl-toc-foot;
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    color: Ink.quiet;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+    // the Library's bar, every page's: its name and tabs, or on a page of its own
+    // the way back to the Library, the page's name, its star and Play
+    PageBar {
+        y: 0;
+        title: root.gl-view == 0 ? "Library" : root.gl-name;
+        back: root.gl-view == 1 ? "Library" : "";
+        back-clicked => { root.gl-back(); }
+        tabs: root.gl-view == 0 ? ["Favorites", "Games", "Apps"] : [];
+        tab: root.gl-tab;
+        tab-chosen(i) => { root.gl-tab-chosen(i); }
+        status: root.gl-said;
+        status-bad: root.gl-said-bad;
+        undo-shown: root.gl-undo-shown;
+        undo => { root.gl-undo(); }
+        if root.gl-view == 0: HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: Space.inline;
+            if root.gl-tab < 2: BarButton {
+                // two cards, one on another: every game at once
+                commands: "M2.5 5.5h7.5a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-7.5a1.5 1.5 0 0 1-1.5-1.5v-6a1.5 1.5 0 0 1 1.5-1.5zM4.5 3h8a1.5 1.5 0 0 1 1.5 1.5v7.5";
+                text: "Every game";
+                clicked => { root.gl-every-page(); }
+            }
+            BarButton {
+                commands: "M8 3v10M3 8h10";
+                round: true;
+                text: root.gl-tab < 2 ? "Add a game" : "Add an app";
+                clicked => { root.gl-add(); }
+            }
+        }
+        if root.gl-view == 1 && !root.gl-every: HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: Space.inline;
+            alignment: center;
+            if root.gl-removable: VerticalLayout {
+                alignment: center;
+                LinkButton {
+                    text: "Remove";
+                    clicked => { root.gl-remove(); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                StarButton {
+                    on: root.gl-fav;
+                    clicked => { root.gl-star-page(); }
+                }
+            }
+            if root.gl-playable: VerticalLayout {
+                alignment: center;
+                WordButton {
+                    primary: true;
+                    text: "Play";
+                    icon: "M4 2.6v8.8c0 .5.5.8.9.5l7-4.4a.6.6 0 0 0 0-1L4.9 2.1c-.4-.3-.9 0-.9.5Z";
+                    clicked => { root.gl-play(); }
+                }
+            }
+        }
+    }
+}

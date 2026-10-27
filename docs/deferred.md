@@ -133,12 +133,12 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   isn't: every part reaches every field, and no page's state is a type of its
   own. Its largest file is `front/mod.rs` (3,278 lines: the types, `new`, and
   what every page shares, such as acting on the window's controls).
-- One window component holds most pages: `AppWindow` in `ui/app.slint`, every
-  page's properties and callbacks on it. The windows of their own are in
-  `ui/windows/`, the pages' shared parts in `ui/pages/shared.slint`, and the
-  mouse's page is a component of its own (`ui/pages/mouse.slint`, bound to the
-  window's properties one by one); Home, the keyboard's page, the Library and
-  Settings aren't yet.
+- The main window's pages are components of their own (`ui/pages/`: Home,
+  the keyboard's, the mouse's, the Library, Settings; 2026-10-26), but each is
+  bound to the window property by property (the keyboard's page takes 190 of
+  them): every page's state is still the window's, as `Front`'s is one
+  object, and Rust sets it on the window. A page's own state as a type (a
+  Slint global per page, a Rust type per page) waits for both.
 - Untyped JSON at every file and protocol boundary.
 - The render tests (`apps/ectomatter/tests/renders.rs`) draw in a sandbox
   (bubblewrap) on a made-up desk, but the sandbox lends them this system's

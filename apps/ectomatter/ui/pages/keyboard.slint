@@ -1,0 +1,1454 @@
+// A keyboard's page: its bar and tabs, the hole the window draws the
+// keyboard's picture into, and each tab's boxes (Keys, Lighting, Screen,
+// Settings), the page scrolling under the device's bar.
+// The window binds each property and callback here to its own of the same
+// name (app.slint, `keyboard-page`).
+
+
+import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
+import { CarryChip, ScreenBay, RenameField, FolderTab, Tip, BoxRow, Dot, PageBar, HintRow, Spinner, CheckBox, StripIcon, PlayButton, DropField, BarButton, Stage, PageBox, ScrollBox, Cell, CellView, LaidBox, CellBox, ProfileItem, AnchorColumn } from "../system/system.slint";
+import { KeyItem, Overlay, EffectItem, LibGroup, CheckItem, PlPage, PlBlock, GlRow, KeyBox, EffectGrid, KeyLibrary, GameBox, PlCard, WayGlyph, KeyDetail, SliderDetail } from "shared.slint";
+
+export component KeyboardPage inherits Rectangle {
+    callback action-menu(int, length, length, length, length);
+    callback area-hover(int, bool);
+    in-out property <length> band-max;
+    in-out property <length> band-min;
+    in-out property <length> band-y;
+    in-out property <length> bay-pad;
+    callback board-clicked();
+    in-out property <length> board-h;
+    in property <bool> board-ready;
+    in property <image> board-shadow;
+    in property <length> board-shadow-margin;
+    in-out property <length> board-top;
+    in-out property <length> board-w;
+    in property <int> boot;
+    in property <string> boot-text;
+    in property <string> boot-title;
+    in-out property <length> box-h;
+    callback boxes-resized();
+    in-out property <length> carry-gx;
+    in-out property <length> carry-gy;
+    in property <string> carry-name;
+    in-out property <bool> carry-on;
+    in-out property <bool> carry-settle;
+    in-out property <length> carry-x;
+    in-out property <length> carry-y;
+    callback cell-left(int, int, bool);
+    callback cell-pick(int, int, length, length, length, length);
+    callback cell-slide(int, float);
+    callback cell-typed(int, int, string);
+    in property <[Cell]> cells;
+    callback choose-profile(int);
+    in property <int> conn-state;
+    in-out property <length> cqw;
+    in property <bool> dimming;
+    callback effect(int);
+    in property <bool> effect-moves;
+    in property <[EffectItem]> effects;
+    in property <[CheckItem]> game-items;
+    in-out property <length> game-need;
+    in-out property <length> game-panel-h;
+    callback game-toggled(int);
+    callback gl-carry-move(int, int);
+    callback gl-row-on(int);
+    callback gl-row-pick(int);
+    callback gl-row-until(int, length, length, length, length);
+    in property <[GlRow]> gl-rows;
+    in-out property <length> head-end;
+    in-out property <length> head-h;
+    in property <string> hint;
+    in property <image> hint-chip;
+    in property <bool> hint-chip-on;
+    in property <string> kb-maker;
+    in property <string> kb-name;
+    in-out property <length> kb-pad-x;
+    in-out property <length> kb-pad-y;
+    callback kb-profile-menu(length, length, length);
+    in property <string> key-cap;
+    callback key-clicked(int);
+    in property <string> key-factory;
+    callback key-hovered(int, bool);
+    in property <string> key-job;
+    in property <int> key-kind;
+    in property <bool> key-listening;
+    in property <string> key-name;
+    in-out property <length> key-need;
+    in property <string> key-note;
+    in property <bool> key-open;
+    in property <bool> key-rebound;
+    in property <string> key-state;
+    in property <[KeyItem]> keys;
+    callback kind-picked(int, length, length, length);
+    in property <duration> knob-glide;
+    in property <int> layer;
+    callback layer-changed(int);
+    in property <bool> layer-rebound;
+    in property <image> lcd-big;
+    in property <color> lcd-field;
+    in property <length> lcd-h;
+    callback lcd-pause();
+    in property <int> lcd-state;
+    in property <length> lcd-w;
+    in-out property <length> lfx-h;
+    callback lib-find(string);
+    in property <int> lib-gap;
+    in property <[LibGroup]> lib-groups;
+    callback lib-menu(int, length, length);
+    callback lib-new(length, length);
+    in property <[PlPage]> lib-pages;
+    in-out property <string> lib-query;
+    in property <int> lib-reveal-n;
+    in property <length> lib-reveal-y;
+    callback lib-toggle(string);
+    callback light-box-resized(int, length);
+    in property <[LaidBox]> light-boxes;
+    in-out property <length> light-fx-w;
+    callback listen(int);
+    in property <bool> live;
+    callback macro-editor(int);
+    in property <bool> menu-open;
+    callback ob-choose(length, length, length);
+    in property <length> ob-chooser-w;
+    in property <bool> ob-choosing;
+    in property <string> ob-name;
+    in property <bool> ob-over;
+    in property <bool> ob-ready;
+    in property <string> ob-say;
+    in property <[Overlay]> overlays;
+    in-out property <length> page-h;
+    callback page-remove(int);
+    callback page-show(int);
+    in property <bool> pl-adding;
+    callback pl-back();
+    in property <[PlBlock]> pl-blocks;
+    callback pl-carry-cancel();
+    callback pl-carry-drop();
+    callback pl-carry-move(length, bool, int);
+    callback pl-carry-start(int, int);
+    callback pl-choose(length, length, length);
+    in property <length> pl-chooser-most;
+    in property <length> pl-chooser-w;
+    in property <bool> pl-choosing;
+    in property <bool> pl-dim;
+    in property <bool> pl-empty;
+    in property <bool> pl-head;
+    callback pl-hold-menu(length, length, length);
+    in property <length> pl-hold-w;
+    in property <length> pl-hold-x;
+    in property <bool> pl-in;
+    in property <bool> pl-live;
+    callback pl-mark(int, length, length, length);
+    in property <int> pl-menu;
+    in property <string> pl-name;
+    in-out property <float> pl-p;
+    in-out property <length> pl-panel-h;
+    in-out property <length> pl-pre;
+    callback pl-rename-done(bool, string);
+    in-out property <string> pl-rename-text;
+    in property <bool> pl-renaming;
+    in property <string> pl-script;
+    in property <bool> pl-single;
+    callback pl-size(int, length);
+    callback pl-size-done();
+    in-out property <int> pl-sizing;
+    in property <length> pl-slot-w;
+    in property <length> pl-slot-x;
+    callback pl-time(int, length, length, length, length);
+    in property <int> pl-timing;
+    in property <length> pl-track-w;
+    in property <length> pl-track-x;
+    in property <length> pl-way-w;
+    in-out property <string> place;
+    in property <[ProfileItem]> profiles;
+    in-out property <length> pws-w;
+    in-out property <length> pws-x;
+    callback rail(string);
+    callback rename-profile(string);
+    callback reset-key();
+    in-out property <bool> screen-closed;
+    callback screen-edit(int);
+    callback screen-editor();
+    in-out property <bool> screen-game;
+    callback screen-state();
+    in property <string> screen-status;
+    in-out property <length> second-need;
+    in-out property <length> second-w;
+    in-out property <length> shelf-h;
+    in-out property <bool> shelf-on;
+    in property <bool> shelf-two;
+    callback show-rebindings();
+    in property <bool> show-rebindings-on;
+    in property <float> slider-at;
+    callback slider-bind-at(int);
+    in property <[CheckItem]> slider-choices;
+    in property <int> slider-chosen;
+    callback slider-chosen-at(int);
+    in-out property <length> slider-need;
+    in property <string> slider-note;
+    in property <string> slider-title;
+    in property <int> status-kind;
+    in property <string> status-text;
+    in property <int> tab;
+    in-out property <length> tabs-h;
+    in property <length> tile-height;
+    in-out property <length> under-top;
+    in property <length> under-w;
+    in-out property <length> under-x;
+    callback undo(bool);
+    in property <bool> undo-shown;
+    in-out property <length> unit;
+    callback view-changed(int);
+    in-out property anchor-preferred-height <=> anchor.preferred-height;
+    in-out property flick-content-height <=> flick.content-height;
+    in-out property flick-content-y <=> flick.content-y;
+    in-out property flick-height <=> flick.height;
+    in-out property kb-keys-height <=> kb-keys.height;
+    in-out property kb-light-height <=> kb-light.height;
+    out property <Point> key-tile-absolute-position: key-tile.absolute-position;
+    in-out property key-tile-height <=> key-tile.height;
+    in-out property key-tile-width <=> key-tile.width;
+
+    // the page scrolls under the device's bar, as the web page did
+    flick := Flickable {
+        y: Size.bar;
+        height: parent.height - Size.bar;
+        content-height: root.page-h;
+        mouse-drag-pan-enabled: false;
+        // over the keyboard: what to do on this tab, and Show rebindings
+        Rectangle {
+            x: pws-x;
+            y: Space.row;
+            width: pws-w;
+            height: head-h;
+            if root.boot != 0: HorizontalLayout {
+                spacing: Space.inline;
+                alignment: start;
+                if root.boot == 1: Rectangle {
+                    width: Size.spinner;
+                    Spinner {
+                        y: (parent.height - Size.spinner) / 2;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: root.boot-title;
+                        font-family: Font.ui;
+                        font-size: Font.text;
+                        font-weight: Font.strong;
+                        color: root.boot == 2 ? Ink.bad : Ink.ink;
+                    }
+                    Text {
+                        text: root.boot-text;
+                        font-family: Font.ui;
+                        font-size: Font.caption;
+                        color: Ink.quiet;
+                    }
+                }
+            }
+            if root.boot == 0: HintRow {
+                y: 0;
+                width: parent.width;
+                text: root.hint;
+                chip: root.hint-chip;
+                chip-on: root.hint-chip-on;
+                // (a status: its dot, breathing while it plays, and its words)
+                if root.live: HorizontalLayout {
+                    spacing: Space.inline;
+                    VerticalLayout {
+                        alignment: center;
+                        Dot {
+                            state: 1;
+                            opacity: 0.55 + 0.45 * cos(animation-tick() / 1600ms * 360deg);
+                        }
+                    }
+                    Text {
+                        text: "Showing on keyboard";
+                        font-family: Font.ui;
+                        font-size: Font.caption;
+                        color: Ink.good;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+                // whether rebound keys show their new actions on the keyboard
+                if root.tab < 2: CheckBox {
+                    width: self.preferred-width;
+                    text: "Show rebindings";
+                    on: root.show-rebindings-on;
+                    clicked => { root.show-rebindings(); }
+                }
+                // on Screen, what it is doing now, a dot that breathes while
+                // Ectomatter plays it; then Pause, which holds the screen as it
+                // is, and Play, which carries on
+                if root.tab == 3 && root.screen-status != "": Text {
+                    horizontal-stretch: 0;
+                    text: root.screen-status;
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    color: Ink.soft;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // the anchoring column: the profiles, saving, and on Keys the layers
+        anchor := AnchorColumn {
+            visible: root.boot == 0 && root.tab != 2;
+            x: pws-x;
+            y: root.tab == 3 ? head-end : under-top;
+            width: Size.column;
+            // (its well reaching the foot of the boxes beside it)
+            height: max(self.preferred-height, root.tab == 0 ? kb-keys.height : root.tab == 1 ? kb-light.height : 0);
+            profiles: root.profiles;
+            has-menu: true;
+            choose(n) => { root.choose-profile(n); }
+            rename(t) => { root.rename-profile(t); }
+            menu(x, y, h) => { root.kb-profile-menu(x, y, h); }
+        }
+
+        // Keys: the Key library, and beside it Game mode, or the chosen key or slider,
+        // in the row of boxes every device page has
+        kb-keys := BoxRow {
+            visible: root.tab == 0 && root.boot == 0;
+            x: under-x;
+            y: under-top;
+            width: under-w;
+            // (at least as tall as the Profiles column beside it, its one line then as tall)
+            height: max(self.preferred-height, band-min);
+            // (as tall as the box that goes with it, beside it or, in a narrow
+            // window, under it)
+            if root.tab == 0 && root.boot == 0: KeyLibrary {
+                min-width: Size.library;
+                preferred-width: Size.library;
+                max-height: band-max;
+                preferred-height: max(band-min, second-need);
+                layer: root.layer;
+                reveal-y: root.lib-reveal-y;
+                reveal-n: root.lib-reveal-n;
+                layer-chosen(i) => { root.layer-changed(i); }
+                groups: root.lib-groups;
+                query <=> root.lib-query;
+                toggle(g) => { root.lib-toggle(g); }
+                find(t) => { root.lib-find(t); }
+                pick(id) => { if (id >= 0) { root.key-clicked(id); } else { root.slider-chosen-at(-id); } }
+            }
+            key-tile := ScrollBox {
+                // Game mode in the Profiles box's darker shade; a key or a slider in a box's
+                fill: !root.key-open && root.slider-chosen == 0 ? Ink.well : Ink.box;
+                min-width: second-w;
+                preferred-width: second-w;
+                max-height: band-max;
+                preferred-height: second-need;
+                need: second-need;
+                if !root.key-open && root.slider-chosen == 0: GameBox {
+                    width: parent.width;
+                    height: max(second-need, parent.height);
+                    fill: transparent;
+                    items: root.game-items;
+                    toggled(i) => { root.game-toggled(i); }
+                    init => { root.game-need = self.need; }
+                    changed need => { root.game-need = self.need; }
+                }
+                if root.key-open: KeyDetail {
+                    width: parent.width;
+                    height: max(second-need, parent.height);
+                    fill: transparent;
+                    init => { root.key-need = self.need; }
+                    changed need => { root.key-need = self.need; }
+                    title: root.key-name;
+                    cap: root.key-cap;
+                    factory: root.key-factory;
+                    state: root.key-state;
+                    rebound: root.key-rebound;
+                    layer-title: root.layer == 1 ? "Function layer" : "Base layer";
+                    layer-rebound: root.layer-rebound;
+                    kind: root.key-kind;
+                    job: root.key-job;
+                    listening: root.key-listening;
+                    menu-open: root.menu-open;
+                    note: root.key-note;
+                    done => { root.board-clicked(); }
+                    reset => { root.reset-key(); }
+                    kind-picked(i, x, y, h) => { root.kind-picked(i, x, y, h); }
+                    job-clicked(x, y, h, w) => { root.action-menu(root.layer, x, y, h, w); }
+                    record => { root.listen(root.layer); }
+                }
+                if root.slider-chosen != 0: SliderDetail {
+                    width: parent.width;
+                    height: max(second-need, parent.height);
+                    fill: transparent;
+                    init => { root.slider-need = self.need; }
+                    changed need => { root.slider-need = self.need; }
+                    title: root.slider-title;
+                    side: root.slider-chosen == 1 ? "left" : "right";
+                    at: root.slider-at;
+                    choices: root.slider-choices;
+                    note: root.slider-note;
+                    done => { root.slider-chosen-at(0); }
+                    picked(i) => { root.slider-bind-at(i); }
+                }
+            }
+        }
+        // the Lighting page: the effects, the chosen one's settings, and where and when it
+        // plays, in the row of boxes every device page has (the effects no wider than
+        // their tiles' pictures can grow; the boxes laid out in Rust say how wide they are)
+        kb-light := BoxRow {
+            visible: root.tab == 1 && root.boot == 0;
+            x: under-x;
+            y: under-top;
+            width: under-w;
+            height: max(self.preferred-height, band-min);
+            if root.tab == 1 && root.boot == 0: ScrollBox {
+                min-width: Size.effects;
+                preferred-width: Size.effects;
+                max-height: band-max;
+                preferred-height: lfx-h;
+                need: lfx-h;
+                EffectGrid {
+                    width: parent.width;
+                    height: max(lfx-h, parent.height);
+                    fill: transparent;
+                    effects: root.effects;
+                    moving: root.effect-moves;
+                    chose(i) => { root.effect(i); }
+                    init => { root.light-fx-w = self.pic-w; root.boxes-resized(); }
+                    changed pic-w => { root.light-fx-w = self.pic-w; root.boxes-resized(); }
+                }
+            }
+            // the chosen effect's boxes, laid out in Rust (its settings, and where and when)
+            for b[i] in root.tab == 1 && root.boot == 0 ? root.light-boxes : []: CellBox {
+                b: b;
+                max-height: band-max;
+                resized(w) => { root.light-box-resized(i, w); }
+                pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
+                field-left(id, index, kept) => { root.cell-left(id, index, kept); }
+                slide(id, v) => { root.cell-slide(id, v); }
+                hovered(k, on) => { root.area-hover(k, on); }
+            }
+        }
+        // Screen, the right column: the tabs of the screen's two states over its dark box,
+        // the playlist's panel in the box under the screen, and the Library joined to the
+        // box's foot. (All in one part of the window, so a screen carried from the Library
+        // knows where the panel is.)
+        if root.tab == 3: stage := Rectangle {
+            x: under-x;
+            y: head-end;
+            width: under-w;
+            height: tabs-h + box-h + (shelf-on ? shelf-h : 0);
+            // a screen carried to `wx`, `wy` in the window: where the pointer holds it
+            // here, and where that is along the strip (anywhere over the panel, it can land);
+            // on the second tab, whether it is over the screen, where it lands there; and
+            // on either, the place in the Library under it
+            function carry-to(wx: length, wy: length) {
+                root.carry-x = wx - self.absolute-position.x;
+                root.carry-y = wy - self.absolute-position.y;
+                if (root.screen-game) {
+                    root.gl-carry-move(
+                        wx < game-panel.absolute-position.x || wx > game-panel.absolute-position.x + game-panel.width ? -1
+                        : wy >= game-panel.absolute-position.y + 6px && wy < game-panel.absolute-position.y + 48px ? 0 // art: where a carried layout lands on Game launch's rows
+                        : wy >= game-panel.absolute-position.y + 48px && wy < game-panel.absolute-position.y + 92px ? 1 : -1, // art: where a carried layout lands on Game launch's rows
+                        self.shelf-at(root.carry-x, root.carry-y));
+                } else if (root.screen-closed) {
+                    root.pl-carry-move(0,
+                        wx > screen-bay.absolute-position.x && wx < screen-bay.absolute-position.x + screen-bay.width
+                        && wy > screen-bay.absolute-position.y && wy < screen-bay.absolute-position.y + screen-bay.height,
+                        self.shelf-at(root.carry-x, root.carry-y));
+                } else {
+                    root.pl-carry-move(wx - strip.absolute-position.x,
+                        wx > panel.absolute-position.x && wx < panel.absolute-position.x + panel.width
+                        && wy > panel.absolute-position.y - 20px && wy < panel.absolute-position.y + panel.height + 40px, // art: the reach of a drop on the panel
+                        self.shelf-at(root.carry-x, root.carry-y));
+                }
+            }
+            // the Library's place at `lx`, `ly` here, counted as its cards are laid (two to a
+            // row, or one), past its last card the last; -1 off the Library
+            function shelf-at(lx: length, ly: length) -> int {
+                if (!shelf-on || lx < 0 || lx > under-w || ly < tabs-h + box-h || ly > tabs-h + box-h + shelf-h) {
+                    return -1;
+                }
+                return max(0, floor((ly - tabs-h - box-h - Size.box-head + Space.tight) / (Size.layout-card-h + Space.inline))) * (shelf-two ? 2 : 1) + (shelf-two && lx > under-w / 2 ? 1 : 0);
+            }
+            // let go: over the panel, the carried name settles into its room and then
+            // the screen takes its place; over the Library, into its card's place, where
+            // the card's own name sits; away from both, nothing changes
+            function drop-carry() {
+                if (root.pl-slot-w > 0) {
+                    root.carry-settle = true;
+                    root.carry-x = panel.x + strip.x + root.pl-slot-x + root.carry-gx;
+                    root.carry-y = panel.y + strip.y + 30px + root.carry-gy; // art: a carried card's place on the shelf
+                    settle.running = true;
+                } else if (root.lib-gap >= 0) {
+                    root.carry-settle = true;
+                    root.carry-x = 16px + (shelf-two ? mod(root.lib-gap, 2) * ((under-w - 40px) / 2 + 8px) : 0) + 288px + root.carry-gx; // art: a carried card's place on the shelf
+                    root.carry-y = tabs-h + box-h + 48px + (shelf-two ? floor(root.lib-gap / 2) : root.lib-gap) * 104px + 16px + root.carry-gy; // art: a carried card's place on the shelf
+                    settle.running = true;
+                } else {
+                    root.carry-on = false;
+                    root.pl-carry-drop();
+                }
+            }
+            settle := Timer {
+                interval: 160ms;
+                running: false;
+                triggered => {
+                    self.running = false;
+                    root.carry-settle = false;
+                    root.carry-on = false;
+                    root.pl-carry-drop();
+                }
+            }
+            // the screen's two states, as folder tabs on the box's top
+            HorizontalLayout {
+                x: 0;
+                y: 0;
+                height: tabs-h;
+                spacing: Space.tight;
+                alignment: start;
+                FolderTab {
+                    fill: Ink.well;
+                    text: "Playlist";
+                    open: !root.screen-closed && !root.screen-game;
+                    first: true;
+                    clicked => {
+                        root.screen-closed = false;
+                        root.screen-game = false;
+                        root.screen-state();
+                    }
+                }
+                FolderTab {
+                    fill: Ink.well;
+                    text: "Onboard layout";
+                    open: root.screen-closed;
+                    clicked => {
+                        root.screen-closed = true;
+                        root.screen-game = false;
+                        root.screen-state();
+                    }
+                }
+                FolderTab {
+                    fill: Ink.well;
+                    text: "Game launch";
+                    open: root.screen-game;
+                    clicked => {
+                        root.screen-closed = false;
+                        root.screen-game = true;
+                        root.screen-state();
+                    }
+                }
+            }
+            // Layouts' gray behind the box's lower corners, where the two meet
+            Rectangle {
+                visible: shelf-on;
+                y: tabs-h + box-h - Radius.box;
+                height: 2 * Radius.box;
+                background: Ink.box;
+            }
+            // the screen's box (square at its top left under the first tab, open)
+            Rectangle {
+                y: tabs-h;
+                height: box-h;
+                border-radius: Radius.box;
+                border-top-left-radius: !root.screen-closed && !root.screen-game ? 0 : Radius.box;
+                background: Ink.well;
+                // the bay the screen is set into, Space.pad down the box
+                screen-bay := ScreenBay {
+                    x: (parent.width - self.width) / 2;
+                    y: bay-pad;
+                    screen-w: lcd-w;
+                    screen-h: lcd-h;
+                    field: root.lcd-field;
+                }
+                // a layout carried over the screen on the second tab: ringed, as where it lands
+                if root.ob-over: Rectangle {
+                    x: screen-bay.x - Part.ring-out;
+                    y: screen-bay.y - Part.ring-out;
+                    width: screen-bay.width + 2 * Part.ring-out;
+                    height: screen-bay.height + 2 * Part.ring-out;
+                    border-radius: Radius.panel + Part.ring-out;
+                    border-width: Stroke.ring;
+                    border-color: Ink.soft;
+                }
+                Rectangle {
+                    x: (parent.width - lcd-w) / 2;
+                    y: bay-pad + kb-pad-y;
+                    width: lcd-w;
+                    height: lcd-h;
+                    border-radius: Radius.tiny;
+                    clip: true;
+                    Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.lcd-big;
+                    }
+                }
+            }
+
+            // ---------------------------------------------------- Game launch's rows
+            // in the box under the screen, as the playlist's panel is: a row for a game
+            // starting and one for a game quitting, each with its checkbox (unchecked, the
+            // row shows nothing), its words, the layout's bar (select it to see the layout
+            // on the screen above, again to let go; drag a layout from Layouts onto it to
+            // show that one) and until when
+            game-panel := Rectangle {
+                visible: root.screen-game;
+                y: band-y;
+                height: game-panel-h;
+                // (its rows a button's height, Space.inline apart, Space.row in from the
+                // panel's top and foot, Space.pad from its sides as the playlist's row is)
+                for g[i] in root.gl-rows: Rectangle {
+                    x: Space.pad;
+                    y: Space.row + i * (Size.button + Space.inline);
+                    width: parent.width - 2 * Space.pad;
+                    height: Size.button;
+                    HorizontalLayout {
+                        spacing: Space.inline;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            CheckBox {
+                                width: Size.check;
+                                on: g.on;
+                                clicked => { root.gl-row-on(i); }
+                            }
+                        }
+                        Text {
+                            text: g.words;
+                            font-family: Font.ui;
+                            font-size: Font.control;
+                            color: Ink.soft;
+                            vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 230px; // art: a Game launch row: its layout's bar, its check, its words
+                                height: 24px; // art: a Game launch row: its layout's bar, its check, its words
+                                border-radius: Radius.small;
+                                opacity: g.on ? 1 : 0.45;
+                                background: g.chosen ? (bar-ta.has-hover ? Ink.edge-hover : Ink.edge) : bar-ta.has-hover ? Ink.pick : Ink.hover-box;
+                                border-width: g.over ? Stroke.ring : 0;
+                                border-color: Ink.soft;
+                                clip: true;
+                                Rectangle {
+                                    x: 0;
+                                    width: 26px; // art: a Game launch row: its layout's bar, its check, its words
+                                    background: Ink.white.with-alpha(0.039);
+                                    Path {
+                                        width: 12px; // art: a Game launch row: its layout's bar, its check, its words
+                                        height: 12px; // art: a Game launch row: its layout's bar, its check, its words
+                                        viewbox-width: 12;
+                                        viewbox-height: 12;
+                                        commands: "M2.7 2.5h6.6a1.2 1.2 0 0 1 1.2 1.2v4.6a1.2 1.2 0 0 1-1.2 1.2H2.7a1.2 1.2 0 0 1-1.2-1.2V3.7a1.2 1.2 0 0 1 1.2-1.2zM3.5 5h5M3.5 7h3";
+                                        fill: transparent;
+                                        stroke: Ink.soft;
+                                        stroke-width: 1.2px; // art: a Game launch row: its layout's bar, its check, its words
+                                    }
+                                }
+                                Text {
+                                    x: 35px; // art: a Game launch row: its layout's bar, its check, its words
+                                    width: parent.width - 44px; // art: a Game launch row: its layout's bar, its check, its words
+                                    height: parent.height;
+                                    text: g.layout;
+                                    font-family: Font.ui;
+                                    font-size: Font.note;
+                                    font-weight: Font.medium;
+                                    color: Ink.ink;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                bar-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.gl-row-pick(i); }
+                                }
+                            }
+                        }
+                        Text {
+                            text: "until";
+                            font-family: Font.ui;
+                            font-size: Font.control;
+                            color: Ink.soft;
+                            vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            DropField {
+                                width: 250px; // art: the until chooser, as wide as its longest choice
+                                height: Size.compact;
+                                opacity: g.on ? 1 : 0.45;
+                                text: g.until;
+                                clicked(x, y, h) => { root.gl-row-until(i, x, y, h, self.width); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---------------------------------------------------- the playlist's panel
+            // attached under the screen's box, as wide as the box, in the boxes' gray (over
+            // the box's foot, so what opens from the panel rises over the box). One row:
+            // Pause, which playlist, then one round of it, left to right, each turn as long
+            // as its time, and the round starting again after it.
+            panel := Rectangle {
+                visible: !root.screen-closed && !root.screen-game;
+                y: band-y;
+                height: pl-panel-h;
+                // Pause, at the playlist's right end, after the round's start again
+                PlayButton {
+                    x: parent.width - Space.pad - self.width;
+                    y: (pl-panel-h - self.height) / 2;
+                    paused: root.lcd-state == 1;
+                    clicked => { root.lcd-pause(); }
+                }
+                // which playlist the profile plays: select it to choose another, or to
+                // make, rename or delete one
+                if !root.pl-renaming: DropField {
+                    x: Space.pad;
+                    y: (pl-panel-h - self.height) / 2;
+                    width: root.pl-chooser-w;
+                    height: Size.compact;
+                    subtle: true;
+                    text: root.pl-name;
+                    open: root.pl-choosing;
+                    clicked(x, y, h) => { root.pl-choose(x, y, h); }
+                }
+                // the playlist's name changed in place: Enter, the tick or a press away keeps
+                // it, Escape lets it go
+                if root.pl-renaming: RenameField {
+                    x: Space.pad;
+                    y: (pl-panel-h - self.height) / 2;
+                    width: root.pl-chooser-most;
+                    height: Size.compact;
+                    text <=> root.pl-rename-text;
+                    done(kept, t) => { root.pl-rename-done(kept, t); }
+                }
+                // the round starting again, after the strip (before Pause)
+                Path {
+                    visible: !root.pl-single && !root.pl-empty && root.pl-sizing < 0;
+                    x: parent.width - Space.pad - Size.compact - Space.inline - Size.round;
+                    y: (pl-panel-h - self.height) / 2;
+                    width: Size.round;
+                    height: Size.round;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5";
+                    fill: transparent;
+                    stroke: Ink.quiet;
+                    stroke-width: 1.8px; // art: the playlist's strip
+                    stroke-line-cap: round;
+                    stroke-line-join: round;
+                }
+                // the strip: every turn one piece, its way bar then its screen's bar with the
+                // screen's name on it; then an empty bar to add to. (16 above the bars' row
+                // as well, for a turn's time and buttons, which rise over the screen's box.)
+                strip := Rectangle {
+                    x: root.pl-track-x;
+                    y: -16px;
+                    width: root.pl-track-w;
+                    height: 16px + pl-panel-h; // art: the playlist's strip
+                    // where a carried layout will land: one empty bar in the box's shade (as the
+                    // holding bar; the screen's charcoal wouldn't show on the box's), the turn's
+                    // whole room, the others making room
+                    if root.pl-slot-w > 0: Rectangle {
+                        x: root.pl-slot-x - root.pl-pre;
+                        y: 32px; // art: the playlist's strip
+                        width: root.pl-pre + root.pl-slot-w;
+                        height: 24px; // art: the playlist's strip
+                        animate x, width { duration: 250ms; easing: ease; }
+                        border-radius: Radius.small;
+                        background: Ink.box;
+                    }
+                    // the empty holding bar, at the strip's end: a turn's room, a step lighter than
+                    // the screen's charcoal it sits on, with a "+": select it for a menu of the
+                    // layouts to add. The whole strip while the playlist is empty, saying how to fill it.
+                    if root.pl-hold-w > 0: Rectangle {
+                        x: root.pl-hold-x;
+                        y: 32px; // art: the playlist's strip
+                        width: root.pl-hold-w;
+                        height: 24px; // art: the playlist's strip
+                        animate x, width { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
+                        border-radius: Radius.small;
+                        property <bool> lit: (hold-ta.has-hover || root.pl-adding) && !root.carry-on;
+                        background: hold-ta.pressed ? Ink.pick : self.lit ? Ink.hover-box : Ink.box;
+                        animate background { duration: 120ms; }
+                        Path {
+                            x: root.pl-empty ? 10px : (parent.width - 12px) / 2; // art: the playlist's strip
+                            y: 6px; // art: the playlist's strip
+                            width: 12px; // art: the playlist's strip
+                            height: 12px; // art: the playlist's strip
+                            viewbox-width: 12;
+                            viewbox-height: 12;
+                            commands: "M6 2v8M2 6h8";
+                            fill: transparent;
+                            stroke: parent.lit ? Ink.bright : Ink.soft;
+                            stroke-width: 1.6px; // art: the playlist's strip
+                            stroke-line-cap: round;
+                        }
+                        if root.pl-empty: Text {
+                            x: 28px; // art: the playlist's strip
+                            width: parent.width - 38px; // art: the playlist's strip
+                            height: parent.height;
+                            text: "Add a screen layout, or drag one here from Layouts.";
+                            font-family: Font.ui;
+                            font-size: Font.note;
+                            color: parent.lit ? Ink.dim : Ink.quiet;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        hold-ta := TouchArea {
+                            enabled: !root.carry-on;
+                            mouse-cursor: pointer;
+                            clicked => { root.pl-hold-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
+                        }
+                    }
+                    for b[i] in root.pl-blocks: turn := Rectangle {
+                        x: b.x - root.pl-pre;
+                        width: root.pl-pre + b.w;
+                        animate x, width { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
+                        opacity: b.away ? 0 : root.pl-dim ? 0.3 : 1;
+                        animate opacity { duration: 120ms; }
+                        // the pointer on the screen's part or on the way bar: each lights the
+                        // other a step, so the two read as one; the way bar lit while its menu
+                        // is open or the screen is coming in
+                        property <bool> hov: sta.has-hover && !root.carry-on && root.pl-sizing < 0 && !root.pl-dim;
+                        property <bool> way-hov: wta.has-hover && !root.carry-on && root.pl-sizing < 0 && !root.pl-dim;
+                        property <bool> lit: root.pl-menu == i || (b.on && root.pl-head && root.pl-in);
+                        // how the screen comes in: the turn's start (grayed while the turn is the
+                        // only one, when nothing comes in after it, but still to be chosen)
+                        Rectangle {
+                            x: 0;
+                            y: 32px; // art: the playlist's strip
+                            width: root.pl-way-w;
+                            height: 24px; // art: the playlist's strip
+                            opacity: root.pl-single && !(turn.way-hov || turn.hov || turn.lit) ? 0.45 : 1;
+                            animate opacity { duration: 120ms; }
+                            border-top-left-radius: Radius.small;
+                            border-bottom-left-radius: Radius.small;
+                            background: turn.lit ? Ink.pick-hover : turn.way-hov || turn.hov ? Ink.pick : Ink.hover-box;
+                            animate background { duration: 120ms; }
+                            WayGlyph {
+                                x: (parent.width - 12px) / 2; // art: the playlist's strip
+                                y: 6px; // art: the playlist's strip
+                                way: b.way;
+                                ink: turn.lit || turn.way-hov ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
+                            }
+                        }
+                        // the screen's bar, a hairline after its way in, the screen's name on it
+                        // (none on a bar too short for a letter or two)
+                        Rectangle {
+                            x: root.pl-pre;
+                            y: 32px; // art: the playlist's strip
+                            width: b.w;
+                            height: 24px; // art: the playlist's strip
+                            border-top-right-radius: Radius.small;
+                            border-bottom-right-radius: Radius.small;
+                            background: b.on ? (turn.hov || turn.way-hov ? Ink.off : Ink.edge) : (turn.hov || turn.way-hov ? Ink.pick-hover : Ink.pick);
+                            animate background { duration: 120ms; }
+                            // its name, then its time at its end, short of the end's handle: its
+                            // seconds, or the infinity mark for a turn that stays until the layouts
+                            // are switched (the time left off a bar too short to keep some of the
+                            // name beside it, and both off one too short for a letter or two)
+                            if b.w >= 28px: HorizontalLayout { // art: the playlist's strip
+                                padding-left: 8px;  // art: a turn on the strip
+                                padding-right: 10px;  // art: a turn on the strip
+                                spacing: 8px;  // art: a turn on the strip
+                                Text {
+                                    min-width: 0px;
+                                    horizontal-stretch: 1;
+                                    text: b.name;
+                                    font-family: Font.ui;
+                                    font-size: Font.caption;
+                                    font-weight: b.on ? Font.strong : Font.regular;
+                                    color: b.on ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                if b.time != "" && b.w >= 64px: Text { // art: the playlist's strip
+                                    text: b.time;
+                                    font-family: Font.ui;
+                                    font-size: Font.small;
+                                    color: b.on ? Ink.dim : turn.hov ? Ink.soft : Ink.quiet;
+                                    vertical-alignment: center;
+                                }
+                                if b.stays && !root.pl-single && b.w >= 34px: Rectangle { // art: the playlist's strip
+                                    width: 17.6px; // art: the playlist's strip
+                                    Path {
+                                        y: (parent.height - 8px) / 2; // art: the playlist's strip
+                                        width: 17.6px; // art: the playlist's strip
+                                        height: 8px; // art: the playlist's strip
+                                        viewbox-x: 1;
+                                        viewbox-y: 7;
+                                        viewbox-width: 22;
+                                        viewbox-height: 10;
+                                        commands: "M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.33-6 4Z";
+                                        fill: transparent;
+                                        stroke: b.on ? Ink.dim : turn.hov ? Ink.soft : Ink.quiet;
+                                        stroke-width: 1.5px; // art: the playlist's strip
+                                    }
+                                }
+                            }
+                        }
+                        // the playhead: across the way bar while the screen comes in, then along
+                        // the screen's bar (under the turn's time and buttons)
+                        if b.on && root.pl-head && !b.away: Rectangle {
+                            x: (root.pl-in ? root.pl-pre * root.pl-p : root.pl-pre + b.w * root.pl-p) - 1px; // art: the playlist's strip
+                            y: 26px; // art: the playlist's strip
+                            width: 2px; // art: the playlist's strip
+                            height: 36px; // art: the playlist's strip
+                            border-radius: self.width / 2;
+                            background: Ink.bright;
+                            opacity: root.carry-on ? 0.3 : 1;
+                            Rectangle {
+                                x: -4px;
+                                y: -4px;
+                                width: 10px; // art: the playlist's strip
+                                height: 10px; // art: the playlist's strip
+                                border-radius: self.width / 2;
+                                background: Ink.bright;
+                            }
+                        }
+                        // select the turn to show it now; drag it along the strip to move it
+                        // (the turn carried keeps the press it was carried with, unseen, until
+                        // it lands: switched off then, the drag would end under the hand)
+                        sta := TouchArea {
+                            enabled: (!b.away || root.carry-on) && !root.pl-dim;
+                            // (the open hand at rest, as a turn is there to be carried; Grant, 2026-10-16)
+                            mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.grab;
+                            property <bool> far;
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.down) {
+                                    self.far = false;
+                                }
+                                if (e.kind == PointerEventKind.up) {
+                                    if (root.carry-on) {
+                                        stage.drop-carry();
+                                    } else if (!self.far) {
+                                        root.page-show(i);
+                                    }
+                                }
+                                if (e.kind == PointerEventKind.cancel && root.carry-on) {
+                                    root.carry-on = false;
+                                    root.pl-carry-cancel();
+                                }
+                            }
+                            moved => {
+                                if (self.pressed) {
+                                    if (!root.carry-on && !self.far && (abs(self.mouse-x - self.pressed-x) > Part.drag || abs(self.mouse-y - self.pressed-y) > Part.drag)) {
+                                        self.far = true;
+                                        root.carry-gx = 18px; // art: the playlist's strip
+                                        root.carry-gy = 14px; // art: the playlist's strip
+                                        root.carry-settle = false;
+                                        root.carry-on = true;
+                                        root.pl-carry-start(0, i);
+                                    }
+                                    if (root.carry-on) {
+                                        stage.carry-to(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                                    }
+                                }
+                            }
+                            // its time, then Edit and Remove, over its bar while the pointer is on
+                            // the turn or its time's menu is open; only the time while its end is
+                            // dragged. The time opens its menu of times while there are other turns.
+                            // (Inside the turn's TouchArea, so the turn keeps the pointer while it
+                            // is on them.)
+                            if (turn.hov || root.pl-sizing == i || root.pl-timing == i) && !b.away: tb := Rectangle {
+                                property <bool> buttons: root.pl-sizing != i;
+                                property <bool> times: self.buttons && !root.pl-single;
+                                x: root.pl-pre + (b.w - self.width) / 2;
+                                y: 0;
+                                width: 2px + time-button.width + (self.buttons ? 1px + 20px + 21px : 0) + 2px; // art: the playlist's strip
+                                height: 24px; // art: the playlist's strip
+                                border-radius: Radius.control;
+                                background: Ink.pop;
+                                drop-shadow-blur: Shadow.float.blur;
+                                drop-shadow-offset-y: Shadow.float.y;
+                                drop-shadow-color: Shadow.float.color;
+                                time-button := Rectangle {
+                                    x: 2px; // art: the playlist's strip
+                                    y: 2px; // art: the playlist's strip
+                                    width: 6px + secs-text.preferred-width + (tb.times ? 3px + 10px + 5px : 6px); // art: the playlist's strip
+                                    height: 20px; // art: the playlist's strip
+                                    border-radius: Radius.control - 2px; // art: the playlist's strip
+                                    background: !tb.times ? transparent : time-ta.pressed || root.pl-timing == i ? Ink.pick : time-ta.has-hover ? Ink.hover-box : transparent;
+                                    secs-text := Text {
+                                        x: 6px; // art: the playlist's strip
+                                        height: parent.height;
+                                        text: b.secs;
+                                        font-family: Font.ui;
+                                        font-size: Font.caption;
+                                        color: Ink.bright;
+                                        vertical-alignment: center;
+                                    }
+                                    if tb.times: Path {
+                                        x: 6px + secs-text.preferred-width + 3px; // art: the playlist's strip
+                                        y: 5px; // art: the playlist's strip
+                                        width: 10px; // art: the playlist's strip
+                                        height: 10px; // art: the playlist's strip
+                                        viewbox-width: 24;
+                                        viewbox-height: 24;
+                                        commands: "M6 9l6 6 6-6";  // art: the turn's own tools, over the strip
+                                        fill: transparent;
+                                        stroke: time-ta.has-hover || root.pl-timing == i ? Ink.bright : Ink.soft;
+                                        stroke-width: 2px; // art: the playlist's strip
+                                    }
+                                    time-ta := TouchArea {
+                                        enabled: tb.times;
+                                        mouse-cursor: tb.times ? MouseCursor.pointer : MouseCursor.default;
+                                        clicked => { root.pl-time(i, self.absolute-position.x, self.absolute-position.y, self.width, self.height); }
+                                    }
+                                }
+                                if tb.buttons: StripIcon {
+                                    x: 2px + time-button.width + 1px; // art: the playlist's strip
+                                    y: 2px; // art: the playlist's strip
+                                    commands: "M4 20h4L19 9l-4-4L4 16z";
+                                    clicked => { root.screen-edit(i); }
+                                }
+                                if tb.buttons: StripIcon {
+                                    x: 2px + time-button.width + 1px + 21px; // art: the playlist's strip
+                                    y: 2px; // art: the playlist's strip
+                                    commands: "M6 6l12 12M18 6L6 18";
+                                    clicked => { root.page-remove(i); }
+                                }
+                            }
+                            // the bar's right end: drag it to make the turn longer or shorter
+                            if !root.pl-single && !b.away && !root.pl-dim: Rectangle {
+                                x: parent.width - 10px; // art: the playlist's strip
+                                y: 32px; // art: the playlist's strip
+                                width: 10px; // art: the playlist's strip
+                                height: 24px; // art: the playlist's strip
+                                Rectangle {
+                                    x: 4px; // art: the playlist's strip
+                                    y: 7px; // art: the playlist's strip
+                                    width: 2px; // art: the playlist's strip
+                                    height: 10px; // art: the playlist's strip
+                                    border-radius: self.width / 2;
+                                    background: Ink.bright;
+                                    opacity: turn.hov || root.pl-sizing == i ? 0.8 : 0;
+                                    animate opacity { duration: 120ms; }
+                                }
+                                TouchArea {
+                                    enabled: !root.carry-on;
+                                    mouse-cursor: MouseCursor.ew-resize;
+                                    // (measured in the window: the end moves with the drag)
+                                    property <length> from;
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down) {
+                                            self.from = self.absolute-position.x + self.mouse-x;
+                                        }
+                                        if ((e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) && root.pl-sizing == i) {
+                                            root.pl-sizing = -1;
+                                            root.pl-size-done();
+                                        }
+                                    }
+                                    moved => {
+                                        if (self.pressed) {
+                                            root.pl-sizing = i;
+                                            root.pl-size(i, self.absolute-position.x + self.mouse-x - self.from);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // the way bar: select it to choose how the screen comes in
+                        wta := TouchArea {
+                            enabled: !b.away && !root.pl-dim && !root.carry-on;
+                            x: 0;
+                            y: 16px; // art: the playlist's strip
+                            width: root.pl-way-w;
+                            height: 40px; // art: the playlist's strip
+                            mouse-cursor: pointer;
+                            clicked => { root.pl-mark(i, self.absolute-position.x, self.absolute-position.y + 16px, 24px); } // art: the playlist's strip
+                        }
+                        // its name over it while the pointer is on it (not while its menu is open)
+                        if turn.way-hov && root.pl-menu != i: Tip {
+                            x: (root.pl-way-w - self.width) / 2;
+                            y: 32px - self.height - Space.tight; // art: the playlist's strip
+                            width: self.preferred-width;
+                            height: self.preferred-height;
+                            text: b.way-name;
+                        }
+                    }
+                    // a script's screen on the keyboard: the strip waits, and says so
+                    if root.pl-dim: Rectangle {
+                        property <length> tw: pill-text.preferred-width;
+                        property <length> bw: back-text.preferred-width + 20px; // art: the playlist's strip
+                        x: (parent.width - self.width) / 2;
+                        y: 26px; // art: the playlist's strip
+                        width: 14px + self.tw + 12px + self.bw + 4px; // art: the playlist's strip
+                        height: 36px; // art: the playlist's strip
+                        border-radius: Radius.panel;
+                        background: Ink.pop;
+                        drop-shadow-blur: Shadow.float.blur;
+                        drop-shadow-offset-y: Shadow.float.y;
+                        drop-shadow-color: Shadow.float.color;
+                        pill-text := Text {
+                            x: 14px; // art: the playlist's strip
+                            height: parent.height;
+                            text: root.pl-script;
+                            font-family: Font.ui;
+                            font-size: Font.control;
+                            color: Ink.bright;
+                            vertical-alignment: center;
+                        }
+                        Rectangle {
+                            x: 14px + parent.tw + 12px; // art: the playlist's strip
+                            y: 4px; // art: the playlist's strip
+                            width: parent.bw;
+                            height: 28px; // art: the playlist's strip
+                            border-radius: Radius.panel - 4px; // art: the playlist's strip
+                            background: back-ta.pressed ? Ink.pick : back-ta.has-hover ? Ink.pick-hover : Ink.hover-box;
+                            back-text := Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: "Back to the playlist";
+                                font-family: Font.ui;
+                                font-size: Font.control;
+                                color: Ink.bright;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            back-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.pl-back(); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---------------------------------------------------- the onboard layout
+            // the second tab's row under the screen, where the first has the playlist: the
+            // chooser of the layout the profile keeps on the keyboard, and the line beside
+            // it; on a keyboard without build 5, what the keyboard needs instead
+            if root.screen-closed: Rectangle {
+                y: band-y;
+                height: pl-panel-h;
+                if root.ob-ready: DropField {
+                    x: Space.pad;
+                    y: (pl-panel-h - self.height) / 2;
+                    width: root.ob-chooser-w;
+                    height: Size.compact;
+                    subtle: true;
+                    text: root.ob-name;
+                    open: root.ob-choosing;
+                    clicked(x, y, h) => { root.ob-choose(x, y, h); }
+                }
+                if root.ob-ready: Text {
+                    x: Space.pad + root.ob-chooser-w + Space.margin;
+                    y: (Size.bar - Size.compact) / 2;
+                    width: parent.width - self.x - Space.pad;
+                    height: Size.compact;
+                    text: root.ob-say;
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    color: Ink.quiet;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                if !root.ob-ready: Rectangle {
+                    x: Space.margin;
+                    y: (Size.bar - Size.compact) / 2;
+                    width: parent.width - 2 * Space.margin;
+                    height: Size.compact;
+                    Path {
+                        x: 0;
+                        y: (parent.height - Part.glyph) / 2;
+                        width: Part.glyph;
+                        height: Part.glyph;
+                        viewbox-width: 14;
+                        viewbox-height: 14;
+                        commands: "M7 1.4a5.6 5.6 0 1 0 0 11.2a5.6 5.6 0 1 0 0-11.2zM7 6.2v3.6M7 4.3v0.1";
+                        fill: transparent;
+                        stroke: Ink.soft;
+                        stroke-width: 1.3px; // art: the glyph's stroke
+                        stroke-line-cap: round;
+                    }
+                    Text {
+                        x: Part.glyph + Part.glyph-gap;
+                        width: parent.width - self.x;
+                        height: parent.height;
+                        text: "Onboard layouts need Ectomatter’s firmware on the keyboard. Until then, the keyboard shows " + (root.kb-maker == "" ? "its maker’s" : root.kb-maker + "’s") + " status screen when Ectomatter isn’t running.";
+                        font-family: Font.ui;
+                        font-size: Font.note;
+                        color: Ink.soft;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            // ---------------------------------------------------- the Library
+            // every screen there is, two to a row; drag one onto the playlist to play it,
+            // or put it on the playlist's end from its card; an empty block after them
+            // for a new one
+            if root.boot == 0: PageBox {
+                visible: shelf-on;
+                x: 0;
+                y: tabs-h + box-h;
+                width: under-w;
+                height: shelf-h;
+                border-top-left-radius: 0;
+                border-top-right-radius: 0;
+                title: "Layouts";
+                // how the Library is used, at the end of its title's line
+                Text {
+                    x: 96px; // art: after the title's word
+                    y: Part.title-top;
+                    width: parent.width - Space.pad - self.x;
+                    height: Line.title;
+                    text: root.screen-game ? "Drag a screen layout onto a bar above to show that layout when a game starts or quits." : root.screen-closed ? "Drag a screen layout onto the screen to save the layout on the keyboard, or to another place in Layouts to move the layout." : "Drag a screen layout onto the playlist to add the layout to what the keyboard shows, or to another place in Layouts to move the layout.";
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    color: Ink.quiet;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                // each card in its place: while a layout is carried along the Library, the
+                // others make room where it will land, and it is left out of its own
+                for c[k] in root.lib-pages: Rectangle {
+                    property <length> cw: shelf-two ? (parent.width - 2 * Space.pad - Space.inline) / 2 : parent.width - 2 * Space.pad;
+                    x: Space.pad + (shelf-two ? mod(c.at, 2) * (self.cw + Space.inline) : 0);
+                    y: Size.box-head + (shelf-two ? floor(c.at / 2) : c.at) * (Size.layout-card-h + Space.inline);
+                    animate x, y { duration: root.carry-on ? 250ms : 0ms; easing: ease; }
+                    opacity: c.carried ? 0 : 1;
+                    width: self.cw;
+                    height: Size.layout-card-h;
+                    PlCard {
+                        width: parent.width;
+                        height: parent.height;
+                        p: c;
+                        hovered: cta.has-hover && !root.carry-on;
+                    }
+                    // the whole card a button: select it (or right-click it) for its menu, Edit
+                    // first; press and drag it to carry it onto the playlist
+                    cta := TouchArea {
+                        mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.pointer;
+                        property <bool> far;
+                        // (pressed with the right button: its menu, never a carry)
+                        property <bool> right;
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                self.far = false;
+                                self.right = e.button == PointerEventButton.right;
+                            }
+                            if (e.kind == PointerEventKind.up && root.carry-on) {
+                                stage.drop-carry();
+                            } else if (e.kind == PointerEventKind.up && !self.far && (e.button == PointerEventButton.left || e.button == PointerEventButton.right)) {
+                                root.lib-menu(k, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            }
+                            if (e.kind == PointerEventKind.cancel && root.carry-on) {
+                                root.carry-on = false;
+                                root.pl-carry-cancel();
+                            }
+                        }
+                        moved => {
+                            if (self.pressed && !self.right) {
+                                if (!root.carry-on && !self.far && (abs(self.mouse-x - self.pressed-x) > Part.drag || abs(self.mouse-y - self.pressed-y) > Part.drag)) {
+                                    self.far = true;
+                                    root.carry-gx = 18px; // art: where the chip is held
+                                    root.carry-gy = 14px; // art: where the chip is held
+                                    root.carry-settle = false;
+                                    root.carry-on = true;
+                                    root.pl-carry-start(1, k);
+                                }
+                                if (root.carry-on) {
+                                    stage.carry-to(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                                }
+                            }
+                        }
+                        // the menu's "···", at the middle of the card's right edge while the pointer
+                        // is on it: what selecting the card opens
+                        if self.has-hover && !root.carry-on: Text {
+                            x: parent.width - 30px - self.preferred-width / 2; // art: what selecting the card opens, at its end
+                            y: (parent.height - self.preferred-height) / 2;
+                            text: "···";
+                            font-family: Font.ui;
+                            font-size: Font.title;
+                            letter-spacing: 1px; // art: what selecting the card opens, at its end
+                            color: Ink.soft;
+                        }
+                    }
+                }
+                // a new screen: an empty block after the last, in the cards' own shade
+                Rectangle {
+                    property <int> k: root.lib-pages.length;
+                    property <length> cw: shelf-two ? (parent.width - 2 * Space.pad - Space.inline) / 2 : parent.width - 2 * Space.pad;
+                    x: Space.pad + (shelf-two ? mod(self.k, 2) * (self.cw + Space.inline) : 0);
+                    y: Size.box-head + (shelf-two ? floor(self.k / 2) : self.k) * (Size.layout-card-h + Space.inline);
+                    width: self.cw;
+                    height: Size.layout-card-h;
+                    border-radius: Radius.panel;
+                    background: new-ta.pressed ? Ink.pick : new-ta.has-hover ? Ink.hover-well : Ink.well;
+                    animate background { duration: 120ms; }
+                    property <length> words-w: Part.chevron + Part.glyph-gap + new-text.preferred-width;
+                    Path {
+                        x: (parent.width - parent.words-w) / 2;
+                        y: (parent.height - Part.chevron) / 2;
+                        width: Part.chevron;
+                        height: Part.chevron;
+                        viewbox-width: 12;
+                        viewbox-height: 12;
+                        commands: "M6 2v8M2 6h8";
+                        fill: transparent;
+                        stroke: new-ta.has-hover ? Ink.bright : Ink.soft;
+                        stroke-width: 1.6px; // art: the plus's stroke
+                        stroke-line-cap: round;
+                    }
+                    new-text := Text {
+                        x: (parent.width - parent.words-w) / 2 + Part.chevron + Part.glyph-gap;
+                        height: parent.height;
+                        text: "New screen layout";
+                        font-family: Font.ui;
+                        font-size: Font.control;
+                        font-weight: Font.medium;
+                        color: new-ta.has-hover ? Ink.bright : Ink.soft;
+                        vertical-alignment: center;
+                    }
+                    new-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.lib-new(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
+                    }
+                }
+            }
+
+            // the pieces round the box, in the column's terms: the default backlight at the
+            // tabs' row's right end, and the line on a layout's own color before it
+            if root.boot == 0: Rectangle {
+                for c in root.cells: CellView {
+                    c: c;
+                    pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
+                    field-left(id, index, kept) => { root.cell-left(id, index, kept); }
+                    slide(id, v) => { root.cell-slide(id, v); }
+                }
+            }
+
+            // ---------------------------------------------------- the screen carried
+            // its name, under the pointer; let go over the panel, it settles into its room
+            if root.carry-on: CarryChip {
+                x: root.carry-x - root.carry-gx;
+                y: root.carry-y - root.carry-gy;
+                animate x, y { duration: root.carry-settle ? 150ms : 0ms; easing: ease; }
+                text: root.carry-name;
+                opacity: root.carry-settle ? 0 : 1;
+                animate opacity { duration: 150ms; easing: ease; }
+            }
+        }
+        // Settings: the keyboard's facts, a form (src/form.rs) laid out in Rust
+        if root.tab == 2: Rectangle {
+            x: pws-x;
+            y: head-end;
+            width: pws-w;
+            height: root.tile-height;
+            for c in root.cells: CellView {
+                c: c;
+                pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
+                field-left(id, index, kept) => { root.cell-left(id, index, kept); }
+                slide(id, v) => { root.cell-slide(id, v); }
+                typed(id, index, t) => { root.cell-typed(id, index, t); }
+            }
+        }
+
+        // the keyboard's stage, every device's: its shade round the hole the
+        // window draws the keyboard in
+        if root.tab < 2: Stage {
+            x: pws-x;
+            y: board-top - kb-pad-y;
+            width: pws-w;
+            height: board-h + 2 * kb-pad-y;
+            hole-x: kb-pad-x;
+            hole-y: kb-pad-y;
+            hole-w: board-w;
+            hole-h: board-h;
+        }
+        // the device's shadow on the box, kept inside the box's corners
+        if root.tab < 2: Rectangle {
+            x: pws-x;
+            y: board-top - kb-pad-y;
+            width: pws-w;
+            height: board-h + 2 * kb-pad-y;
+            border-radius: Radius.box;
+            clip: true;
+            Image {
+                x: kb-pad-x - root.board-shadow-margin;
+                y: kb-pad-y - root.board-shadow-margin;
+                width: board-w + 2 * root.board-shadow-margin;
+                height: board-h + 2 * root.board-shadow-margin;
+                source: root.board-shadow;
+            }
+        }
+        // the keys, over the keyboard's hole: a click on the keyboard away
+        // from every key lets the chosen one go; then what is drawn over it
+        Rectangle {
+            visible: root.tab < 2;
+            x: pws-x + kb-pad-x;
+            y: board-top;
+            width: board-w;
+            height: board-h;
+            TouchArea {
+                clicked => { root.board-clicked(); }
+            }
+            for k in root.keys: KeyBox {
+                k: k;
+                unit: root.unit;
+                cqw: root.cqw;
+                clicked => { root.key-clicked(k.pos); }
+                hovered(on) => { root.key-hovered(k.pos, on); }
+            }
+            for o in root.overlays: Image {
+                visible: root.board-ready;
+                // Only a knob's place along its track glides, as long as the time
+                // between readings, so it is still moving when the next one comes
+                // and never steps; its track moves with the keyboard at once.
+                property <float> along: o.frac;
+                animate along { duration: root.knob-glide; easing: linear; }
+                x: o.x + self.along * o.travel;
+                y: o.y;
+                // (dimmed with the keyboard round an area the pointer is over)
+                opacity: o.opacity * (root.dimming ? 0.45 : 1);
+                width: o.w;
+                height: o.h;
+                source: o.image;
+                image-fit: fill;
+            }
+        }
+    }
+    // the device's own bar, every page's: its name, its tabs, its editors, and how it is
+    devbar := PageBar {
+        y: 0;
+        title: root.kb-name;
+        dot: root.conn-state;
+        tabs: ["Keys", "Lighting", "Screen", "Settings"];
+        // (the tabs in the bar's order: the page's numbers have Settings 2, Screen 3)
+        tab: root.tab == 3 ? 2 : root.tab == 2 ? 3 : root.tab;
+        tab-chosen(i) => { root.view-changed(i == 2 ? 3 : i == 3 ? 2 : i); }
+        status: root.status-text;
+        status-bad: root.status-kind == 2;
+        undo-shown: root.undo-shown;
+        undo => { root.undo(false); }
+        // the Macro Editor, the Screen Editor and the lab
+        BarButton {
+            commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
+            text: "Macro Editor";
+            clicked => { root.macro-editor(-1); }
+        }
+        // (the keyboard's screen: a wide frame with its rows of words)
+        BarButton {
+            commands: "M2.6 3.4h10.8a1.6 1.6 0 0 1 1.6 1.6v6a1.6 1.6 0 0 1-1.6 1.6H2.6A1.6 1.6 0 0 1 1 11V5a1.6 1.6 0 0 1 1.6-1.6zM4 6.2h8M4 8h6M4 9.8h7";
+            text: "Screen Editor";
+            clicked => { root.screen-editor(); }
+        }
+        BarButton {
+            // a flask drawn for this size, its lines on the pixel grid
+            commands: "M5.14 1.14h5.72M6.29 1.14v4.58L2.95 11.93a1.25 1.25 0 0 0 1.1 1.79h7.9a1.25 1.25 0 0 0 1.1-1.79L9.71 5.72V1.14M4.3 10.29h7.4";
+            round: true;
+            text: "";
+            clicked => { root.rail("lab"); }
+        }
+    }
+
+}

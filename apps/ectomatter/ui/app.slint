@@ -34,6 +34,10 @@ export { Typing, MenuRow, Cell, LaidBox, ProfileItem }
 
 // The rows and items the pages are handed, and the page parts drawn from them (pages/shared.slint).
 import { KeyItem, Overlay, LayerItem, EffectItem, LibRow, LibGroup, LayerTab, CheckItem, PlPage, PlBlock, MouseRow, MouseCall, MousePatch, RailDevice, DeskItem, DeskPad, LibCover, LibApp, GlRow, LibToc, LibFact, KeyBox, EffectGrid, LayerSwitch, KeyLibrary, GameBox, LibCoverView, PlCard, WayGlyph, KeyDetail, SliderDetail, MouseLayers, PadGrip } from "pages/shared.slint";
+import { KeyboardPage } from "pages/keyboard.slint";
+import { HomePage } from "pages/home.slint";
+import { SettingsPage } from "pages/settings.slint";
+import { LibraryPage } from "pages/library.slint";
 import { MousePage } from "pages/mouse.slint";
 export { KeyItem, Overlay, LayerItem, EffectItem, LibRow, LibGroup, LayerTab, CheckItem, PlPage, PlBlock, MouseRow, MouseCall, MousePatch, RailDevice, DeskItem, DeskPad, LibCover, LibApp, GlRow, LibToc, LibFact }
 
@@ -106,7 +110,7 @@ export component AppWindow inherits Window {
     callback gl-toc-jump(int);
     // (a jump from On this page: the section near the top, as far as the page goes)
     changed gl-jump-n => {
-        gl-flick.content-y = -max(0, min(root.gl-jump-y, gl-flick.content-height - gl-flick.height));
+        library-page.gl-flick-content-y = -max(0, min(root.gl-jump-y, library-page.gl-flick-content-height - library-page.gl-flick-height));
     }
     // the form for a script (gl-modal 3): its words, what's typed into it, its choices
     in property <string> gl-script-title;
@@ -177,7 +181,7 @@ export component AppWindow inherits Window {
     in property <int> gl-seen-chosen: -1;
     in property <bool> gl-can-add;
     out property <length> gl-width: content-w;
-    out property <length> gl-scroll: -gl-flick.content-y;
+    out property <length> gl-scroll: -library-page.gl-flick-content-y;
     callback gl-tab-chosen(int);
     callback gl-find(string);
     callback gl-store-menu(length, length, length, length);
@@ -244,12 +248,12 @@ export component AppWindow inherits Window {
     in property <[Cell]> cells;
     in property <length> tile-height;
     in property <length> settings-h;
-    out property <length> settings-scroll: set-flick.content-y;
+    out property <length> settings-scroll: settings-page.set-flick-content-y;
     // Settings scrolled to a place on its page (its Sensor Feed box), as far as it scrolls
     in property <length> settings-goto: -1px;
     changed settings-goto => {
         if (root.settings-goto >= 0) {
-            set-flick.content-y = -min(root.settings-goto, max(0px, root.settings-h - set-flick.height));
+            settings-page.set-flick-content-y = -min(root.settings-goto, max(0px, root.settings-h - settings-page.set-flick-height));
         }
     }
     // the keyboard is showing the page's preview
@@ -398,10 +402,10 @@ export component AppWindow inherits Window {
     // the chosen key, and its two layers
     in property <bool> key-open;
     // where the chosen key's editor is in the window, which a press on keeps the key chosen
-    out property <length> key-tile-x: key-tile.absolute-position.x;
-    out property <length> key-tile-y: key-tile.absolute-position.y;
-    out property <length> key-tile-w: key-tile.width;
-    out property <length> key-tile-h: key-tile.height;
+    out property <length> key-tile-x: keyboard-page.key-tile-absolute-position.x;
+    out property <length> key-tile-y: keyboard-page.key-tile-absolute-position.y;
+    out property <length> key-tile-w: keyboard-page.key-tile-width;
+    out property <length> key-tile-h: keyboard-page.key-tile-height;
     in property <string> key-name;
     in property <string> key-factory;
     in property <[LayerItem]> layers;
@@ -445,7 +449,7 @@ export component AppWindow inherits Window {
     in property <bool> board-ready;
     in property <duration> knob-glide: 120ms;
     out property <length> board-x: rail-w + pws-x + kb-pad-x;
-    out property <length> board-y: bar + Size.bar + flick.content-y + board-top;
+    out property <length> board-y: bar + Size.bar + keyboard-page.flick-content-y + board-top;
     out property <length> board-width: board-w;
     out property <length> board-height: board-h;
     // the app's ground, which the window lays under the content
@@ -771,14 +775,14 @@ export component AppWindow inherits Window {
     // Profiles. (`stage-h` is the screen's part of the box.)
     // (the playlist's row: a bar's height, its controls at its middle)
     property <length> pl-panel-h: Size.bar;
-    property <length> stage-h: anchor.preferred-height - pl-panel-h;
+    property <length> stage-h: keyboard-page.anchor-preferred-height - pl-panel-h;
     property <length> tabs-h: Size.tab;
     // the box: as tall as Profiles, less whatever a narrow window takes off the screen's
     // height, so the row under the screen keeps its margin
     property <length> lcd-short: stage-h - 2 * bay-pad - 2 * kb-pad-y - lcd-h;
     // (Game launch's two rows take more than the playlist's one)
     property <length> game-panel-h: 2 * Size.button + Space.inline + 2 * Space.row;
-    property <length> box-h: anchor.preferred-height - lcd-short + (root.screen-game ? game-panel-h - pl-panel-h : 0);
+    property <length> box-h: keyboard-page.anchor-preferred-height - lcd-short + (root.screen-game ? game-panel-h - pl-panel-h : 0);
     // Layouts, joined to the box's foot: on the second tab only once the keyboard can keep a layout
     property <bool> shelf-on: !root.screen-closed || root.ob-ready;
     // the row under the screen in the box: the bay 16 in from the box's top, its gutter round the screen
@@ -807,7 +811,7 @@ export component AppWindow inherits Window {
     // the playlist's name changed in place: where its field is in the window, so a press
     // away from it keeps the name
     out property <length> pl-rename-wx: rail-w + under-x + Space.pad;
-    out property <length> pl-rename-wy: bar + Size.bar + flick.content-y + head-end + band-y + (pl-panel-h - Size.compact) / 2;
+    out property <length> pl-rename-wy: bar + Size.bar + keyboard-page.flick-content-y + head-end + band-y + (pl-panel-h - Size.compact) / 2;
     property <length> anchor-w: Size.column;
     property <length> under-x: pws-x + anchor-w + Space.gap;
     out property <length> under-w: pws-w - anchor-w - Space.gap;
@@ -822,8 +826,8 @@ export component AppWindow inherits Window {
     // at most the room under the keyboard in the window (so it never runs off
     // its foot), between those as tall as the tallest holds. What holds more
     // than that scrolls inside its block.
-    property <length> band-min: anchor.preferred-height;
-    property <length> room: flick.height - under-top - Space.margin;
+    property <length> band-min: keyboard-page.anchor-preferred-height;
+    property <length> room: keyboard-page.flick-height - under-top - Space.margin;
     property <length> band-max: max(band-min, room);
     // (each of the second box's three, as tall as it says it needs)
     property <length> key-need: 270px; // art: the box's height until it says
@@ -833,11 +837,11 @@ export component AppWindow inherits Window {
     property <length> second-w: root.key-open ? Size.detail : root.slider-chosen != 0 ? Size.settings : Size.game;
     // Lighting: the effects, the effect's settings and where and when, in the row of boxes
     property <length> lfx-h: Size.box-head + 3 * Size.tile + 2 * Space.inline + Space.pad;
-    property <length> tab-h: root.tab == 0 ? kb-keys.height : root.tab == 1 ? kb-light.height
+    property <length> tab-h: root.tab == 0 ? keyboard-page.kb-keys-height : root.tab == 1 ? keyboard-page.kb-light-height
         : root.tab == 3 ? (shelf-on ? shelf-h : 0) : root.tile-height;
-    property <length> under-board: Space.gap + max(anchor.preferred-height, tab-h);
+    property <length> under-board: Space.gap + max(keyboard-page.anchor-preferred-height, tab-h);
     property <length> page-h: root.tab == 2 ? head-end + root.tile-height
-        : root.tab == 3 ? max(head-end + anchor.preferred-height, under-top + tab-h) + Space.margin
+        : root.tab == 3 ? max(head-end + keyboard-page.anchor-preferred-height, under-top + tab-h) + Space.margin
         : board-top + board-h + kb-pad-y + under-board + Space.margin;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
     property <length> doc-h: bar + Size.bar + page-h;
@@ -863,452 +867,58 @@ export component AppWindow inherits Window {
         // its page; Arrange shows the dots, the desk zooms and pans, and the
         // devices move onto the dots. (The window lays the dots and the
         // highlight under a device on the ground, and draws the keyboard.)
-        if root.place == "home": Rectangle {
-            desk-ta := TouchArea {
-                // (in edit mode a drag on the empty desk moves round it; with
-                // Draw your own on, it draws a pad)
-                mouse-cursor: root.desk-panning ? MouseCursor.grabbing : root.desk-drawing ? MouseCursor.crosshair : MouseCursor.default;
-                // (in edit mode a drag with the middle button moves around the desk)
-                pointer-event(e) => {
-                    if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
-                        root.desk-press(-1, self.mouse-x, self.mouse-y);
-                    }
-                    if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
-                        root.desk-pan(self.mouse-x, self.mouse-y);
-                    }
-                    if ((e.button == PointerEventButton.left || e.button == PointerEventButton.middle) && e.kind == PointerEventKind.up) {
-                        root.desk-release();
-                    }
-                }
-                moved => { root.desk-move(self.mouse-x, self.mouse-y); }
-                scroll-event(e) => {
-                    if (root.desk-editing) {
-                        root.desk-wheel(self.mouse-x, self.mouse-y, e.delta-y);
-                        return accept;
-                    }
-                    return reject;
-                }
-                // the pads, under the devices (the window draws them on the ground):
-                // in edit mode, a ring round the one chosen or being drawn, and a
-                // fainter one round the one the pointer is over; a drag on one
-                // carries it, and the chosen one's edges and corners size it
-                for p[j] in root.desk-pads: Rectangle {
-                    x: p.x;
-                    y: p.y;
-                    width: p.w;
-                    height: p.h;
-                    if root.desk-editing && (p.chosen || (p.hover && !root.desk-carrying)): Rectangle {
-                        border-radius: p.r;
-                        border-width: p.chosen ? Stroke.chosen : Stroke.line;
-                        border-color: p.chosen ? Ink.white.with-alpha(0.878) : Ink.white.with-alpha(0.251);
-                    }
-                    if root.desk-editing && !p.drawing: TouchArea {
-                        mouse-cursor: root.desk-drawing ? MouseCursor.crosshair : root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab;
-                        changed has-hover => { root.desk-pad-hover(j, self.has-hover); }
-                        pointer-event(e) => {
-                            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
-                                root.desk-press(-1, p.x + self.mouse-x, p.y + self.mouse-y);
-                            }
-                            if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
-                                root.desk-pan(p.x + self.mouse-x, p.y + self.mouse-y);
-                            }
-                            if ((e.button == PointerEventButton.left || e.button == PointerEventButton.middle) && e.kind == PointerEventKind.up) {
-                                root.desk-release();
-                            }
-                        }
-                        moved => { root.desk-move(p.x + self.mouse-x, p.y + self.mouse-y); }
-                    }
-                    // (each its own element, placed as the pad's size has it: not
-                    // a list made from its size, which a drag would make anew, and
-                    // the grip held with it)
-                    if root.desk-editing && p.chosen && !p.drawing: Rectangle {
-                        PadGrip {
-                            x: -5px;
-                            y: 7px; // art: the grips that size a device in edit mode
-                            width: 10px; // art: the grips that size a device in edit mode
-                            height: p.h - 14px; // art: the grips that size a device in edit mode
-                            edges: 1;
-                            ox: p.x;
-                            oy: p.y;
-                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
-                            pan(x, y) => { root.desk-pan(x, y); }
-                            drag(x, y) => { root.desk-move(x, y); }
-                            let-go => { root.desk-release(); }
-                        }
-                        PadGrip {
-                            x: p.w - 5px; // art: the grips that size a device in edit mode
-                            y: 7px; // art: the grips that size a device in edit mode
-                            width: 10px; // art: the grips that size a device in edit mode
-                            height: p.h - 14px; // art: the grips that size a device in edit mode
-                            edges: 4;
-                            ox: p.x;
-                            oy: p.y;
-                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
-                            pan(x, y) => { root.desk-pan(x, y); }
-                            drag(x, y) => { root.desk-move(x, y); }
-                            let-go => { root.desk-release(); }
-                        }
-                        PadGrip {
-                            x: 7px; // art: the grips that size a device in edit mode
-                            y: -5px;
-                            width: p.w - 14px; // art: the grips that size a device in edit mode
-                            height: 10px; // art: the grips that size a device in edit mode
-                            edges: 2;
-                            ox: p.x;
-                            oy: p.y;
-                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
-                            pan(x, y) => { root.desk-pan(x, y); }
-                            drag(x, y) => { root.desk-move(x, y); }
-                            let-go => { root.desk-release(); }
-                        }
-                        PadGrip {
-                            x: 7px; // art: the grips that size a device in edit mode
-                            y: p.h - 5px; // art: the grips that size a device in edit mode
-                            width: p.w - 14px; // art: the grips that size a device in edit mode
-                            height: 10px; // art: the grips that size a device in edit mode
-                            edges: 8;
-                            ox: p.x;
-                            oy: p.y;
-                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
-                            pan(x, y) => { root.desk-pan(x, y); }
-                            drag(x, y) => { root.desk-move(x, y); }
-                            let-go => { root.desk-release(); }
-                        }
-                        PadGrip {
-                            x: -7px;
-                            y: -7px;
-                            width: 14px; // art: the grips that size a device in edit mode
-                            height: 14px; // art: the grips that size a device in edit mode
-                            edges: 3;
-                            ox: p.x;
-                            oy: p.y;
-                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
-                            pan(x, y) => { root.desk-pan(x, y); }
-                            drag(x, y) => { root.desk-move(x, y); }
-                            let-go => { root.desk-release(); }
-                        }
-                        PadGrip {
-                            x: p.w - 7px; // art: the grips that size a device in edit mode
-                            y: -7px;
-                            width: 14px; // art: the grips that size a device in edit mode
-                            height: 14px; // art: the grips that size a device in edit mode
-                            edges: 6;
-                            ox: p.x;
-                            oy: p.y;
-                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
-                            pan(x, y) => { root.desk-pan(x, y); }
-                            drag(x, y) => { root.desk-move(x, y); }
-                            let-go => { root.desk-release(); }
-                        }
-                        PadGrip {
-                            x: p.w - 7px; // art: the grips that size a device in edit mode
-                            y: p.h - 7px; // art: the grips that size a device in edit mode
-                            width: 14px; // art: the grips that size a device in edit mode
-                            height: 14px; // art: the grips that size a device in edit mode
-                            edges: 12;
-                            ox: p.x;
-                            oy: p.y;
-                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
-                            pan(x, y) => { root.desk-pan(x, y); }
-                            drag(x, y) => { root.desk-move(x, y); }
-                            let-go => { root.desk-release(); }
-                        }
-                        PadGrip {
-                            x: -7px;
-                            y: p.h - 7px; // art: the grips that size a device in edit mode
-                            width: 14px; // art: the grips that size a device in edit mode
-                            height: 14px; // art: the grips that size a device in edit mode
-                            edges: 9;
-                            ox: p.x;
-                            oy: p.y;
-                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
-                            pan(x, y) => { root.desk-pan(x, y); }
-                            drag(x, y) => { root.desk-move(x, y); }
-                            let-go => { root.desk-release(); }
-                        }
-                    }
-                }
-                for d[i] in root.desk-items: Rectangle {
-                    x: d.x;
-                    y: d.y;
-                    width: d.w;
-                    height: d.h;
-                    // the keyboard: its shadow round its place, its knobs and the display's glass over it
-                    if d.kind == 0: Image {
-                        x: -root.desk-kb-shadow-m * root.desk-kb-k;
-                        y: -root.desk-kb-shadow-m * root.desk-kb-k;
-                        width: parent.width + 2 * root.desk-kb-shadow-m * root.desk-kb-k;
-                        height: parent.height + 2 * root.desk-kb-shadow-m * root.desk-kb-k;
-                        source: root.desk-kb-shadow;
-                    }
-                    if d.kind == 0: Rectangle {
-                        // the keys held down on the keyboard, shaded as its page shades them
-                        for k in root.keys: Rectangle {
-                            visible: k.pressed;
-                            x: k.x * d.w / root.units;
-                            y: k.y * d.w / root.units;
-                            width: k.w * d.w / root.units;
-                            height: k.h * d.w / root.units;
-                            border-radius: (k.molded ? 0.13 : 0.24) * d.w / 100;
-                            background: #00000052;  // art: a key held down, as the keyboard's own picture has it
-                        }
-                        for o in root.overlays: Image {
-                            visible: root.board-ready;
-                            property <float> along: o.frac;
-                            animate along { duration: root.knob-glide; easing: linear; }
-                            x: (o.x + self.along * o.travel) * root.desk-kb-k;
-                            y: o.y * root.desk-kb-k;
-                            opacity: o.opacity * (d.off ? 0.5 : 1);
-                            width: o.w * root.desk-kb-k;
-                            height: o.h * root.desk-kb-k;
-                            source: o.image;
-                            image-fit: fill;
-                        }
-                    }
-                    // the mouse: the window draws it here in HDR, under the page; these
-                    // layers only place it
-                    if d.kind == 1: MouseLayers {
-                        x: -root.desk-mouse-m * root.desk-mouse-k;
-                        y: -root.desk-mouse-m * root.desk-mouse-k;
-                        width: parent.width + 2 * root.desk-mouse-m * root.desk-mouse-k;
-                        height: parent.height + 2 * root.desk-mouse-m * root.desk-mouse-k;
-                        drawn: false;
-                        k: root.desk-mouse-k;
-                        opacity: d.off ? 0.5 : 1;
-                        lit: !d.off;
-                        base: root.desk-mouse-picture;
-                        logo-under: root.desk-mouse-logo-under;
-                        wheel-under: root.desk-mouse-wheel-under;
-                        logo: root.desk-mouse-logo;
-                        wheel: root.desk-mouse-wheel;
-                        logo-tint: root.mouse-logo-tint;
-                        wheel-tint: root.mouse-wheel-tint;
-                    }
-                    // in edit mode, a thin ring round the device the pointer is over
-                    if root.desk-editing && d.hover && !root.desk-carrying: Rectangle {
-                        x: -16px;
-                        y: -16px;
-                        width: parent.width + 2 * Space.pad;
-                        height: parent.height + 16px + 58px; // art: the ring round the device and its name
-                        border-radius: Radius.box;
-                        border-width: Stroke.line;
-                        border-color: Ink.white.with-alpha(0.11);
-                    }
-                    // over a pad it could be lost on, its name on a backing of the
-                    // app's own ground
-                    if d.backed: Rectangle {
-                        x: (parent.width - name-col.preferred-width) / 2 - 10px; // art: the name's backing
-                        y: parent.height + 16px - 5px; // art: the name's backing
-                        width: name-col.preferred-width + 20px; // art: the name's backing
-                        height: name-col.preferred-height + 10px; // art: the name's backing
-                        border-radius: Radius.control;
-                        background: Ink.base.with-alpha(0.851);
-                    }
-                    // its name under it, and under that whether it is plugged in
-                    name-col := VerticalLayout {
-                        x: (parent.width - self.preferred-width) / 2;
-                        y: parent.height + Space.pad;
-                        width: self.preferred-width;
-                        spacing: Space.list;
-                        HorizontalLayout {
-                            alignment: center;
-                            spacing: Space.inline;
-                            VerticalLayout {
-                                alignment: center;
-                                Dot { state: d.off ? 2 : 1; }
-                            }
-                            Text {
-                                text: d.name;
-                                font-family: Font.ui;
-                                font-size: Font.text;
-                                font-weight: Font.medium;
-                                color: d.hover ? Ink.bright : Ink.dim;
-                                height: Line.text;
-                                vertical-alignment: center;
-                            }
-                        }
-                        if d.sub != "": Text {
-                            text: d.sub;
-                            font-family: Font.ui;
-                            font-size: Font.caption;
-                            color: Ink.quiet;
-                            horizontal-alignment: center;
-                        }
-                    }
-                    // a press: outside edit mode, a click opens its page; in edit mode it carries it
-                    TouchArea {
-                        y: 0;
-                        height: parent.height + 16px + 40px; // art: the device and its name, pressed as one
-                        mouse-cursor: root.desk-editing ? (root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab) : MouseCursor.pointer;
-                        changed has-hover => { root.desk-hover(i, self.has-hover); }
-                        pointer-event(e) => {
-                            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
-                                root.desk-press(i, d.x + self.mouse-x, d.y + self.mouse-y);
-                            }
-                            // (the middle button's drag moves around the desk, over a device too)
-                            if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
-                                root.desk-pan(d.x + self.mouse-x, d.y + self.mouse-y);
-                            }
-                            if ((e.button == PointerEventButton.left || e.button == PointerEventButton.middle) && e.kind == PointerEventKind.up) {
-                                root.desk-release();
-                            }
-                        }
-                        moved => { root.desk-move(d.x + self.mouse-x, d.y + self.mouse-y); }
-                    }
-                }
-            }
-            // day to day: the tab's words at the top left, Arrange at the top right
-            // day to day: what to do here, and at the right Scenes (the scene on, by its
-            // name and its chip; Scenes, with the light's glyph, while none is on) and Arrange
-            if !root.desk-editing && root.desk-empty == "": HintRow {
-                x: Space.margin;
-                width: parent.width - 2 * Space.margin;
-                text: "Select a device to change it.";
-                Rectangle {
-                    horizontal-stretch: 1;
-                }
-                HorizontalLayout {
-                    spacing: Space.inline;
-                    cross-axis-alignment: center;
-                    LinkButton {
-                        text: root.scene-name == "" ? "Scenes" : "Scene: " + root.scene-name;
-                        chip: root.scene-chip;
-                        chip-on: root.scene-name != "";
-                        lit: root.scene-name != "";
-                        // (a bulb's light: a ring, and its rays)
-                        icon: "M7 4.6a2.4 2.4 0 1 0 0 4.8a2.4 2.4 0 1 0 0-4.8zM7 0.9v1.5M7 11.6v1.5M0.9 7h1.5M11.6 7h1.5M2.7 2.7l1.06 1.06M10.24 10.24l1.06 1.06M2.7 11.3l1.06-1.06M10.24 3.76l1.06-1.06";
-                        clicked => { root.scene-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
-                    }
-                    LinkButton {
-                        text: "Arrange";
-                        icon: "M7 1.5v11M1.5 7h11M7 1.5 5.4 3.1M7 1.5l1.6 1.6M7 12.5l-1.6-1.6M7 12.5l1.6-1.6M1.5 7l1.6-1.6M1.5 7l1.6 1.6M12.5 7l-1.6-1.6M12.5 7l-1.6 1.6";
-                        clicked => { root.desk-arrange(); }
-                    }
-                }
-            }
-            // edit mode: what to do and Done, on a bar of its own over the dots
-            if root.desk-editing: FloatBar {
-                x: (parent.width - self.width) / 2;
-                y: Space.row;
-                // nothing chosen: what to do, Space.row in from the bar's edge
-                if root.desk-pad-chosen < 0: HorizontalLayout {
-                    padding-left: Space.row - Space.tight;
-                    padding-right: Space.tight;
-                    Text {
-                        text: root.desk-drawing ? "Drag across the desk to draw your pad." : "Drag a device to where it sits on your desk.";
-                        font-family: Font.ui;
-                        font-size: Font.note;
-                        color: Ink.soft;
-                        vertical-alignment: center;
-                    }
-                }
-                // nothing chosen: a pad to add, at its maker's size or drawn
-                if root.desk-pad-chosen < 0 && !root.desk-drawing: WordButton {
-                    text: "Add pad";
-                    compact: true;
-                    on-box: true;
-                    clicked => { root.desk-add-pad(self.absolute-position.x, self.absolute-position.y, self.height); }
-                }
-                // drawing: put away unused
-                if root.desk-pad-chosen < 0 && root.desk-drawing: WordButton {
-                    text: "Cancel";
-                    compact: true;
-                    on-box: true;
-                    clicked => { root.desk-draw-cancel(); }
-                }
-                // a pad chosen: its size, its color, its picture, and taking it off the desk
-                if root.desk-pad-chosen >= 0: WordButton {
-                    text: root.desk-pad-size;
-                    compact: true;
-                    on-box: true;
-                    menu: true;
-                    clicked => { root.desk-pad-size-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
-                }
-                if root.desk-pad-chosen >= 0: WordButton {
-                    text: "Color";
-                    compact: true;
-                    on-box: true;
-                    swatched: true;
-                    swatch: root.desk-pad-rgb;
-                    clicked => { root.desk-pad-color(self.absolute-position.x, self.absolute-position.y, self.height); }
-                }
-                if root.desk-pad-chosen >= 0: WordButton {
-                    text: "Choose a picture…";
-                    compact: true;
-                    on-box: true;
-                    clicked => { root.desk-pad-picture(); }
-                }
-                if root.desk-pad-chosen >= 0 && root.desk-pad-pictured: WordButton {
-                    text: "Remove picture";
-                    compact: true;
-                    on-box: true;
-                    clicked => { root.desk-pad-no-picture(); }
-                }
-                if root.desk-pad-chosen >= 0: WordButton {
-                    text: "Delete pad";
-                    compact: true;
-                    danger: true;
-                    clicked => { root.desk-pad-delete(); }
-                }
-                if root.desk-pad-chosen >= 0 && root.desk-pad-note != "": Text {
-                    text: root.desk-pad-note;
-                    font-family: Font.ui;
-                    font-size: Font.note;
-                    color: Ink.bad;
-                    vertical-alignment: center;
-                }
-                // (Done apart from the rest, Space.inline more)
-                if root.desk-pad-chosen >= 0: Rectangle { width: Space.inline; }
-                WordButton {
-                    text: "Done";
-                    compact: true;
-                    on-box: true;
-                    clicked => { root.desk-done(); }
-                }
-            }
-            // edit mode: zoom, at the bottom right, Space.margin in
-            if root.desk-editing: FloatBar {
-                x: parent.width - self.width - Space.margin;
-                y: parent.height - self.height - Space.margin;
-                IconButton {
-                    width: Size.compact;
-                    height: Size.compact;
-                    icon: "M2 6h8";
-                    units: 12;
-                    clicked => { root.desk-zoom-step(-1); }
-                }
-                // (as wide at every zoom as at its widest, so the bar never moves)
-                TextButton {
-                    width: max(self.preferred-width, zoom-most.preferred-width + 2 * Part.quiet-pad);
-                    text: root.desk-zoom;
-                    clicked => { root.desk-zoom-step(0); }
-                }
-                IconButton {
-                    width: Size.compact;
-                    height: Size.compact;
-                    icon: "M2 6h8M6 2v8";
-                    units: 12;
-                    clicked => { root.desk-zoom-step(1); }
-                }
-                TextButton {
-                    text: "Fit";
-                    clicked => { root.desk-zoom-step(2); }
-                }
-            }
-            zoom-most := Text {
-                visible: false;
-                text: "400%";
-                font-family: Font.ui;
-                font-size: Font.control;
-                font-weight: Font.medium;
-            }
-            // before anything is plugged in: which devices Ectomatter works with
-            if root.desk-empty != "": EmptyState {
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                width: min(Size.empty, parent.width - 2 * Space.margin);
-                text: root.desk-empty;
-            }
+        if root.place == "home": home-page := HomePage {
+            board-ready: root.board-ready;
+            desk-add-pad(a0, a1, a2) => { root.desk-add-pad(a0, a1, a2); }
+            desk-arrange() => { root.desk-arrange(); }
+            desk-carrying: root.desk-carrying;
+            desk-done() => { root.desk-done(); }
+            desk-draw-cancel() => { root.desk-draw-cancel(); }
+            desk-drawing: root.desk-drawing;
+            desk-editing: root.desk-editing;
+            desk-empty: root.desk-empty;
+            desk-hover(a0, a1) => { root.desk-hover(a0, a1); }
+            desk-items: root.desk-items;
+            desk-kb-k: root.desk-kb-k;
+            desk-kb-shadow: root.desk-kb-shadow;
+            desk-kb-shadow-m: root.desk-kb-shadow-m;
+            desk-mouse-k: root.desk-mouse-k;
+            desk-mouse-logo: root.desk-mouse-logo;
+            desk-mouse-logo-under: root.desk-mouse-logo-under;
+            desk-mouse-m: root.desk-mouse-m;
+            desk-mouse-picture: root.desk-mouse-picture;
+            desk-mouse-wheel: root.desk-mouse-wheel;
+            desk-mouse-wheel-under: root.desk-mouse-wheel-under;
+            desk-move(a0, a1) => { root.desk-move(a0, a1); }
+            desk-pad-chosen: root.desk-pad-chosen;
+            desk-pad-color(a0, a1, a2) => { root.desk-pad-color(a0, a1, a2); }
+            desk-pad-delete() => { root.desk-pad-delete(); }
+            desk-pad-edges(a0, a1, a2) => { root.desk-pad-edges(a0, a1, a2); }
+            desk-pad-hover(a0, a1) => { root.desk-pad-hover(a0, a1); }
+            desk-pad-no-picture() => { root.desk-pad-no-picture(); }
+            desk-pad-note: root.desk-pad-note;
+            desk-pad-picture() => { root.desk-pad-picture(); }
+            desk-pad-pictured: root.desk-pad-pictured;
+            desk-pad-rgb: root.desk-pad-rgb;
+            desk-pad-size: root.desk-pad-size;
+            desk-pad-size-menu(a0, a1, a2) => { root.desk-pad-size-menu(a0, a1, a2); }
+            desk-pads: root.desk-pads;
+            desk-pan(a0, a1) => { root.desk-pan(a0, a1); }
+            desk-panning: root.desk-panning;
+            desk-press(a0, a1, a2) => { root.desk-press(a0, a1, a2); }
+            desk-release() => { root.desk-release(); }
+            desk-wheel(a0, a1, a2) => { root.desk-wheel(a0, a1, a2); }
+            desk-zoom: root.desk-zoom;
+            desk-zoom-step(a0) => { root.desk-zoom-step(a0); }
+            keys: root.keys;
+            knob-glide: root.knob-glide;
+            mouse-logo-tint: root.mouse-logo-tint;
+            mouse-wheel-tint: root.mouse-wheel-tint;
+            overlays: root.overlays;
+            scene-chip: root.scene-chip;
+            scene-menu(a0, a1, a2) => { root.scene-menu(a0, a1, a2); }
+            scene-name: root.scene-name;
+            units: root.units;
         }
 
         // the mouse's page, from the keyboard page's own parts: its bar, then
@@ -1416,1573 +1026,276 @@ export component AppWindow inherits Window {
         // the Library (games_page.rs): the games and apps on three tabs, each
         // game's or app's own page, and Every game's; its bar stays put over
         // what scrolls, as a device's does
-        Rectangle {
+        library-page := LibraryPage {
             visible: root.place == "library";
-            gl-flick := Flickable {
-                y: Size.bar;
-                height: parent.height - Size.bar;
-                content-height: root.gl-page-h;
-                mouse-drag-pan-enabled: false;
-                // what to do here, and beside it the find box and, on the games' tabs, the
-                // store and the order
-                HintRow {
-                    x: pws-x;
-                    width: pws-w;
-                    text: root.gl-hint;
-                    shorten: true;
-                    // the find box, and on the games' tabs the store and the order, on the
-                    // hint line at a button's height
-                    if root.gl-view == 0: HorizontalLayout {
-                        cross-axis-self-alignment: center;
-                        height: Size.button;
-                        spacing: Space.inline;
-                        FieldBox {
-                            width: Size.find;
-                            height: Size.button;
-                            glyph: Glyph.find;
-                            placeholder: root.gl-find-hint;
-                            text <=> root.gl-query;
-                            edited => { root.gl-find(self.text); }
-                            escape => { self.stop-typing(); }
-                        }
-                        if root.gl-tab < 2: DropField {
-                            width: root.gl-store-w;
-                            height: Size.button;
-                            text: root.gl-store;
-                            clicked(x, y, h) => { root.gl-store-menu(x, y, h, self.width); }
-                        }
-                        if root.gl-tab < 2: DropField {
-                            width: root.gl-sort-w;
-                            height: Size.button;
-                            text: root.gl-sort;
-                            clicked(x, y, h) => { root.gl-sort-menu(x, y, h, self.width); }
-                        }
-                    }
-                }
-                for c[i] in root.gl-covers: LibCoverView {
-                    c: c;
-                    open => { root.gl-open(i); }
-                    star => { root.gl-star(i); }
-                }
-                // the Apps tab: a row for each app, in a box of their own, Space.inline in from it
-                // as a list's rows in a box are: its icon, its name and what changes for it, where
-                // it's from, and the way on to its page
-                if root.gl-view == 0 && root.gl-apps.length > 0: PageBox {
-                    x: pws-x;
-                    y: head-end;
-                    width: pws-w;
-                    height: root.gl-apps.length * Size.app + 2 * Space.inline;
-                    for a[i] in root.gl-apps: Rectangle {
-                        x: Space.inline;
-                        y: Space.inline + i * Size.app;
-                        width: parent.width - 2 * Space.inline;
-                        height: Size.app;
-                        border-radius: Radius.control;
-                        background: row-ta.has-hover ? Ink.hover-box : transparent;
-                        property <length> words-x: Space.row + Size.app-icon + Space.row;
-                        property <length> onward-x: self.width - Part.field-pad - Part.chevron;
-                        if a.has-icon: Image {
-                            x: Space.row;
-                            y: (parent.height - self.height) / 2;
-                            width: Size.app-icon;
-                            height: Size.app-icon;
-                            source: a.icon;
-                        }
-                        if !a.has-icon: Rectangle {
-                            x: Space.row;
-                            y: (parent.height - self.height) / 2;
-                            width: Size.app-icon;
-                            height: Size.app-icon;
-                            border-radius: Radius.control;
-                            background: Ink.well;
-                        }
-                        VerticalLayout {
-                            x: parent.words-x;
-                            width: parent.width - parent.words-x - from-t.width - Space.row - (parent.width - parent.onward-x);
-                            alignment: center;
-                            spacing: Space.list;
-                            Text {
-                                text: a.name;
-                                font-family: Font.ui;
-                                font-size: Font.name;
-                                font-weight: Font.medium;
-                                color: Ink.ink;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: a.sub;
-                                font-family: Font.ui;
-                                font-size: Font.note;
-                                color: Ink.quiet;
-                                overflow: elide;
-                            }
-                        }
-                        from-t := Text {
-                            x: parent.onward-x - Space.row - self.width;
-                            width: min(self.preferred-width, parent.width / 3);
-                            height: parent.height;
-                            text: a.from;
-                            font-family: Font.ui;
-                            font-size: Font.note;
-                            color: Ink.quiet;
-                            horizontal-alignment: right;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                        Path {
-                            x: parent.onward-x;
-                            y: (parent.height - self.height) / 2;
-                            width: Part.chevron;
-                            height: Part.chevron;
-                            viewbox-width: 12;
-                            viewbox-height: 12;
-                            commands: Glyph.onward;
-                            fill: transparent;
-                            stroke: Ink.quiet;
-                            stroke-width: 1.6px; // art: the chevron's stroke
-                            stroke-line-cap: round;
-                        }
-                        row-ta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.gl-open(i); }
-                        }
-                    }
-                }
-                // nothing to show: what's missing, and the way to it, in the page's middle
-                if root.gl-view == 0 && root.gl-empty != "": EmptyState {
-                    x: (parent.width - self.width) / 2;
-                    y: max(head-end + Space.section, (gl-flick.height - self.preferred-height) / 2);
-                    width: min(Size.empty, pws-w);
-                    height: self.preferred-height;
-                    title: root.gl-empty;
-                    text: root.gl-empty-sub;
-                }
-                // a page of its own: the game's picture, then its sections
-                if root.gl-view == 1 && root.gl-has-hero: Rectangle {
-                    x: pws-x;
-                    y: head-end;
-                    width: pws-w;
-                    height: Size.hero;
-                    border-radius: Radius.box;
-                    background: Ink.box;
-                    Image {
-                        width: parent.width;
-                        height: parent.height;
-                        source: root.gl-hero;
-                    }
-                    for f in root.gl-facts: Text {
-                        x: parent.width - Space.margin - root.gl-facts-w + f.x;
-                        y: parent.height - Space.margin - Line.note;
-                        height: Line.note;
-                        text: f.text;
-                        font-family: Font.ui;
-                        font-size: Font.note;
-                        font-weight: f.strong ? Font.medium : Font.regular;
-                        color: f.strong ? Ink.ink : Ink.dim;
-                        vertical-alignment: center;
-                    }
-                }
-                // (a device's glyph at the rail's own size, drawn for it, not a larger one shrunk)
-                for c in root.gl-cells: CellView {
-                    c: c;
-                    glyph: root.keyboard-glyph;
-                    glyph2: root.mouse-glyph;
-                    glyphs: root.package-glyphs;
-                    glyph3: root.scene-glyph;
-                    chips: root.scene-chips;
-                    pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
-                    field-left(id, index, kept) => { root.cell-left(id, index, kept); }
-                    slide(id, v) => { root.cell-slide(id, v); }
-                    typed(id, index, t) => { root.cell-typed(id, index, t); }
-                }
-            }
-            // On this page: each section's name and what it changes for this game, beside the
-            // sections; it scrolls with the page until it reaches the top, then stays in view
-            if root.gl-view == 1 && root.gl-toc.length > 0: Rectangle {
-                x: root.gl-toc-x;
-                y: Size.bar + max(Space.pad, root.gl-toc-top + gl-flick.content-y);
-                width: root.gl-toc-w;
-                height: toc-col.preferred-height;
-                // its heading in capitals, as a list's, its words level with the entries'
-                toc-col := VerticalLayout {
-                    spacing: 0;
-                    HorizontalLayout {
-                        padding-left: Space.row;
-                        AnchorHead { text: "ON THIS PAGE"; }
-                    }
-                    for t[i] in root.gl-toc: Rectangle {
-                        height: toc-words.preferred-height;
-                        border-radius: Radius.control;
-                        background: toc-ta.has-hover ? Ink.box : transparent;
-                        toc-words := VerticalLayout {
-                            padding-left: Space.row;
-                            padding-right: Space.row;
-                            padding-top: Space.inline;
-                            padding-bottom: Space.inline;
-                            spacing: Space.list;
-                            Text {
-                                text: t.name;
-                                font-family: Font.ui;
-                                font-size: Font.text;
-                                font-weight: Font.medium;
-                                color: Ink.dim;
-                            }
-                            Text {
-                                text: t.sub;
-                                font-family: Font.ui;
-                                font-size: Font.note;
-                                color: t.set ? Ink.soft : Ink.quiet;
-                                wrap: word-wrap;
-                            }
-                        }
-                        toc-ta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.gl-toc-jump(i); }
-                        }
-                    }
-                    if root.gl-toc-foot != "": Rectangle { height: Space.row; }
-                    if root.gl-toc-foot != "": HorizontalLayout {
-                        padding-left: Space.row;
-                        padding-right: Space.row;
-                        Text {
-                            text: root.gl-toc-foot;
-                            font-family: Font.ui;
-                            font-size: Font.note;
-                            color: Ink.quiet;
-                            wrap: word-wrap;
-                        }
-                    }
-                }
-            }
-            // the Library's bar, every page's: its name and tabs, or on a page of its own
-            // the way back to the Library, the page's name, its star and Play
-            PageBar {
-                y: 0;
-                title: root.gl-view == 0 ? "Library" : root.gl-name;
-                back: root.gl-view == 1 ? "Library" : "";
-                back-clicked => { root.gl-back(); }
-                tabs: root.gl-view == 0 ? ["Favorites", "Games", "Apps"] : [];
-                tab: root.gl-tab;
-                tab-chosen(i) => { root.gl-tab-chosen(i); }
-                status: root.gl-said;
-                status-bad: root.gl-said-bad;
-                undo-shown: root.gl-undo-shown;
-                undo => { root.gl-undo(); }
-                if root.gl-view == 0: HorizontalLayout {
-                    horizontal-stretch: 0;
-                    spacing: Space.inline;
-                    if root.gl-tab < 2: BarButton {
-                        // two cards, one on another: every game at once
-                        commands: "M2.5 5.5h7.5a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-7.5a1.5 1.5 0 0 1-1.5-1.5v-6a1.5 1.5 0 0 1 1.5-1.5zM4.5 3h8a1.5 1.5 0 0 1 1.5 1.5v7.5";
-                        text: "Every game";
-                        clicked => { root.gl-every-page(); }
-                    }
-                    BarButton {
-                        commands: "M8 3v10M3 8h10";
-                        round: true;
-                        text: root.gl-tab < 2 ? "Add a game" : "Add an app";
-                        clicked => { root.gl-add(); }
-                    }
-                }
-                if root.gl-view == 1 && !root.gl-every: HorizontalLayout {
-                    horizontal-stretch: 0;
-                    spacing: Space.inline;
-                    alignment: center;
-                    if root.gl-removable: VerticalLayout {
-                        alignment: center;
-                        LinkButton {
-                            text: "Remove";
-                            clicked => { root.gl-remove(); }
-                        }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        StarButton {
-                            on: root.gl-fav;
-                            clicked => { root.gl-star-page(); }
-                        }
-                    }
-                    if root.gl-playable: VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            primary: true;
-                            text: "Play";
-                            icon: "M4 2.6v8.8c0 .5.5.8.9.5l7-4.4a.6.6 0 0 0 0-1L4.9 2.1c-.4-.3-.9 0-.9.5Z";
-                            clicked => { root.gl-play(); }
-                        }
-                    }
-                }
-            }
+            cell-left(a0, a1, a2) => { root.cell-left(a0, a1, a2); }
+            cell-pick(a0, a1, a2, a3, a4, a5) => { root.cell-pick(a0, a1, a2, a3, a4, a5); }
+            cell-slide(a0, a1) => { root.cell-slide(a0, a1); }
+            cell-typed(a0, a1, a2) => { root.cell-typed(a0, a1, a2); }
+            gl-add() => { root.gl-add(); }
+            gl-apps: root.gl-apps;
+            gl-back() => { root.gl-back(); }
+            gl-cells: root.gl-cells;
+            gl-covers: root.gl-covers;
+            gl-empty: root.gl-empty;
+            gl-empty-sub: root.gl-empty-sub;
+            gl-every: root.gl-every;
+            gl-every-page() => { root.gl-every-page(); }
+            gl-facts: root.gl-facts;
+            gl-facts-w: root.gl-facts-w;
+            gl-fav: root.gl-fav;
+            gl-find(a0) => { root.gl-find(a0); }
+            gl-find-hint: root.gl-find-hint;
+            gl-has-hero: root.gl-has-hero;
+            gl-hero: root.gl-hero;
+            gl-hint: root.gl-hint;
+            gl-name: root.gl-name;
+            gl-open(a0) => { root.gl-open(a0); }
+            gl-page-h: root.gl-page-h;
+            gl-play() => { root.gl-play(); }
+            gl-playable: root.gl-playable;
+            gl-query <=> root.gl-query;
+            gl-removable: root.gl-removable;
+            gl-remove() => { root.gl-remove(); }
+            gl-said: root.gl-said;
+            gl-said-bad: root.gl-said-bad;
+            gl-sort: root.gl-sort;
+            gl-sort-menu(a0, a1, a2, a3) => { root.gl-sort-menu(a0, a1, a2, a3); }
+            gl-sort-w: root.gl-sort-w;
+            gl-star(a0) => { root.gl-star(a0); }
+            gl-star-page() => { root.gl-star-page(); }
+            gl-store: root.gl-store;
+            gl-store-menu(a0, a1, a2, a3) => { root.gl-store-menu(a0, a1, a2, a3); }
+            gl-store-w: root.gl-store-w;
+            gl-tab: root.gl-tab;
+            gl-tab-chosen(a0) => { root.gl-tab-chosen(a0); }
+            gl-toc: root.gl-toc;
+            gl-toc-foot: root.gl-toc-foot;
+            gl-toc-jump(a0) => { root.gl-toc-jump(a0); }
+            gl-toc-top: root.gl-toc-top;
+            gl-toc-w: root.gl-toc-w;
+            gl-toc-x: root.gl-toc-x;
+            gl-undo() => { root.gl-undo(); }
+            gl-undo-shown: root.gl-undo-shown;
+            gl-view: root.gl-view;
+            head-end <=> root.head-end;
+            keyboard-glyph: root.keyboard-glyph;
+            mouse-glyph: root.mouse-glyph;
+            package-glyphs: root.package-glyphs;
+            place <=> root.place;
+            pws-w <=> root.pws-w;
+            pws-x <=> root.pws-x;
+            scene-chips: root.scene-chips;
+            scene-glyph: root.scene-glyph;
         }
         // Ectomatter's own settings: its bar, every page's, and under it the form
         // (src/ecto_settings.rs), which scrolls
-        Rectangle {
+        settings-page := SettingsPage {
             visible: root.place == "settings";
-        set-flick := Flickable {
-            y: Size.bar;
-            height: parent.height - Size.bar;
-            content-height: root.settings-h;
-            mouse-drag-pan-enabled: false;
-            for c in root.cells: CellView {
-                c: c;
-                glyph: root.keyboard-tile;
-                glyph2: root.mouse-tile;
-                glyphs: root.package-tiles;
-                pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
-                field-left(id, index, kept) => { root.cell-left(id, index, kept); }
-                slide(id, v) => { root.cell-slide(id, v); }
-                typed(id, index, t) => { root.cell-typed(id, index, t); }
-            }
-        }
-            PageBar {
-                y: 0;
-                title: "Settings";
-            }
+            cell-left(a0, a1, a2) => { root.cell-left(a0, a1, a2); }
+            cell-pick(a0, a1, a2, a3, a4, a5) => { root.cell-pick(a0, a1, a2, a3, a4, a5); }
+            cell-slide(a0, a1) => { root.cell-slide(a0, a1); }
+            cell-typed(a0, a1, a2) => { root.cell-typed(a0, a1, a2); }
+            cells: root.cells;
+            keyboard-tile: root.keyboard-tile;
+            mouse-tile: root.mouse-tile;
+            package-tiles: root.package-tiles;
+            place <=> root.place;
+            settings-h: root.settings-h;
         }
 
-        Rectangle {
+        keyboard-page := KeyboardPage {
             visible: root.place == "keyboard";
-            // the page scrolls under the device's bar, as the web page did
-            flick := Flickable {
-                y: Size.bar;
-                height: parent.height - Size.bar;
-                content-height: root.page-h;
-                mouse-drag-pan-enabled: false;
-                // over the keyboard: what to do on this tab, and Show rebindings
-                Rectangle {
-                    x: pws-x;
-                    y: Space.row;
-                    width: pws-w;
-                    height: head-h;
-                    if root.boot != 0: HorizontalLayout {
-                        spacing: Space.inline;
-                        alignment: start;
-                        if root.boot == 1: Rectangle {
-                            width: Size.spinner;
-                            Spinner {
-                                y: (parent.height - Size.spinner) / 2;
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            Text {
-                                text: root.boot-title;
-                                font-family: Font.ui;
-                                font-size: Font.text;
-                                font-weight: Font.strong;
-                                color: root.boot == 2 ? Ink.bad : Ink.ink;
-                            }
-                            Text {
-                                text: root.boot-text;
-                                font-family: Font.ui;
-                                font-size: Font.caption;
-                                color: Ink.quiet;
-                            }
-                        }
-                    }
-                    if root.boot == 0: HintRow {
-                        y: 0;
-                        width: parent.width;
-                        text: root.hint;
-                        chip: root.hint-chip;
-                        chip-on: root.hint-chip-on;
-                        // (a status: its dot, breathing while it plays, and its words)
-                        if root.live: HorizontalLayout {
-                            spacing: Space.inline;
-                            VerticalLayout {
-                                alignment: center;
-                                Dot {
-                                    state: 1;
-                                    opacity: 0.55 + 0.45 * cos(animation-tick() / 1600ms * 360deg);
-                                }
-                            }
-                            Text {
-                                text: "Showing on keyboard";
-                                font-family: Font.ui;
-                                font-size: Font.caption;
-                                color: Ink.good;
-                                vertical-alignment: center;
-                            }
-                        }
-                        Rectangle {
-                            horizontal-stretch: 1;
-                        }
-                        // whether rebound keys show their new actions on the keyboard
-                        if root.tab < 2: CheckBox {
-                            width: self.preferred-width;
-                            text: "Show rebindings";
-                            on: root.show-rebindings-on;
-                            clicked => { root.show-rebindings(); }
-                        }
-                        // on Screen, what it is doing now, a dot that breathes while
-                        // Ectomatter plays it; then Pause, which holds the screen as it
-                        // is, and Play, which carries on
-                        if root.tab == 3 && root.screen-status != "": Text {
-                            horizontal-stretch: 0;
-                            text: root.screen-status;
-                            font-family: Font.ui;
-                            font-size: Font.note;
-                            color: Ink.soft;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-
-                // the anchoring column: the profiles, saving, and on Keys the layers
-                anchor := AnchorColumn {
-                    visible: root.boot == 0 && root.tab != 2;
-                    x: pws-x;
-                    y: root.tab == 3 ? head-end : under-top;
-                    width: Size.column;
-                    // (its well reaching the foot of the boxes beside it)
-                    height: max(self.preferred-height, root.tab == 0 ? kb-keys.height : root.tab == 1 ? kb-light.height : 0);
-                    profiles: root.profiles;
-                    has-menu: true;
-                    choose(n) => { root.choose-profile(n); }
-                    rename(t) => { root.rename-profile(t); }
-                    menu(x, y, h) => { root.kb-profile-menu(x, y, h); }
-                }
-
-                // Keys: the Key library, and beside it Game mode, or the chosen key or slider,
-                // in the row of boxes every device page has
-                kb-keys := BoxRow {
-                    visible: root.tab == 0 && root.boot == 0;
-                    x: under-x;
-                    y: under-top;
-                    width: under-w;
-                    // (at least as tall as the Profiles column beside it, its one line then as tall)
-                    height: max(self.preferred-height, band-min);
-                    // (as tall as the box that goes with it, beside it or, in a narrow
-                    // window, under it)
-                    if root.tab == 0 && root.boot == 0: KeyLibrary {
-                        min-width: Size.library;
-                        preferred-width: Size.library;
-                        max-height: band-max;
-                        preferred-height: max(band-min, second-need);
-                        layer: root.layer;
-                        reveal-y: root.lib-reveal-y;
-                        reveal-n: root.lib-reveal-n;
-                        layer-chosen(i) => { root.layer-changed(i); }
-                        groups: root.lib-groups;
-                        query <=> root.lib-query;
-                        toggle(g) => { root.lib-toggle(g); }
-                        find(t) => { root.lib-find(t); }
-                        pick(id) => { if (id >= 0) { root.key-clicked(id); } else { root.slider-chosen-at(-id); } }
-                    }
-                    key-tile := ScrollBox {
-                        // Game mode in the Profiles box's darker shade; a key or a slider in a box's
-                        fill: !root.key-open && root.slider-chosen == 0 ? Ink.well : Ink.box;
-                        min-width: second-w;
-                        preferred-width: second-w;
-                        max-height: band-max;
-                        preferred-height: second-need;
-                        need: second-need;
-                        if !root.key-open && root.slider-chosen == 0: GameBox {
-                            width: parent.width;
-                            height: max(second-need, parent.height);
-                            fill: transparent;
-                            items: root.game-items;
-                            toggled(i) => { root.game-toggled(i); }
-                            init => { root.game-need = self.need; }
-                            changed need => { root.game-need = self.need; }
-                        }
-                        if root.key-open: KeyDetail {
-                            width: parent.width;
-                            height: max(second-need, parent.height);
-                            fill: transparent;
-                            init => { root.key-need = self.need; }
-                            changed need => { root.key-need = self.need; }
-                            title: root.key-name;
-                            cap: root.key-cap;
-                            factory: root.key-factory;
-                            state: root.key-state;
-                            rebound: root.key-rebound;
-                            layer-title: root.layer == 1 ? "Function layer" : "Base layer";
-                            layer-rebound: root.layer-rebound;
-                            kind: root.key-kind;
-                            job: root.key-job;
-                            listening: root.key-listening;
-                            menu-open: root.menu-open;
-                            note: root.key-note;
-                            done => { root.board-clicked(); }
-                            reset => { root.reset-key(); }
-                            kind-picked(i, x, y, h) => { root.kind-picked(i, x, y, h); }
-                            job-clicked(x, y, h, w) => { root.action-menu(root.layer, x, y, h, w); }
-                            record => { root.listen(root.layer); }
-                        }
-                        if root.slider-chosen != 0: SliderDetail {
-                            width: parent.width;
-                            height: max(second-need, parent.height);
-                            fill: transparent;
-                            init => { root.slider-need = self.need; }
-                            changed need => { root.slider-need = self.need; }
-                            title: root.slider-title;
-                            side: root.slider-chosen == 1 ? "left" : "right";
-                            at: root.slider-at;
-                            choices: root.slider-choices;
-                            note: root.slider-note;
-                            done => { root.slider-chosen-at(0); }
-                            picked(i) => { root.slider-bind-at(i); }
-                        }
-                    }
-                }
-                // the Lighting page: the effects, the chosen one's settings, and where and when it
-                // plays, in the row of boxes every device page has (the effects no wider than
-                // their tiles' pictures can grow; the boxes laid out in Rust say how wide they are)
-                kb-light := BoxRow {
-                    visible: root.tab == 1 && root.boot == 0;
-                    x: under-x;
-                    y: under-top;
-                    width: under-w;
-                    height: max(self.preferred-height, band-min);
-                    if root.tab == 1 && root.boot == 0: ScrollBox {
-                        min-width: Size.effects;
-                        preferred-width: Size.effects;
-                        max-height: band-max;
-                        preferred-height: lfx-h;
-                        need: lfx-h;
-                        EffectGrid {
-                            width: parent.width;
-                            height: max(lfx-h, parent.height);
-                            fill: transparent;
-                            effects: root.effects;
-                            moving: root.effect-moves;
-                            chose(i) => { root.effect(i); }
-                            init => { root.light-fx-w = self.pic-w; root.boxes-resized(); }
-                            changed pic-w => { root.light-fx-w = self.pic-w; root.boxes-resized(); }
-                        }
-                    }
-                    // the chosen effect's boxes, laid out in Rust (its settings, and where and when)
-                    for b[i] in root.tab == 1 && root.boot == 0 ? root.light-boxes : []: CellBox {
-                        b: b;
-                        max-height: band-max;
-                        resized(w) => { root.light-box-resized(i, w); }
-                        pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
-                        field-left(id, index, kept) => { root.cell-left(id, index, kept); }
-                        slide(id, v) => { root.cell-slide(id, v); }
-                        hovered(k, on) => { root.area-hover(k, on); }
-                    }
-                }
-                // Screen, the right column: the tabs of the screen's two states over its dark box,
-                // the playlist's panel in the box under the screen, and the Library joined to the
-                // box's foot. (All in one part of the window, so a screen carried from the Library
-                // knows where the panel is.)
-                if root.tab == 3: stage := Rectangle {
-                    x: under-x;
-                    y: head-end;
-                    width: under-w;
-                    height: tabs-h + box-h + (shelf-on ? shelf-h : 0);
-                    // a screen carried to `wx`, `wy` in the window: where the pointer holds it
-                    // here, and where that is along the strip (anywhere over the panel, it can land);
-                    // on the second tab, whether it is over the screen, where it lands there; and
-                    // on either, the place in the Library under it
-                    function carry-to(wx: length, wy: length) {
-                        root.carry-x = wx - self.absolute-position.x;
-                        root.carry-y = wy - self.absolute-position.y;
-                        if (root.screen-game) {
-                            root.gl-carry-move(
-                                wx < game-panel.absolute-position.x || wx > game-panel.absolute-position.x + game-panel.width ? -1
-                                : wy >= game-panel.absolute-position.y + 6px && wy < game-panel.absolute-position.y + 48px ? 0 // art: where a carried layout lands on Game launch's rows
-                                : wy >= game-panel.absolute-position.y + 48px && wy < game-panel.absolute-position.y + 92px ? 1 : -1, // art: where a carried layout lands on Game launch's rows
-                                self.shelf-at(root.carry-x, root.carry-y));
-                        } else if (root.screen-closed) {
-                            root.pl-carry-move(0,
-                                wx > screen-bay.absolute-position.x && wx < screen-bay.absolute-position.x + screen-bay.width
-                                && wy > screen-bay.absolute-position.y && wy < screen-bay.absolute-position.y + screen-bay.height,
-                                self.shelf-at(root.carry-x, root.carry-y));
-                        } else {
-                            root.pl-carry-move(wx - strip.absolute-position.x,
-                                wx > panel.absolute-position.x && wx < panel.absolute-position.x + panel.width
-                                && wy > panel.absolute-position.y - 20px && wy < panel.absolute-position.y + panel.height + 40px, // art: the reach of a drop on the panel
-                                self.shelf-at(root.carry-x, root.carry-y));
-                        }
-                    }
-                    // the Library's place at `lx`, `ly` here, counted as its cards are laid (two to a
-                    // row, or one), past its last card the last; -1 off the Library
-                    function shelf-at(lx: length, ly: length) -> int {
-                        if (!shelf-on || lx < 0 || lx > under-w || ly < tabs-h + box-h || ly > tabs-h + box-h + shelf-h) {
-                            return -1;
-                        }
-                        return max(0, floor((ly - tabs-h - box-h - Size.box-head + Space.tight) / (Size.layout-card-h + Space.inline))) * (shelf-two ? 2 : 1) + (shelf-two && lx > under-w / 2 ? 1 : 0);
-                    }
-                    // let go: over the panel, the carried name settles into its room and then
-                    // the screen takes its place; over the Library, into its card's place, where
-                    // the card's own name sits; away from both, nothing changes
-                    function drop-carry() {
-                        if (root.pl-slot-w > 0) {
-                            root.carry-settle = true;
-                            root.carry-x = panel.x + strip.x + root.pl-slot-x + root.carry-gx;
-                            root.carry-y = panel.y + strip.y + 30px + root.carry-gy; // art: a carried card's place on the shelf
-                            settle.running = true;
-                        } else if (root.lib-gap >= 0) {
-                            root.carry-settle = true;
-                            root.carry-x = 16px + (shelf-two ? mod(root.lib-gap, 2) * ((under-w - 40px) / 2 + 8px) : 0) + 288px + root.carry-gx; // art: a carried card's place on the shelf
-                            root.carry-y = tabs-h + box-h + 48px + (shelf-two ? floor(root.lib-gap / 2) : root.lib-gap) * 104px + 16px + root.carry-gy; // art: a carried card's place on the shelf
-                            settle.running = true;
-                        } else {
-                            root.carry-on = false;
-                            root.pl-carry-drop();
-                        }
-                    }
-                    settle := Timer {
-                        interval: 160ms;
-                        running: false;
-                        triggered => {
-                            self.running = false;
-                            root.carry-settle = false;
-                            root.carry-on = false;
-                            root.pl-carry-drop();
-                        }
-                    }
-                    // the screen's two states, as folder tabs on the box's top
-                    HorizontalLayout {
-                        x: 0;
-                        y: 0;
-                        height: tabs-h;
-                        spacing: Space.tight;
-                        alignment: start;
-                        FolderTab {
-                            fill: Ink.well;
-                            text: "Playlist";
-                            open: !root.screen-closed && !root.screen-game;
-                            first: true;
-                            clicked => {
-                                root.screen-closed = false;
-                                root.screen-game = false;
-                                root.screen-state();
-                            }
-                        }
-                        FolderTab {
-                            fill: Ink.well;
-                            text: "Onboard layout";
-                            open: root.screen-closed;
-                            clicked => {
-                                root.screen-closed = true;
-                                root.screen-game = false;
-                                root.screen-state();
-                            }
-                        }
-                        FolderTab {
-                            fill: Ink.well;
-                            text: "Game launch";
-                            open: root.screen-game;
-                            clicked => {
-                                root.screen-closed = false;
-                                root.screen-game = true;
-                                root.screen-state();
-                            }
-                        }
-                    }
-                    // Layouts' gray behind the box's lower corners, where the two meet
-                    Rectangle {
-                        visible: shelf-on;
-                        y: tabs-h + box-h - Radius.box;
-                        height: 2 * Radius.box;
-                        background: Ink.box;
-                    }
-                    // the screen's box (square at its top left under the first tab, open)
-                    Rectangle {
-                        y: tabs-h;
-                        height: box-h;
-                        border-radius: Radius.box;
-                        border-top-left-radius: !root.screen-closed && !root.screen-game ? 0 : Radius.box;
-                        background: Ink.well;
-                        // the bay the screen is set into, Space.pad down the box
-                        screen-bay := ScreenBay {
-                            x: (parent.width - self.width) / 2;
-                            y: bay-pad;
-                            screen-w: lcd-w;
-                            screen-h: lcd-h;
-                            field: root.lcd-field;
-                        }
-                        // a layout carried over the screen on the second tab: ringed, as where it lands
-                        if root.ob-over: Rectangle {
-                            x: screen-bay.x - Part.ring-out;
-                            y: screen-bay.y - Part.ring-out;
-                            width: screen-bay.width + 2 * Part.ring-out;
-                            height: screen-bay.height + 2 * Part.ring-out;
-                            border-radius: Radius.panel + Part.ring-out;
-                            border-width: Stroke.ring;
-                            border-color: Ink.soft;
-                        }
-                        Rectangle {
-                            x: (parent.width - lcd-w) / 2;
-                            y: bay-pad + kb-pad-y;
-                            width: lcd-w;
-                            height: lcd-h;
-                            border-radius: Radius.tiny;
-                            clip: true;
-                            Image {
-                                width: parent.width;
-                                height: parent.height;
-                                source: root.lcd-big;
-                            }
-                        }
-                    }
-
-                    // ---------------------------------------------------- Game launch's rows
-                    // in the box under the screen, as the playlist's panel is: a row for a game
-                    // starting and one for a game quitting, each with its checkbox (unchecked, the
-                    // row shows nothing), its words, the layout's bar (select it to see the layout
-                    // on the screen above, again to let go; drag a layout from Layouts onto it to
-                    // show that one) and until when
-                    game-panel := Rectangle {
-                        visible: root.screen-game;
-                        y: band-y;
-                        height: game-panel-h;
-                        // (its rows a button's height, Space.inline apart, Space.row in from the
-                        // panel's top and foot, Space.pad from its sides as the playlist's row is)
-                        for g[i] in root.gl-rows: Rectangle {
-                            x: Space.pad;
-                            y: Space.row + i * (Size.button + Space.inline);
-                            width: parent.width - 2 * Space.pad;
-                            height: Size.button;
-                            HorizontalLayout {
-                                spacing: Space.inline;
-                                alignment: start;
-                                VerticalLayout {
-                                    alignment: center;
-                                    CheckBox {
-                                        width: Size.check;
-                                        on: g.on;
-                                        clicked => { root.gl-row-on(i); }
-                                    }
-                                }
-                                Text {
-                                    text: g.words;
-                                    font-family: Font.ui;
-                                    font-size: Font.control;
-                                    color: Ink.soft;
-                                    vertical-alignment: center;
-                                }
-                                VerticalLayout {
-                                    alignment: center;
-                                    Rectangle {
-                                        width: 230px; // art: a Game launch row: its layout's bar, its check, its words
-                                        height: 24px; // art: a Game launch row: its layout's bar, its check, its words
-                                        border-radius: Radius.small;
-                                        opacity: g.on ? 1 : 0.45;
-                                        background: g.chosen ? (bar-ta.has-hover ? Ink.edge-hover : Ink.edge) : bar-ta.has-hover ? Ink.pick : Ink.hover-box;
-                                        border-width: g.over ? Stroke.ring : 0;
-                                        border-color: Ink.soft;
-                                        clip: true;
-                                        Rectangle {
-                                            x: 0;
-                                            width: 26px; // art: a Game launch row: its layout's bar, its check, its words
-                                            background: Ink.white.with-alpha(0.039);
-                                            Path {
-                                                width: 12px; // art: a Game launch row: its layout's bar, its check, its words
-                                                height: 12px; // art: a Game launch row: its layout's bar, its check, its words
-                                                viewbox-width: 12;
-                                                viewbox-height: 12;
-                                                commands: "M2.7 2.5h6.6a1.2 1.2 0 0 1 1.2 1.2v4.6a1.2 1.2 0 0 1-1.2 1.2H2.7a1.2 1.2 0 0 1-1.2-1.2V3.7a1.2 1.2 0 0 1 1.2-1.2zM3.5 5h5M3.5 7h3";
-                                                fill: transparent;
-                                                stroke: Ink.soft;
-                                                stroke-width: 1.2px; // art: a Game launch row: its layout's bar, its check, its words
-                                            }
-                                        }
-                                        Text {
-                                            x: 35px; // art: a Game launch row: its layout's bar, its check, its words
-                                            width: parent.width - 44px; // art: a Game launch row: its layout's bar, its check, its words
-                                            height: parent.height;
-                                            text: g.layout;
-                                            font-family: Font.ui;
-                                            font-size: Font.note;
-                                            font-weight: Font.medium;
-                                            color: Ink.ink;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
-                                        bar-ta := TouchArea {
-                                            mouse-cursor: pointer;
-                                            clicked => { root.gl-row-pick(i); }
-                                        }
-                                    }
-                                }
-                                Text {
-                                    text: "until";
-                                    font-family: Font.ui;
-                                    font-size: Font.control;
-                                    color: Ink.soft;
-                                    vertical-alignment: center;
-                                }
-                                VerticalLayout {
-                                    alignment: center;
-                                    DropField {
-                                        width: 250px; // art: the until chooser, as wide as its longest choice
-                                        height: Size.compact;
-                                        opacity: g.on ? 1 : 0.45;
-                                        text: g.until;
-                                        clicked(x, y, h) => { root.gl-row-until(i, x, y, h, self.width); }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ---------------------------------------------------- the playlist's panel
-                    // attached under the screen's box, as wide as the box, in the boxes' gray (over
-                    // the box's foot, so what opens from the panel rises over the box). One row:
-                    // Pause, which playlist, then one round of it, left to right, each turn as long
-                    // as its time, and the round starting again after it.
-                    panel := Rectangle {
-                        visible: !root.screen-closed && !root.screen-game;
-                        y: band-y;
-                        height: pl-panel-h;
-                        // Pause, at the playlist's right end, after the round's start again
-                        PlayButton {
-                            x: parent.width - Space.pad - self.width;
-                            y: (pl-panel-h - self.height) / 2;
-                            paused: root.lcd-state == 1;
-                            clicked => { root.lcd-pause(); }
-                        }
-                        // which playlist the profile plays: select it to choose another, or to
-                        // make, rename or delete one
-                        if !root.pl-renaming: DropField {
-                            x: Space.pad;
-                            y: (pl-panel-h - self.height) / 2;
-                            width: root.pl-chooser-w;
-                            height: Size.compact;
-                            subtle: true;
-                            text: root.pl-name;
-                            open: root.pl-choosing;
-                            clicked(x, y, h) => { root.pl-choose(x, y, h); }
-                        }
-                        // the playlist's name changed in place: Enter, the tick or a press away keeps
-                        // it, Escape lets it go
-                        if root.pl-renaming: RenameField {
-                            x: Space.pad;
-                            y: (pl-panel-h - self.height) / 2;
-                            width: root.pl-chooser-most;
-                            height: Size.compact;
-                            text <=> root.pl-rename-text;
-                            done(kept, t) => { root.pl-rename-done(kept, t); }
-                        }
-                        // the round starting again, after the strip (before Pause)
-                        Path {
-                            visible: !root.pl-single && !root.pl-empty && root.pl-sizing < 0;
-                            x: parent.width - Space.pad - Size.compact - Space.inline - Size.round;
-                            y: (pl-panel-h - self.height) / 2;
-                            width: Size.round;
-                            height: Size.round;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            commands: "M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5";
-                            fill: transparent;
-                            stroke: Ink.quiet;
-                            stroke-width: 1.8px; // art: the playlist's strip
-                            stroke-line-cap: round;
-                            stroke-line-join: round;
-                        }
-                        // the strip: every turn one piece, its way bar then its screen's bar with the
-                        // screen's name on it; then an empty bar to add to. (16 above the bars' row
-                        // as well, for a turn's time and buttons, which rise over the screen's box.)
-                        strip := Rectangle {
-                            x: root.pl-track-x;
-                            y: -16px;
-                            width: root.pl-track-w;
-                            height: 16px + pl-panel-h; // art: the playlist's strip
-                            // where a carried layout will land: one empty bar in the box's shade (as the
-                            // holding bar; the screen's charcoal wouldn't show on the box's), the turn's
-                            // whole room, the others making room
-                            if root.pl-slot-w > 0: Rectangle {
-                                x: root.pl-slot-x - root.pl-pre;
-                                y: 32px; // art: the playlist's strip
-                                width: root.pl-pre + root.pl-slot-w;
-                                height: 24px; // art: the playlist's strip
-                                animate x, width { duration: 250ms; easing: ease; }
-                                border-radius: Radius.small;
-                                background: Ink.box;
-                            }
-                            // the empty holding bar, at the strip's end: a turn's room, a step lighter than
-                            // the screen's charcoal it sits on, with a "+": select it for a menu of the
-                            // layouts to add. The whole strip while the playlist is empty, saying how to fill it.
-                            if root.pl-hold-w > 0: Rectangle {
-                                x: root.pl-hold-x;
-                                y: 32px; // art: the playlist's strip
-                                width: root.pl-hold-w;
-                                height: 24px; // art: the playlist's strip
-                                animate x, width { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
-                                border-radius: Radius.small;
-                                property <bool> lit: (hold-ta.has-hover || root.pl-adding) && !root.carry-on;
-                                background: hold-ta.pressed ? Ink.pick : self.lit ? Ink.hover-box : Ink.box;
-                                animate background { duration: 120ms; }
-                                Path {
-                                    x: root.pl-empty ? 10px : (parent.width - 12px) / 2; // art: the playlist's strip
-                                    y: 6px; // art: the playlist's strip
-                                    width: 12px; // art: the playlist's strip
-                                    height: 12px; // art: the playlist's strip
-                                    viewbox-width: 12;
-                                    viewbox-height: 12;
-                                    commands: "M6 2v8M2 6h8";
-                                    fill: transparent;
-                                    stroke: parent.lit ? Ink.bright : Ink.soft;
-                                    stroke-width: 1.6px; // art: the playlist's strip
-                                    stroke-line-cap: round;
-                                }
-                                if root.pl-empty: Text {
-                                    x: 28px; // art: the playlist's strip
-                                    width: parent.width - 38px; // art: the playlist's strip
-                                    height: parent.height;
-                                    text: "Add a screen layout, or drag one here from Layouts.";
-                                    font-family: Font.ui;
-                                    font-size: Font.note;
-                                    color: parent.lit ? Ink.dim : Ink.quiet;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
-                                hold-ta := TouchArea {
-                                    enabled: !root.carry-on;
-                                    mouse-cursor: pointer;
-                                    clicked => { root.pl-hold-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
-                                }
-                            }
-                            for b[i] in root.pl-blocks: turn := Rectangle {
-                                x: b.x - root.pl-pre;
-                                width: root.pl-pre + b.w;
-                                animate x, width { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
-                                opacity: b.away ? 0 : root.pl-dim ? 0.3 : 1;
-                                animate opacity { duration: 120ms; }
-                                // the pointer on the screen's part or on the way bar: each lights the
-                                // other a step, so the two read as one; the way bar lit while its menu
-                                // is open or the screen is coming in
-                                property <bool> hov: sta.has-hover && !root.carry-on && root.pl-sizing < 0 && !root.pl-dim;
-                                property <bool> way-hov: wta.has-hover && !root.carry-on && root.pl-sizing < 0 && !root.pl-dim;
-                                property <bool> lit: root.pl-menu == i || (b.on && root.pl-head && root.pl-in);
-                                // how the screen comes in: the turn's start (grayed while the turn is the
-                                // only one, when nothing comes in after it, but still to be chosen)
-                                Rectangle {
-                                    x: 0;
-                                    y: 32px; // art: the playlist's strip
-                                    width: root.pl-way-w;
-                                    height: 24px; // art: the playlist's strip
-                                    opacity: root.pl-single && !(turn.way-hov || turn.hov || turn.lit) ? 0.45 : 1;
-                                    animate opacity { duration: 120ms; }
-                                    border-top-left-radius: Radius.small;
-                                    border-bottom-left-radius: Radius.small;
-                                    background: turn.lit ? Ink.pick-hover : turn.way-hov || turn.hov ? Ink.pick : Ink.hover-box;
-                                    animate background { duration: 120ms; }
-                                    WayGlyph {
-                                        x: (parent.width - 12px) / 2; // art: the playlist's strip
-                                        y: 6px; // art: the playlist's strip
-                                        way: b.way;
-                                        ink: turn.lit || turn.way-hov ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
-                                    }
-                                }
-                                // the screen's bar, a hairline after its way in, the screen's name on it
-                                // (none on a bar too short for a letter or two)
-                                Rectangle {
-                                    x: root.pl-pre;
-                                    y: 32px; // art: the playlist's strip
-                                    width: b.w;
-                                    height: 24px; // art: the playlist's strip
-                                    border-top-right-radius: Radius.small;
-                                    border-bottom-right-radius: Radius.small;
-                                    background: b.on ? (turn.hov || turn.way-hov ? Ink.off : Ink.edge) : (turn.hov || turn.way-hov ? Ink.pick-hover : Ink.pick);
-                                    animate background { duration: 120ms; }
-                                    // its name, then its time at its end, short of the end's handle: its
-                                    // seconds, or the infinity mark for a turn that stays until the layouts
-                                    // are switched (the time left off a bar too short to keep some of the
-                                    // name beside it, and both off one too short for a letter or two)
-                                    if b.w >= 28px: HorizontalLayout { // art: the playlist's strip
-                                        padding-left: 8px;  // art: a turn on the strip
-                                        padding-right: 10px;  // art: a turn on the strip
-                                        spacing: 8px;  // art: a turn on the strip
-                                        Text {
-                                            min-width: 0px;
-                                            horizontal-stretch: 1;
-                                            text: b.name;
-                                            font-family: Font.ui;
-                                            font-size: Font.caption;
-                                            font-weight: b.on ? Font.strong : Font.regular;
-                                            color: b.on ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
-                                        if b.time != "" && b.w >= 64px: Text { // art: the playlist's strip
-                                            text: b.time;
-                                            font-family: Font.ui;
-                                            font-size: Font.small;
-                                            color: b.on ? Ink.dim : turn.hov ? Ink.soft : Ink.quiet;
-                                            vertical-alignment: center;
-                                        }
-                                        if b.stays && !root.pl-single && b.w >= 34px: Rectangle { // art: the playlist's strip
-                                            width: 17.6px; // art: the playlist's strip
-                                            Path {
-                                                y: (parent.height - 8px) / 2; // art: the playlist's strip
-                                                width: 17.6px; // art: the playlist's strip
-                                                height: 8px; // art: the playlist's strip
-                                                viewbox-x: 1;
-                                                viewbox-y: 7;
-                                                viewbox-width: 22;
-                                                viewbox-height: 10;
-                                                commands: "M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.33-6 4Z";
-                                                fill: transparent;
-                                                stroke: b.on ? Ink.dim : turn.hov ? Ink.soft : Ink.quiet;
-                                                stroke-width: 1.5px; // art: the playlist's strip
-                                            }
-                                        }
-                                    }
-                                }
-                                // the playhead: across the way bar while the screen comes in, then along
-                                // the screen's bar (under the turn's time and buttons)
-                                if b.on && root.pl-head && !b.away: Rectangle {
-                                    x: (root.pl-in ? root.pl-pre * root.pl-p : root.pl-pre + b.w * root.pl-p) - 1px; // art: the playlist's strip
-                                    y: 26px; // art: the playlist's strip
-                                    width: 2px; // art: the playlist's strip
-                                    height: 36px; // art: the playlist's strip
-                                    border-radius: self.width / 2;
-                                    background: Ink.bright;
-                                    opacity: root.carry-on ? 0.3 : 1;
-                                    Rectangle {
-                                        x: -4px;
-                                        y: -4px;
-                                        width: 10px; // art: the playlist's strip
-                                        height: 10px; // art: the playlist's strip
-                                        border-radius: self.width / 2;
-                                        background: Ink.bright;
-                                    }
-                                }
-                                // select the turn to show it now; drag it along the strip to move it
-                                // (the turn carried keeps the press it was carried with, unseen, until
-                                // it lands: switched off then, the drag would end under the hand)
-                                sta := TouchArea {
-                                    enabled: (!b.away || root.carry-on) && !root.pl-dim;
-                                    // (the open hand at rest, as a turn is there to be carried; Grant, 2026-10-16)
-                                    mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.grab;
-                                    property <bool> far;
-                                    pointer-event(e) => {
-                                        if (e.kind == PointerEventKind.down) {
-                                            self.far = false;
-                                        }
-                                        if (e.kind == PointerEventKind.up) {
-                                            if (root.carry-on) {
-                                                stage.drop-carry();
-                                            } else if (!self.far) {
-                                                root.page-show(i);
-                                            }
-                                        }
-                                        if (e.kind == PointerEventKind.cancel && root.carry-on) {
-                                            root.carry-on = false;
-                                            root.pl-carry-cancel();
-                                        }
-                                    }
-                                    moved => {
-                                        if (self.pressed) {
-                                            if (!root.carry-on && !self.far && (abs(self.mouse-x - self.pressed-x) > Part.drag || abs(self.mouse-y - self.pressed-y) > Part.drag)) {
-                                                self.far = true;
-                                                root.carry-gx = 18px; // art: the playlist's strip
-                                                root.carry-gy = 14px; // art: the playlist's strip
-                                                root.carry-settle = false;
-                                                root.carry-on = true;
-                                                root.pl-carry-start(0, i);
-                                            }
-                                            if (root.carry-on) {
-                                                stage.carry-to(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
-                                            }
-                                        }
-                                    }
-                                    // its time, then Edit and Remove, over its bar while the pointer is on
-                                    // the turn or its time's menu is open; only the time while its end is
-                                    // dragged. The time opens its menu of times while there are other turns.
-                                    // (Inside the turn's TouchArea, so the turn keeps the pointer while it
-                                    // is on them.)
-                                    if (turn.hov || root.pl-sizing == i || root.pl-timing == i) && !b.away: tb := Rectangle {
-                                        property <bool> buttons: root.pl-sizing != i;
-                                        property <bool> times: self.buttons && !root.pl-single;
-                                        x: root.pl-pre + (b.w - self.width) / 2;
-                                        y: 0;
-                                        width: 2px + time-button.width + (self.buttons ? 1px + 20px + 21px : 0) + 2px; // art: the playlist's strip
-                                        height: 24px; // art: the playlist's strip
-                                        border-radius: Radius.control;
-                                        background: Ink.pop;
-                                        drop-shadow-blur: Shadow.float.blur;
-                                        drop-shadow-offset-y: Shadow.float.y;
-                                        drop-shadow-color: Shadow.float.color;
-                                        time-button := Rectangle {
-                                            x: 2px; // art: the playlist's strip
-                                            y: 2px; // art: the playlist's strip
-                                            width: 6px + secs-text.preferred-width + (tb.times ? 3px + 10px + 5px : 6px); // art: the playlist's strip
-                                            height: 20px; // art: the playlist's strip
-                                            border-radius: Radius.control - 2px; // art: the playlist's strip
-                                            background: !tb.times ? transparent : time-ta.pressed || root.pl-timing == i ? Ink.pick : time-ta.has-hover ? Ink.hover-box : transparent;
-                                            secs-text := Text {
-                                                x: 6px; // art: the playlist's strip
-                                                height: parent.height;
-                                                text: b.secs;
-                                                font-family: Font.ui;
-                                                font-size: Font.caption;
-                                                color: Ink.bright;
-                                                vertical-alignment: center;
-                                            }
-                                            if tb.times: Path {
-                                                x: 6px + secs-text.preferred-width + 3px; // art: the playlist's strip
-                                                y: 5px; // art: the playlist's strip
-                                                width: 10px; // art: the playlist's strip
-                                                height: 10px; // art: the playlist's strip
-                                                viewbox-width: 24;
-                                                viewbox-height: 24;
-                                                commands: "M6 9l6 6 6-6";  // art: the turn's own tools, over the strip
-                                                fill: transparent;
-                                                stroke: time-ta.has-hover || root.pl-timing == i ? Ink.bright : Ink.soft;
-                                                stroke-width: 2px; // art: the playlist's strip
-                                            }
-                                            time-ta := TouchArea {
-                                                enabled: tb.times;
-                                                mouse-cursor: tb.times ? MouseCursor.pointer : MouseCursor.default;
-                                                clicked => { root.pl-time(i, self.absolute-position.x, self.absolute-position.y, self.width, self.height); }
-                                            }
-                                        }
-                                        if tb.buttons: StripIcon {
-                                            x: 2px + time-button.width + 1px; // art: the playlist's strip
-                                            y: 2px; // art: the playlist's strip
-                                            commands: "M4 20h4L19 9l-4-4L4 16z";
-                                            clicked => { root.screen-edit(i); }
-                                        }
-                                        if tb.buttons: StripIcon {
-                                            x: 2px + time-button.width + 1px + 21px; // art: the playlist's strip
-                                            y: 2px; // art: the playlist's strip
-                                            commands: "M6 6l12 12M18 6L6 18";
-                                            clicked => { root.page-remove(i); }
-                                        }
-                                    }
-                                    // the bar's right end: drag it to make the turn longer or shorter
-                                    if !root.pl-single && !b.away && !root.pl-dim: Rectangle {
-                                        x: parent.width - 10px; // art: the playlist's strip
-                                        y: 32px; // art: the playlist's strip
-                                        width: 10px; // art: the playlist's strip
-                                        height: 24px; // art: the playlist's strip
-                                        Rectangle {
-                                            x: 4px; // art: the playlist's strip
-                                            y: 7px; // art: the playlist's strip
-                                            width: 2px; // art: the playlist's strip
-                                            height: 10px; // art: the playlist's strip
-                                            border-radius: self.width / 2;
-                                            background: Ink.bright;
-                                            opacity: turn.hov || root.pl-sizing == i ? 0.8 : 0;
-                                            animate opacity { duration: 120ms; }
-                                        }
-                                        TouchArea {
-                                            enabled: !root.carry-on;
-                                            mouse-cursor: MouseCursor.ew-resize;
-                                            // (measured in the window: the end moves with the drag)
-                                            property <length> from;
-                                            pointer-event(e) => {
-                                                if (e.kind == PointerEventKind.down) {
-                                                    self.from = self.absolute-position.x + self.mouse-x;
-                                                }
-                                                if ((e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) && root.pl-sizing == i) {
-                                                    root.pl-sizing = -1;
-                                                    root.pl-size-done();
-                                                }
-                                            }
-                                            moved => {
-                                                if (self.pressed) {
-                                                    root.pl-sizing = i;
-                                                    root.pl-size(i, self.absolute-position.x + self.mouse-x - self.from);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                // the way bar: select it to choose how the screen comes in
-                                wta := TouchArea {
-                                    enabled: !b.away && !root.pl-dim && !root.carry-on;
-                                    x: 0;
-                                    y: 16px; // art: the playlist's strip
-                                    width: root.pl-way-w;
-                                    height: 40px; // art: the playlist's strip
-                                    mouse-cursor: pointer;
-                                    clicked => { root.pl-mark(i, self.absolute-position.x, self.absolute-position.y + 16px, 24px); } // art: the playlist's strip
-                                }
-                                // its name over it while the pointer is on it (not while its menu is open)
-                                if turn.way-hov && root.pl-menu != i: Tip {
-                                    x: (root.pl-way-w - self.width) / 2;
-                                    y: 32px - self.height - Space.tight; // art: the playlist's strip
-                                    width: self.preferred-width;
-                                    height: self.preferred-height;
-                                    text: b.way-name;
-                                }
-                            }
-                            // a script's screen on the keyboard: the strip waits, and says so
-                            if root.pl-dim: Rectangle {
-                                property <length> tw: pill-text.preferred-width;
-                                property <length> bw: back-text.preferred-width + 20px; // art: the playlist's strip
-                                x: (parent.width - self.width) / 2;
-                                y: 26px; // art: the playlist's strip
-                                width: 14px + self.tw + 12px + self.bw + 4px; // art: the playlist's strip
-                                height: 36px; // art: the playlist's strip
-                                border-radius: Radius.panel;
-                                background: Ink.pop;
-                                drop-shadow-blur: Shadow.float.blur;
-                                drop-shadow-offset-y: Shadow.float.y;
-                                drop-shadow-color: Shadow.float.color;
-                                pill-text := Text {
-                                    x: 14px; // art: the playlist's strip
-                                    height: parent.height;
-                                    text: root.pl-script;
-                                    font-family: Font.ui;
-                                    font-size: Font.control;
-                                    color: Ink.bright;
-                                    vertical-alignment: center;
-                                }
-                                Rectangle {
-                                    x: 14px + parent.tw + 12px; // art: the playlist's strip
-                                    y: 4px; // art: the playlist's strip
-                                    width: parent.bw;
-                                    height: 28px; // art: the playlist's strip
-                                    border-radius: Radius.panel - 4px; // art: the playlist's strip
-                                    background: back-ta.pressed ? Ink.pick : back-ta.has-hover ? Ink.pick-hover : Ink.hover-box;
-                                    back-text := Text {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        text: "Back to the playlist";
-                                        font-family: Font.ui;
-                                        font-size: Font.control;
-                                        color: Ink.bright;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    back-ta := TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.pl-back(); }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ---------------------------------------------------- the onboard layout
-                    // the second tab's row under the screen, where the first has the playlist: the
-                    // chooser of the layout the profile keeps on the keyboard, and the line beside
-                    // it; on a keyboard without build 5, what the keyboard needs instead
-                    if root.screen-closed: Rectangle {
-                        y: band-y;
-                        height: pl-panel-h;
-                        if root.ob-ready: DropField {
-                            x: Space.pad;
-                            y: (pl-panel-h - self.height) / 2;
-                            width: root.ob-chooser-w;
-                            height: Size.compact;
-                            subtle: true;
-                            text: root.ob-name;
-                            open: root.ob-choosing;
-                            clicked(x, y, h) => { root.ob-choose(x, y, h); }
-                        }
-                        if root.ob-ready: Text {
-                            x: Space.pad + root.ob-chooser-w + Space.margin;
-                            y: (Size.bar - Size.compact) / 2;
-                            width: parent.width - self.x - Space.pad;
-                            height: Size.compact;
-                            text: root.ob-say;
-                            font-family: Font.ui;
-                            font-size: Font.note;
-                            color: Ink.quiet;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                        if !root.ob-ready: Rectangle {
-                            x: Space.margin;
-                            y: (Size.bar - Size.compact) / 2;
-                            width: parent.width - 2 * Space.margin;
-                            height: Size.compact;
-                            Path {
-                                x: 0;
-                                y: (parent.height - Part.glyph) / 2;
-                                width: Part.glyph;
-                                height: Part.glyph;
-                                viewbox-width: 14;
-                                viewbox-height: 14;
-                                commands: "M7 1.4a5.6 5.6 0 1 0 0 11.2a5.6 5.6 0 1 0 0-11.2zM7 6.2v3.6M7 4.3v0.1";
-                                fill: transparent;
-                                stroke: Ink.soft;
-                                stroke-width: 1.3px; // art: the glyph's stroke
-                                stroke-line-cap: round;
-                            }
-                            Text {
-                                x: Part.glyph + Part.glyph-gap;
-                                width: parent.width - self.x;
-                                height: parent.height;
-                                text: "Onboard layouts need Ectomatter’s firmware on the keyboard. Until then, the keyboard shows " + (root.kb-maker == "" ? "its maker’s" : root.kb-maker + "’s") + " status screen when Ectomatter isn’t running.";
-                                font-family: Font.ui;
-                                font-size: Font.note;
-                                color: Ink.soft;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                        }
-                    }
-
-                    // ---------------------------------------------------- the Library
-                    // every screen there is, two to a row; drag one onto the playlist to play it,
-                    // or put it on the playlist's end from its card; an empty block after them
-                    // for a new one
-                    if root.boot == 0: PageBox {
-                        visible: shelf-on;
-                        x: 0;
-                        y: tabs-h + box-h;
-                        width: under-w;
-                        height: shelf-h;
-                        border-top-left-radius: 0;
-                        border-top-right-radius: 0;
-                        title: "Layouts";
-                        // how the Library is used, at the end of its title's line
-                        Text {
-                            x: 96px; // art: after the title's word
-                            y: Part.title-top;
-                            width: parent.width - Space.pad - self.x;
-                            height: Line.title;
-                            text: root.screen-game ? "Drag a screen layout onto a bar above to show that layout when a game starts or quits." : root.screen-closed ? "Drag a screen layout onto the screen to save the layout on the keyboard, or to another place in Layouts to move the layout." : "Drag a screen layout onto the playlist to add the layout to what the keyboard shows, or to another place in Layouts to move the layout.";
-                            font-family: Font.ui;
-                            font-size: Font.note;
-                            color: Ink.quiet;
-                            horizontal-alignment: right;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                        // each card in its place: while a layout is carried along the Library, the
-                        // others make room where it will land, and it is left out of its own
-                        for c[k] in root.lib-pages: Rectangle {
-                            property <length> cw: shelf-two ? (parent.width - 2 * Space.pad - Space.inline) / 2 : parent.width - 2 * Space.pad;
-                            x: Space.pad + (shelf-two ? mod(c.at, 2) * (self.cw + Space.inline) : 0);
-                            y: Size.box-head + (shelf-two ? floor(c.at / 2) : c.at) * (Size.layout-card-h + Space.inline);
-                            animate x, y { duration: root.carry-on ? 250ms : 0ms; easing: ease; }
-                            opacity: c.carried ? 0 : 1;
-                            width: self.cw;
-                            height: Size.layout-card-h;
-                            PlCard {
-                                width: parent.width;
-                                height: parent.height;
-                                p: c;
-                                hovered: cta.has-hover && !root.carry-on;
-                            }
-                            // the whole card a button: select it (or right-click it) for its menu, Edit
-                            // first; press and drag it to carry it onto the playlist
-                            cta := TouchArea {
-                                mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.pointer;
-                                property <bool> far;
-                                // (pressed with the right button: its menu, never a carry)
-                                property <bool> right;
-                                pointer-event(e) => {
-                                    if (e.kind == PointerEventKind.down) {
-                                        self.far = false;
-                                        self.right = e.button == PointerEventButton.right;
-                                    }
-                                    if (e.kind == PointerEventKind.up && root.carry-on) {
-                                        stage.drop-carry();
-                                    } else if (e.kind == PointerEventKind.up && !self.far && (e.button == PointerEventButton.left || e.button == PointerEventButton.right)) {
-                                        root.lib-menu(k, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
-                                    }
-                                    if (e.kind == PointerEventKind.cancel && root.carry-on) {
-                                        root.carry-on = false;
-                                        root.pl-carry-cancel();
-                                    }
-                                }
-                                moved => {
-                                    if (self.pressed && !self.right) {
-                                        if (!root.carry-on && !self.far && (abs(self.mouse-x - self.pressed-x) > Part.drag || abs(self.mouse-y - self.pressed-y) > Part.drag)) {
-                                            self.far = true;
-                                            root.carry-gx = 18px; // art: where the chip is held
-                                            root.carry-gy = 14px; // art: where the chip is held
-                                            root.carry-settle = false;
-                                            root.carry-on = true;
-                                            root.pl-carry-start(1, k);
-                                        }
-                                        if (root.carry-on) {
-                                            stage.carry-to(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
-                                        }
-                                    }
-                                }
-                                // the menu's "···", at the middle of the card's right edge while the pointer
-                                // is on it: what selecting the card opens
-                                if self.has-hover && !root.carry-on: Text {
-                                    x: parent.width - 30px - self.preferred-width / 2; // art: what selecting the card opens, at its end
-                                    y: (parent.height - self.preferred-height) / 2;
-                                    text: "···";
-                                    font-family: Font.ui;
-                                    font-size: Font.title;
-                                    letter-spacing: 1px; // art: what selecting the card opens, at its end
-                                    color: Ink.soft;
-                                }
-                            }
-                        }
-                        // a new screen: an empty block after the last, in the cards' own shade
-                        Rectangle {
-                            property <int> k: root.lib-pages.length;
-                            property <length> cw: shelf-two ? (parent.width - 2 * Space.pad - Space.inline) / 2 : parent.width - 2 * Space.pad;
-                            x: Space.pad + (shelf-two ? mod(self.k, 2) * (self.cw + Space.inline) : 0);
-                            y: Size.box-head + (shelf-two ? floor(self.k / 2) : self.k) * (Size.layout-card-h + Space.inline);
-                            width: self.cw;
-                            height: Size.layout-card-h;
-                            border-radius: Radius.panel;
-                            background: new-ta.pressed ? Ink.pick : new-ta.has-hover ? Ink.hover-well : Ink.well;
-                            animate background { duration: 120ms; }
-                            property <length> words-w: Part.chevron + Part.glyph-gap + new-text.preferred-width;
-                            Path {
-                                x: (parent.width - parent.words-w) / 2;
-                                y: (parent.height - Part.chevron) / 2;
-                                width: Part.chevron;
-                                height: Part.chevron;
-                                viewbox-width: 12;
-                                viewbox-height: 12;
-                                commands: "M6 2v8M2 6h8";
-                                fill: transparent;
-                                stroke: new-ta.has-hover ? Ink.bright : Ink.soft;
-                                stroke-width: 1.6px; // art: the plus's stroke
-                                stroke-line-cap: round;
-                            }
-                            new-text := Text {
-                                x: (parent.width - parent.words-w) / 2 + Part.chevron + Part.glyph-gap;
-                                height: parent.height;
-                                text: "New screen layout";
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                font-weight: Font.medium;
-                                color: new-ta.has-hover ? Ink.bright : Ink.soft;
-                                vertical-alignment: center;
-                            }
-                            new-ta := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.lib-new(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
-                            }
-                        }
-                    }
-
-                    // the pieces round the box, in the column's terms: the default backlight at the
-                    // tabs' row's right end, and the line on a layout's own color before it
-                    if root.boot == 0: Rectangle {
-                        for c in root.cells: CellView {
-                            c: c;
-                            pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
-                            field-left(id, index, kept) => { root.cell-left(id, index, kept); }
-                            slide(id, v) => { root.cell-slide(id, v); }
-                        }
-                    }
-
-                    // ---------------------------------------------------- the screen carried
-                    // its name, under the pointer; let go over the panel, it settles into its room
-                    if root.carry-on: CarryChip {
-                        x: root.carry-x - root.carry-gx;
-                        y: root.carry-y - root.carry-gy;
-                        animate x, y { duration: root.carry-settle ? 150ms : 0ms; easing: ease; }
-                        text: root.carry-name;
-                        opacity: root.carry-settle ? 0 : 1;
-                        animate opacity { duration: 150ms; easing: ease; }
-                    }
-                }
-                // Settings: the keyboard's facts, a form (src/form.rs) laid out in Rust
-                if root.tab == 2: Rectangle {
-                    x: pws-x;
-                    y: head-end;
-                    width: pws-w;
-                    height: root.tile-height;
-                    for c in root.cells: CellView {
-                        c: c;
-                        pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
-                        field-left(id, index, kept) => { root.cell-left(id, index, kept); }
-                        slide(id, v) => { root.cell-slide(id, v); }
-                        typed(id, index, t) => { root.cell-typed(id, index, t); }
-                    }
-                }
-
-                // the keyboard's stage, every device's: its shade round the hole the
-                // window draws the keyboard in
-                if root.tab < 2: Stage {
-                    x: pws-x;
-                    y: board-top - kb-pad-y;
-                    width: pws-w;
-                    height: board-h + 2 * kb-pad-y;
-                    hole-x: kb-pad-x;
-                    hole-y: kb-pad-y;
-                    hole-w: board-w;
-                    hole-h: board-h;
-                }
-                // the device's shadow on the box, kept inside the box's corners
-                if root.tab < 2: Rectangle {
-                    x: pws-x;
-                    y: board-top - kb-pad-y;
-                    width: pws-w;
-                    height: board-h + 2 * kb-pad-y;
-                    border-radius: Radius.box;
-                    clip: true;
-                    Image {
-                        x: kb-pad-x - root.board-shadow-margin;
-                        y: kb-pad-y - root.board-shadow-margin;
-                        width: board-w + 2 * root.board-shadow-margin;
-                        height: board-h + 2 * root.board-shadow-margin;
-                        source: root.board-shadow;
-                    }
-                }
-                // the keys, over the keyboard's hole: a click on the keyboard away
-                // from every key lets the chosen one go; then what is drawn over it
-                Rectangle {
-                    visible: root.tab < 2;
-                    x: pws-x + kb-pad-x;
-                    y: board-top;
-                    width: board-w;
-                    height: board-h;
-                    TouchArea {
-                        clicked => { root.board-clicked(); }
-                    }
-                    for k in root.keys: KeyBox {
-                        k: k;
-                        unit: root.unit;
-                        cqw: root.cqw;
-                        clicked => { root.key-clicked(k.pos); }
-                        hovered(on) => { root.key-hovered(k.pos, on); }
-                    }
-                    for o in root.overlays: Image {
-                        visible: root.board-ready;
-                        // Only a knob's place along its track glides, as long as the time
-                        // between readings, so it is still moving when the next one comes
-                        // and never steps; its track moves with the keyboard at once.
-                        property <float> along: o.frac;
-                        animate along { duration: root.knob-glide; easing: linear; }
-                        x: o.x + self.along * o.travel;
-                        y: o.y;
-                        // (dimmed with the keyboard round an area the pointer is over)
-                        opacity: o.opacity * (root.dimming ? 0.45 : 1);
-                        width: o.w;
-                        height: o.h;
-                        source: o.image;
-                        image-fit: fill;
-                    }
-                }
-            }
-            // the device's own bar, every page's: its name, its tabs, its editors, and how it is
-            devbar := PageBar {
-                y: 0;
-                title: root.kb-name;
-                dot: root.conn-state;
-                tabs: ["Keys", "Lighting", "Screen", "Settings"];
-                // (the tabs in the bar's order: the page's numbers have Settings 2, Screen 3)
-                tab: root.tab == 3 ? 2 : root.tab == 2 ? 3 : root.tab;
-                tab-chosen(i) => { root.view-changed(i == 2 ? 3 : i == 3 ? 2 : i); }
-                status: root.status-text;
-                status-bad: root.status-kind == 2;
-                undo-shown: root.undo-shown;
-                undo => { root.undo(false); }
-                // the Macro Editor, the Screen Editor and the lab
-                BarButton {
-                    commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
-                    text: "Macro Editor";
-                    clicked => { root.macro-editor(-1); }
-                }
-                // (the keyboard's screen: a wide frame with its rows of words)
-                BarButton {
-                    commands: "M2.6 3.4h10.8a1.6 1.6 0 0 1 1.6 1.6v6a1.6 1.6 0 0 1-1.6 1.6H2.6A1.6 1.6 0 0 1 1 11V5a1.6 1.6 0 0 1 1.6-1.6zM4 6.2h8M4 8h6M4 9.8h7";
-                    text: "Screen Editor";
-                    clicked => { root.screen-editor(); }
-                }
-                BarButton {
-                    // a flask drawn for this size, its lines on the pixel grid
-                    commands: "M5.14 1.14h5.72M6.29 1.14v4.58L2.95 11.93a1.25 1.25 0 0 0 1.1 1.79h7.9a1.25 1.25 0 0 0 1.1-1.79L9.71 5.72V1.14M4.3 10.29h7.4";
-                    round: true;
-                    text: "";
-                    clicked => { root.rail("lab"); }
-                }
-            }
-
+            action-menu(a0, a1, a2, a3, a4) => { root.action-menu(a0, a1, a2, a3, a4); }
+            area-hover(a0, a1) => { root.area-hover(a0, a1); }
+            band-max <=> root.band-max;
+            band-min <=> root.band-min;
+            band-y <=> root.band-y;
+            bay-pad <=> root.bay-pad;
+            board-clicked() => { root.board-clicked(); }
+            board-h <=> root.board-h;
+            board-ready: root.board-ready;
+            board-shadow: root.board-shadow;
+            board-shadow-margin: root.board-shadow-margin;
+            board-top <=> root.board-top;
+            board-w <=> root.board-w;
+            boot: root.boot;
+            boot-text: root.boot-text;
+            boot-title: root.boot-title;
+            box-h <=> root.box-h;
+            boxes-resized() => { root.boxes-resized(); }
+            carry-gx <=> root.carry-gx;
+            carry-gy <=> root.carry-gy;
+            carry-name: root.carry-name;
+            carry-on <=> root.carry-on;
+            carry-settle <=> root.carry-settle;
+            carry-x <=> root.carry-x;
+            carry-y <=> root.carry-y;
+            cell-left(a0, a1, a2) => { root.cell-left(a0, a1, a2); }
+            cell-pick(a0, a1, a2, a3, a4, a5) => { root.cell-pick(a0, a1, a2, a3, a4, a5); }
+            cell-slide(a0, a1) => { root.cell-slide(a0, a1); }
+            cell-typed(a0, a1, a2) => { root.cell-typed(a0, a1, a2); }
+            cells: root.cells;
+            choose-profile(a0) => { root.choose-profile(a0); }
+            conn-state: root.conn-state;
+            cqw <=> root.cqw;
+            dimming: root.dimming;
+            effect(a0) => { root.effect(a0); }
+            effect-moves: root.effect-moves;
+            effects: root.effects;
+            game-items: root.game-items;
+            game-need <=> root.game-need;
+            game-panel-h <=> root.game-panel-h;
+            game-toggled(a0) => { root.game-toggled(a0); }
+            gl-carry-move(a0, a1) => { root.gl-carry-move(a0, a1); }
+            gl-row-on(a0) => { root.gl-row-on(a0); }
+            gl-row-pick(a0) => { root.gl-row-pick(a0); }
+            gl-row-until(a0, a1, a2, a3, a4) => { root.gl-row-until(a0, a1, a2, a3, a4); }
+            gl-rows: root.gl-rows;
+            head-end <=> root.head-end;
+            head-h <=> root.head-h;
+            hint: root.hint;
+            hint-chip: root.hint-chip;
+            hint-chip-on: root.hint-chip-on;
+            kb-maker: root.kb-maker;
+            kb-name: root.kb-name;
+            kb-pad-x <=> root.kb-pad-x;
+            kb-pad-y <=> root.kb-pad-y;
+            kb-profile-menu(a0, a1, a2) => { root.kb-profile-menu(a0, a1, a2); }
+            key-cap: root.key-cap;
+            key-clicked(a0) => { root.key-clicked(a0); }
+            key-factory: root.key-factory;
+            key-hovered(a0, a1) => { root.key-hovered(a0, a1); }
+            key-job: root.key-job;
+            key-kind: root.key-kind;
+            key-listening: root.key-listening;
+            key-name: root.key-name;
+            key-need <=> root.key-need;
+            key-note: root.key-note;
+            key-open: root.key-open;
+            key-rebound: root.key-rebound;
+            key-state: root.key-state;
+            keys: root.keys;
+            kind-picked(a0, a1, a2, a3) => { root.kind-picked(a0, a1, a2, a3); }
+            knob-glide: root.knob-glide;
+            layer: root.layer;
+            layer-changed(a0) => { root.layer-changed(a0); }
+            layer-rebound: root.layer-rebound;
+            lcd-big: root.lcd-big;
+            lcd-field: root.lcd-field;
+            lcd-h: root.lcd-h;
+            lcd-pause() => { root.lcd-pause(); }
+            lcd-state: root.lcd-state;
+            lcd-w: root.lcd-w;
+            lfx-h <=> root.lfx-h;
+            lib-find(a0) => { root.lib-find(a0); }
+            lib-gap: root.lib-gap;
+            lib-groups: root.lib-groups;
+            lib-menu(a0, a1, a2) => { root.lib-menu(a0, a1, a2); }
+            lib-new(a0, a1) => { root.lib-new(a0, a1); }
+            lib-pages: root.lib-pages;
+            lib-query <=> root.lib-query;
+            lib-reveal-n: root.lib-reveal-n;
+            lib-reveal-y: root.lib-reveal-y;
+            lib-toggle(a0) => { root.lib-toggle(a0); }
+            light-box-resized(a0, a1) => { root.light-box-resized(a0, a1); }
+            light-boxes: root.light-boxes;
+            light-fx-w <=> root.light-fx-w;
+            listen(a0) => { root.listen(a0); }
+            live: root.live;
+            macro-editor(a0) => { root.macro-editor(a0); }
+            menu-open: root.menu-open;
+            ob-choose(a0, a1, a2) => { root.ob-choose(a0, a1, a2); }
+            ob-chooser-w: root.ob-chooser-w;
+            ob-choosing: root.ob-choosing;
+            ob-name: root.ob-name;
+            ob-over: root.ob-over;
+            ob-ready: root.ob-ready;
+            ob-say: root.ob-say;
+            overlays: root.overlays;
+            page-h <=> root.page-h;
+            page-remove(a0) => { root.page-remove(a0); }
+            page-show(a0) => { root.page-show(a0); }
+            pl-adding: root.pl-adding;
+            pl-back() => { root.pl-back(); }
+            pl-blocks: root.pl-blocks;
+            pl-carry-cancel() => { root.pl-carry-cancel(); }
+            pl-carry-drop() => { root.pl-carry-drop(); }
+            pl-carry-move(a0, a1, a2) => { root.pl-carry-move(a0, a1, a2); }
+            pl-carry-start(a0, a1) => { root.pl-carry-start(a0, a1); }
+            pl-choose(a0, a1, a2) => { root.pl-choose(a0, a1, a2); }
+            pl-chooser-most: root.pl-chooser-most;
+            pl-chooser-w: root.pl-chooser-w;
+            pl-choosing: root.pl-choosing;
+            pl-dim: root.pl-dim;
+            pl-empty: root.pl-empty;
+            pl-head: root.pl-head;
+            pl-hold-menu(a0, a1, a2) => { root.pl-hold-menu(a0, a1, a2); }
+            pl-hold-w: root.pl-hold-w;
+            pl-hold-x: root.pl-hold-x;
+            pl-in: root.pl-in;
+            pl-live: root.pl-live;
+            pl-mark(a0, a1, a2, a3) => { root.pl-mark(a0, a1, a2, a3); }
+            pl-menu: root.pl-menu;
+            pl-name: root.pl-name;
+            pl-p <=> root.pl-p;
+            pl-panel-h <=> root.pl-panel-h;
+            pl-pre <=> root.pl-pre;
+            pl-rename-done(a0, a1) => { root.pl-rename-done(a0, a1); }
+            pl-rename-text <=> root.pl-rename-text;
+            pl-renaming: root.pl-renaming;
+            pl-script: root.pl-script;
+            pl-single: root.pl-single;
+            pl-size(a0, a1) => { root.pl-size(a0, a1); }
+            pl-size-done() => { root.pl-size-done(); }
+            pl-sizing <=> root.pl-sizing;
+            pl-slot-w: root.pl-slot-w;
+            pl-slot-x: root.pl-slot-x;
+            pl-time(a0, a1, a2, a3, a4) => { root.pl-time(a0, a1, a2, a3, a4); }
+            pl-timing: root.pl-timing;
+            pl-track-w: root.pl-track-w;
+            pl-track-x: root.pl-track-x;
+            pl-way-w: root.pl-way-w;
+            place <=> root.place;
+            profiles: root.profiles;
+            pws-w <=> root.pws-w;
+            pws-x <=> root.pws-x;
+            rail(a0) => { root.rail(a0); }
+            rename-profile(a0) => { root.rename-profile(a0); }
+            reset-key() => { root.reset-key(); }
+            screen-closed <=> root.screen-closed;
+            screen-edit(a0) => { root.screen-edit(a0); }
+            screen-editor() => { root.screen-editor(); }
+            screen-game <=> root.screen-game;
+            screen-state() => { root.screen-state(); }
+            screen-status: root.screen-status;
+            second-need <=> root.second-need;
+            second-w <=> root.second-w;
+            shelf-h <=> root.shelf-h;
+            shelf-on <=> root.shelf-on;
+            shelf-two: root.shelf-two;
+            show-rebindings() => { root.show-rebindings(); }
+            show-rebindings-on: root.show-rebindings-on;
+            slider-at: root.slider-at;
+            slider-bind-at(a0) => { root.slider-bind-at(a0); }
+            slider-choices: root.slider-choices;
+            slider-chosen: root.slider-chosen;
+            slider-chosen-at(a0) => { root.slider-chosen-at(a0); }
+            slider-need <=> root.slider-need;
+            slider-note: root.slider-note;
+            slider-title: root.slider-title;
+            status-kind: root.status-kind;
+            status-text: root.status-text;
+            tab: root.tab;
+            tabs-h <=> root.tabs-h;
+            tile-height: root.tile-height;
+            under-top <=> root.under-top;
+            under-w: root.under-w;
+            under-x <=> root.under-x;
+            undo(a0) => { root.undo(a0); }
+            undo-shown: root.undo-shown;
+            unit <=> root.unit;
+            view-changed(a0) => { root.view-changed(a0); }
         }
     }
 
@@ -3105,10 +1418,10 @@ export component AppWindow inherits Window {
         x: root.width - Part.scroll-in;
         y: root.page-scroll-y;
         height: root.page-scroll-h;
-        view: flick.height;
-        content: flick.content-height;
-        offset: -flick.content-y;
-        scroll-to(o) => { flick.content-y = -o; }
+        view: keyboard-page.flick-height;
+        content: keyboard-page.flick-content-height;
+        offset: -keyboard-page.flick-content-y;
+        scroll-to(o) => { keyboard-page.flick-content-y = -o; }
     }
     if root.place == "mouse": ScrollBar {
         x: root.width - Part.scroll-in;
@@ -3123,19 +1436,19 @@ export component AppWindow inherits Window {
         x: root.width - Part.scroll-in;
         y: root.page-scroll-y;
         height: root.page-scroll-h;
-        view: gl-flick.height;
-        content: gl-flick.content-height;
-        offset: -gl-flick.content-y;
-        scroll-to(o) => { gl-flick.content-y = -o; }
+        view: library-page.gl-flick-height;
+        content: library-page.gl-flick-content-height;
+        offset: -library-page.gl-flick-content-y;
+        scroll-to(o) => { library-page.gl-flick-content-y = -o; }
     }
     if root.place == "settings": ScrollBar {
         x: root.width - Part.scroll-in;
         y: root.page-scroll-y;
         height: root.page-scroll-h;
-        view: set-flick.height;
-        content: set-flick.content-height;
-        offset: -set-flick.content-y;
-        scroll-to(o) => { set-flick.content-y = -o; }
+        view: settings-page.set-flick-height;
+        content: settings-page.set-flick-content-height;
+        offset: -settings-page.set-flick-content-y;
+        scroll-to(o) => { settings-page.set-flick-content-y = -o; }
     }
 
     // a form over the Library: Add a game (its program and its name) or Add an

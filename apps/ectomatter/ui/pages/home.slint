@@ -1,0 +1,511 @@
+// Home: the devices on a desk, each as its page draws it, to scale, its
+// name under it. Day to day the desk fits the window and a device opens
+// its page; Arrange shows the dots, the desk zooms and pans, and the
+// devices move onto the dots. (The window lays the dots and the
+// highlight under a device on the ground, and draws the keyboard.)
+// The window binds each property and callback here to its own of the same
+// name (app.slint, `home-page`).
+
+import { Space, Radius, Font, Line, Size, Part, Stroke, Ink } from "tokens.slint";
+import { FloatBar, EmptyState, IconButton, Dot, HintRow, WordButton, TextButton, LinkButton } from "../system/system.slint";
+import { KeyItem, Overlay, MousePatch, DeskItem, DeskPad, MouseLayers, PadGrip } from "shared.slint";
+
+export component HomePage inherits Rectangle {
+    in property <bool> board-ready;
+    callback desk-add-pad(length, length, length);
+    callback desk-arrange();
+    in property <bool> desk-carrying;
+    callback desk-done();
+    callback desk-draw-cancel();
+    in property <bool> desk-drawing;
+    in property <bool> desk-editing;
+    in property <string> desk-empty;
+    callback desk-hover(int, bool);
+    in property <[DeskItem]> desk-items;
+    in property <float> desk-kb-k;
+    in property <image> desk-kb-shadow;
+    in property <length> desk-kb-shadow-m;
+    in property <float> desk-mouse-k;
+    in property <MousePatch> desk-mouse-logo;
+    in property <MousePatch> desk-mouse-logo-under;
+    in property <length> desk-mouse-m;
+    in property <image> desk-mouse-picture;
+    in property <MousePatch> desk-mouse-wheel;
+    in property <MousePatch> desk-mouse-wheel-under;
+    callback desk-move(length, length);
+    in property <int> desk-pad-chosen;
+    callback desk-pad-color(length, length, length);
+    callback desk-pad-delete();
+    callback desk-pad-edges(int, length, length);
+    callback desk-pad-hover(int, bool);
+    callback desk-pad-no-picture();
+    in property <string> desk-pad-note;
+    callback desk-pad-picture();
+    in property <bool> desk-pad-pictured;
+    in property <color> desk-pad-rgb;
+    in property <string> desk-pad-size;
+    callback desk-pad-size-menu(length, length, length);
+    in property <[DeskPad]> desk-pads;
+    callback desk-pan(length, length);
+    in property <bool> desk-panning;
+    callback desk-press(int, length, length);
+    callback desk-release();
+    callback desk-wheel(length, length, length);
+    in property <string> desk-zoom;
+    callback desk-zoom-step(int);
+    in property <[KeyItem]> keys;
+    in property <duration> knob-glide;
+    in property <color> mouse-logo-tint;
+    in property <color> mouse-wheel-tint;
+    in property <[Overlay]> overlays;
+    in property <image> scene-chip;
+    callback scene-menu(length, length, length);
+    in property <string> scene-name;
+    in property <float> units;
+
+    desk-ta := TouchArea {
+        // (in edit mode a drag on the empty desk moves round it; with
+        // Draw your own on, it draws a pad)
+        mouse-cursor: root.desk-panning ? MouseCursor.grabbing : root.desk-drawing ? MouseCursor.crosshair : MouseCursor.default;
+        // (in edit mode a drag with the middle button moves around the desk)
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.desk-press(-1, self.mouse-x, self.mouse-y);
+            }
+            if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
+                root.desk-pan(self.mouse-x, self.mouse-y);
+            }
+            if ((e.button == PointerEventButton.left || e.button == PointerEventButton.middle) && e.kind == PointerEventKind.up) {
+                root.desk-release();
+            }
+        }
+        moved => { root.desk-move(self.mouse-x, self.mouse-y); }
+        scroll-event(e) => {
+            if (root.desk-editing) {
+                root.desk-wheel(self.mouse-x, self.mouse-y, e.delta-y);
+                return accept;
+            }
+            return reject;
+        }
+        // the pads, under the devices (the window draws them on the ground):
+        // in edit mode, a ring round the one chosen or being drawn, and a
+        // fainter one round the one the pointer is over; a drag on one
+        // carries it, and the chosen one's edges and corners size it
+        for p[j] in root.desk-pads: Rectangle {
+            x: p.x;
+            y: p.y;
+            width: p.w;
+            height: p.h;
+            if root.desk-editing && (p.chosen || (p.hover && !root.desk-carrying)): Rectangle {
+                border-radius: p.r;
+                border-width: p.chosen ? Stroke.chosen : Stroke.line;
+                border-color: p.chosen ? Ink.white.with-alpha(0.878) : Ink.white.with-alpha(0.251);
+            }
+            if root.desk-editing && !p.drawing: TouchArea {
+                mouse-cursor: root.desk-drawing ? MouseCursor.crosshair : root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab;
+                changed has-hover => { root.desk-pad-hover(j, self.has-hover); }
+                pointer-event(e) => {
+                    if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                        root.desk-press(-1, p.x + self.mouse-x, p.y + self.mouse-y);
+                    }
+                    if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
+                        root.desk-pan(p.x + self.mouse-x, p.y + self.mouse-y);
+                    }
+                    if ((e.button == PointerEventButton.left || e.button == PointerEventButton.middle) && e.kind == PointerEventKind.up) {
+                        root.desk-release();
+                    }
+                }
+                moved => { root.desk-move(p.x + self.mouse-x, p.y + self.mouse-y); }
+            }
+            // (each its own element, placed as the pad's size has it: not
+            // a list made from its size, which a drag would make anew, and
+            // the grip held with it)
+            if root.desk-editing && p.chosen && !p.drawing: Rectangle {
+                PadGrip {
+                    x: -5px;
+                    y: 7px; // art: the grips that size a device in edit mode
+                    width: 10px; // art: the grips that size a device in edit mode
+                    height: p.h - 14px; // art: the grips that size a device in edit mode
+                    edges: 1;
+                    ox: p.x;
+                    oy: p.y;
+                    grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                    pan(x, y) => { root.desk-pan(x, y); }
+                    drag(x, y) => { root.desk-move(x, y); }
+                    let-go => { root.desk-release(); }
+                }
+                PadGrip {
+                    x: p.w - 5px; // art: the grips that size a device in edit mode
+                    y: 7px; // art: the grips that size a device in edit mode
+                    width: 10px; // art: the grips that size a device in edit mode
+                    height: p.h - 14px; // art: the grips that size a device in edit mode
+                    edges: 4;
+                    ox: p.x;
+                    oy: p.y;
+                    grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                    pan(x, y) => { root.desk-pan(x, y); }
+                    drag(x, y) => { root.desk-move(x, y); }
+                    let-go => { root.desk-release(); }
+                }
+                PadGrip {
+                    x: 7px; // art: the grips that size a device in edit mode
+                    y: -5px;
+                    width: p.w - 14px; // art: the grips that size a device in edit mode
+                    height: 10px; // art: the grips that size a device in edit mode
+                    edges: 2;
+                    ox: p.x;
+                    oy: p.y;
+                    grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                    pan(x, y) => { root.desk-pan(x, y); }
+                    drag(x, y) => { root.desk-move(x, y); }
+                    let-go => { root.desk-release(); }
+                }
+                PadGrip {
+                    x: 7px; // art: the grips that size a device in edit mode
+                    y: p.h - 5px; // art: the grips that size a device in edit mode
+                    width: p.w - 14px; // art: the grips that size a device in edit mode
+                    height: 10px; // art: the grips that size a device in edit mode
+                    edges: 8;
+                    ox: p.x;
+                    oy: p.y;
+                    grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                    pan(x, y) => { root.desk-pan(x, y); }
+                    drag(x, y) => { root.desk-move(x, y); }
+                    let-go => { root.desk-release(); }
+                }
+                PadGrip {
+                    x: -7px;
+                    y: -7px;
+                    width: 14px; // art: the grips that size a device in edit mode
+                    height: 14px; // art: the grips that size a device in edit mode
+                    edges: 3;
+                    ox: p.x;
+                    oy: p.y;
+                    grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                    pan(x, y) => { root.desk-pan(x, y); }
+                    drag(x, y) => { root.desk-move(x, y); }
+                    let-go => { root.desk-release(); }
+                }
+                PadGrip {
+                    x: p.w - 7px; // art: the grips that size a device in edit mode
+                    y: -7px;
+                    width: 14px; // art: the grips that size a device in edit mode
+                    height: 14px; // art: the grips that size a device in edit mode
+                    edges: 6;
+                    ox: p.x;
+                    oy: p.y;
+                    grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                    pan(x, y) => { root.desk-pan(x, y); }
+                    drag(x, y) => { root.desk-move(x, y); }
+                    let-go => { root.desk-release(); }
+                }
+                PadGrip {
+                    x: p.w - 7px; // art: the grips that size a device in edit mode
+                    y: p.h - 7px; // art: the grips that size a device in edit mode
+                    width: 14px; // art: the grips that size a device in edit mode
+                    height: 14px; // art: the grips that size a device in edit mode
+                    edges: 12;
+                    ox: p.x;
+                    oy: p.y;
+                    grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                    pan(x, y) => { root.desk-pan(x, y); }
+                    drag(x, y) => { root.desk-move(x, y); }
+                    let-go => { root.desk-release(); }
+                }
+                PadGrip {
+                    x: -7px;
+                    y: p.h - 7px; // art: the grips that size a device in edit mode
+                    width: 14px; // art: the grips that size a device in edit mode
+                    height: 14px; // art: the grips that size a device in edit mode
+                    edges: 9;
+                    ox: p.x;
+                    oy: p.y;
+                    grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                    pan(x, y) => { root.desk-pan(x, y); }
+                    drag(x, y) => { root.desk-move(x, y); }
+                    let-go => { root.desk-release(); }
+                }
+            }
+        }
+        for d[i] in root.desk-items: Rectangle {
+            x: d.x;
+            y: d.y;
+            width: d.w;
+            height: d.h;
+            // the keyboard: its shadow round its place, its knobs and the display's glass over it
+            if d.kind == 0: Image {
+                x: -root.desk-kb-shadow-m * root.desk-kb-k;
+                y: -root.desk-kb-shadow-m * root.desk-kb-k;
+                width: parent.width + 2 * root.desk-kb-shadow-m * root.desk-kb-k;
+                height: parent.height + 2 * root.desk-kb-shadow-m * root.desk-kb-k;
+                source: root.desk-kb-shadow;
+            }
+            if d.kind == 0: Rectangle {
+                // the keys held down on the keyboard, shaded as its page shades them
+                for k in root.keys: Rectangle {
+                    visible: k.pressed;
+                    x: k.x * d.w / root.units;
+                    y: k.y * d.w / root.units;
+                    width: k.w * d.w / root.units;
+                    height: k.h * d.w / root.units;
+                    border-radius: (k.molded ? 0.13 : 0.24) * d.w / 100;
+                    background: #00000052;  // art: a key held down, as the keyboard's own picture has it
+                }
+                for o in root.overlays: Image {
+                    visible: root.board-ready;
+                    property <float> along: o.frac;
+                    animate along { duration: root.knob-glide; easing: linear; }
+                    x: (o.x + self.along * o.travel) * root.desk-kb-k;
+                    y: o.y * root.desk-kb-k;
+                    opacity: o.opacity * (d.off ? 0.5 : 1);
+                    width: o.w * root.desk-kb-k;
+                    height: o.h * root.desk-kb-k;
+                    source: o.image;
+                    image-fit: fill;
+                }
+            }
+            // the mouse: the window draws it here in HDR, under the page; these
+            // layers only place it
+            if d.kind == 1: MouseLayers {
+                x: -root.desk-mouse-m * root.desk-mouse-k;
+                y: -root.desk-mouse-m * root.desk-mouse-k;
+                width: parent.width + 2 * root.desk-mouse-m * root.desk-mouse-k;
+                height: parent.height + 2 * root.desk-mouse-m * root.desk-mouse-k;
+                drawn: false;
+                k: root.desk-mouse-k;
+                opacity: d.off ? 0.5 : 1;
+                lit: !d.off;
+                base: root.desk-mouse-picture;
+                logo-under: root.desk-mouse-logo-under;
+                wheel-under: root.desk-mouse-wheel-under;
+                logo: root.desk-mouse-logo;
+                wheel: root.desk-mouse-wheel;
+                logo-tint: root.mouse-logo-tint;
+                wheel-tint: root.mouse-wheel-tint;
+            }
+            // in edit mode, a thin ring round the device the pointer is over
+            if root.desk-editing && d.hover && !root.desk-carrying: Rectangle {
+                x: -16px;
+                y: -16px;
+                width: parent.width + 2 * Space.pad;
+                height: parent.height + 16px + 58px; // art: the ring round the device and its name
+                border-radius: Radius.box;
+                border-width: Stroke.line;
+                border-color: Ink.white.with-alpha(0.11);
+            }
+            // over a pad it could be lost on, its name on a backing of the
+            // app's own ground
+            if d.backed: Rectangle {
+                x: (parent.width - name-col.preferred-width) / 2 - 10px; // art: the name's backing
+                y: parent.height + 16px - 5px; // art: the name's backing
+                width: name-col.preferred-width + 20px; // art: the name's backing
+                height: name-col.preferred-height + 10px; // art: the name's backing
+                border-radius: Radius.control;
+                background: Ink.base.with-alpha(0.851);
+            }
+            // its name under it, and under that whether it is plugged in
+            name-col := VerticalLayout {
+                x: (parent.width - self.preferred-width) / 2;
+                y: parent.height + Space.pad;
+                width: self.preferred-width;
+                spacing: Space.list;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: Space.inline;
+                    VerticalLayout {
+                        alignment: center;
+                        Dot { state: d.off ? 2 : 1; }
+                    }
+                    Text {
+                        text: d.name;
+                        font-family: Font.ui;
+                        font-size: Font.text;
+                        font-weight: Font.medium;
+                        color: d.hover ? Ink.bright : Ink.dim;
+                        height: Line.text;
+                        vertical-alignment: center;
+                    }
+                }
+                if d.sub != "": Text {
+                    text: d.sub;
+                    font-family: Font.ui;
+                    font-size: Font.caption;
+                    color: Ink.quiet;
+                    horizontal-alignment: center;
+                }
+            }
+            // a press: outside edit mode, a click opens its page; in edit mode it carries it
+            TouchArea {
+                y: 0;
+                height: parent.height + 16px + 40px; // art: the device and its name, pressed as one
+                mouse-cursor: root.desk-editing ? (root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab) : MouseCursor.pointer;
+                changed has-hover => { root.desk-hover(i, self.has-hover); }
+                pointer-event(e) => {
+                    if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                        root.desk-press(i, d.x + self.mouse-x, d.y + self.mouse-y);
+                    }
+                    // (the middle button's drag moves around the desk, over a device too)
+                    if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
+                        root.desk-pan(d.x + self.mouse-x, d.y + self.mouse-y);
+                    }
+                    if ((e.button == PointerEventButton.left || e.button == PointerEventButton.middle) && e.kind == PointerEventKind.up) {
+                        root.desk-release();
+                    }
+                }
+                moved => { root.desk-move(d.x + self.mouse-x, d.y + self.mouse-y); }
+            }
+        }
+    }
+    // day to day: the tab's words at the top left, Arrange at the top right
+    // day to day: what to do here, and at the right Scenes (the scene on, by its
+    // name and its chip; Scenes, with the light's glyph, while none is on) and Arrange
+    if !root.desk-editing && root.desk-empty == "": HintRow {
+        x: Space.margin;
+        width: parent.width - 2 * Space.margin;
+        text: "Select a device to change it.";
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        HorizontalLayout {
+            spacing: Space.inline;
+            cross-axis-alignment: center;
+            LinkButton {
+                text: root.scene-name == "" ? "Scenes" : "Scene: " + root.scene-name;
+                chip: root.scene-chip;
+                chip-on: root.scene-name != "";
+                lit: root.scene-name != "";
+                // (a bulb's light: a ring, and its rays)
+                icon: "M7 4.6a2.4 2.4 0 1 0 0 4.8a2.4 2.4 0 1 0 0-4.8zM7 0.9v1.5M7 11.6v1.5M0.9 7h1.5M11.6 7h1.5M2.7 2.7l1.06 1.06M10.24 10.24l1.06 1.06M2.7 11.3l1.06-1.06M10.24 3.76l1.06-1.06";
+                clicked => { root.scene-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
+            }
+            LinkButton {
+                text: "Arrange";
+                icon: "M7 1.5v11M1.5 7h11M7 1.5 5.4 3.1M7 1.5l1.6 1.6M7 12.5l-1.6-1.6M7 12.5l1.6-1.6M1.5 7l1.6-1.6M1.5 7l1.6 1.6M12.5 7l-1.6-1.6M12.5 7l-1.6 1.6";
+                clicked => { root.desk-arrange(); }
+            }
+        }
+    }
+    // edit mode: what to do and Done, on a bar of its own over the dots
+    if root.desk-editing: FloatBar {
+        x: (parent.width - self.width) / 2;
+        y: Space.row;
+        // nothing chosen: what to do, Space.row in from the bar's edge
+        if root.desk-pad-chosen < 0: HorizontalLayout {
+            padding-left: Space.row - Space.tight;
+            padding-right: Space.tight;
+            Text {
+                text: root.desk-drawing ? "Drag across the desk to draw your pad." : "Drag a device to where it sits on your desk.";
+                font-family: Font.ui;
+                font-size: Font.note;
+                color: Ink.soft;
+                vertical-alignment: center;
+            }
+        }
+        // nothing chosen: a pad to add, at its maker's size or drawn
+        if root.desk-pad-chosen < 0 && !root.desk-drawing: WordButton {
+            text: "Add pad";
+            compact: true;
+            on-box: true;
+            clicked => { root.desk-add-pad(self.absolute-position.x, self.absolute-position.y, self.height); }
+        }
+        // drawing: put away unused
+        if root.desk-pad-chosen < 0 && root.desk-drawing: WordButton {
+            text: "Cancel";
+            compact: true;
+            on-box: true;
+            clicked => { root.desk-draw-cancel(); }
+        }
+        // a pad chosen: its size, its color, its picture, and taking it off the desk
+        if root.desk-pad-chosen >= 0: WordButton {
+            text: root.desk-pad-size;
+            compact: true;
+            on-box: true;
+            menu: true;
+            clicked => { root.desk-pad-size-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
+        }
+        if root.desk-pad-chosen >= 0: WordButton {
+            text: "Color";
+            compact: true;
+            on-box: true;
+            swatched: true;
+            swatch: root.desk-pad-rgb;
+            clicked => { root.desk-pad-color(self.absolute-position.x, self.absolute-position.y, self.height); }
+        }
+        if root.desk-pad-chosen >= 0: WordButton {
+            text: "Choose a picture…";
+            compact: true;
+            on-box: true;
+            clicked => { root.desk-pad-picture(); }
+        }
+        if root.desk-pad-chosen >= 0 && root.desk-pad-pictured: WordButton {
+            text: "Remove picture";
+            compact: true;
+            on-box: true;
+            clicked => { root.desk-pad-no-picture(); }
+        }
+        if root.desk-pad-chosen >= 0: WordButton {
+            text: "Delete pad";
+            compact: true;
+            danger: true;
+            clicked => { root.desk-pad-delete(); }
+        }
+        if root.desk-pad-chosen >= 0 && root.desk-pad-note != "": Text {
+            text: root.desk-pad-note;
+            font-family: Font.ui;
+            font-size: Font.note;
+            color: Ink.bad;
+            vertical-alignment: center;
+        }
+        // (Done apart from the rest, Space.inline more)
+        if root.desk-pad-chosen >= 0: Rectangle { width: Space.inline; }
+        WordButton {
+            text: "Done";
+            compact: true;
+            on-box: true;
+            clicked => { root.desk-done(); }
+        }
+    }
+    // edit mode: zoom, at the bottom right, Space.margin in
+    if root.desk-editing: FloatBar {
+        x: parent.width - self.width - Space.margin;
+        y: parent.height - self.height - Space.margin;
+        IconButton {
+            width: Size.compact;
+            height: Size.compact;
+            icon: "M2 6h8";
+            units: 12;
+            clicked => { root.desk-zoom-step(-1); }
+        }
+        // (as wide at every zoom as at its widest, so the bar never moves)
+        TextButton {
+            width: max(self.preferred-width, zoom-most.preferred-width + 2 * Part.quiet-pad);
+            text: root.desk-zoom;
+            clicked => { root.desk-zoom-step(0); }
+        }
+        IconButton {
+            width: Size.compact;
+            height: Size.compact;
+            icon: "M2 6h8M6 2v8";
+            units: 12;
+            clicked => { root.desk-zoom-step(1); }
+        }
+        TextButton {
+            text: "Fit";
+            clicked => { root.desk-zoom-step(2); }
+        }
+    }
+    zoom-most := Text {
+        visible: false;
+        text: "400%";
+        font-family: Font.ui;
+        font-size: Font.control;
+        font-weight: Font.medium;
+    }
+    // before anything is plugged in: which devices Ectomatter works with
+    if root.desk-empty != "": EmptyState {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(Size.empty, parent.width - 2 * Space.margin);
+        text: root.desk-empty;
+    }
+}

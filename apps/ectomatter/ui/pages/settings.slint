@@ -1,0 +1,44 @@
+// Ectomatter's own settings: its bar, every page's, and under it the form
+// (src/ecto_settings.rs), which scrolls.
+// The window binds each property and callback here to its own of the same
+// name (app.slint, `settings-page`).
+
+import { Size } from "tokens.slint";
+import { PageBar, Cell, CellView } from "../system/system.slint";
+
+export component SettingsPage inherits Rectangle {
+    callback cell-left(int, int, bool);
+    callback cell-pick(int, int, length, length, length, length);
+    callback cell-slide(int, float);
+    callback cell-typed(int, int, string);
+    in property <[Cell]> cells;
+    in property <image> keyboard-tile;
+    in property <image> mouse-tile;
+    in property <[image]> package-tiles;
+    in-out property <string> place;
+    in property <length> settings-h;
+    in-out property set-flick-content-height <=> set-flick.content-height;
+    in-out property set-flick-content-y <=> set-flick.content-y;
+    in-out property set-flick-height <=> set-flick.height;
+
+    set-flick := Flickable {
+        y: Size.bar;
+        height: parent.height - Size.bar;
+        content-height: root.settings-h;
+        mouse-drag-pan-enabled: false;
+        for c in root.cells: CellView {
+            c: c;
+            glyph: root.keyboard-tile;
+            glyph2: root.mouse-tile;
+            glyphs: root.package-tiles;
+            pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
+            field-left(id, index, kept) => { root.cell-left(id, index, kept); }
+            slide(id, v) => { root.cell-slide(id, v); }
+            typed(id, index, t) => { root.cell-typed(id, index, t); }
+        }
+    }
+    PageBar {
+        y: 0;
+        title: "Settings";
+    }
+}
