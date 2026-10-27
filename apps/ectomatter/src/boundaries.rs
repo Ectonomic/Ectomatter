@@ -299,6 +299,33 @@ pub(crate) mod tests {
         fail_on(found, "a device named in the app");
     }
 
+    /// docs/core-protocol.md, section 3: every field a manifest gives is one
+    /// the protocol names (ectomatter_protocol::manifest): every package's
+    /// that comes with Ectomatter and every one the tests make up.
+    #[test]
+    fn every_packages_manifest_is_the_protocols() {
+        let mut found = Vec::new();
+        let mut read = 0;
+        let mut dirs = vec![repo().join("cores"), repo().join("plugins"), repo().join("apps/ectomatter/tests/packages")];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                let m = p.join("core.json");
+                if m.is_file() {
+                    read += 1;
+                    let v = ectomatter_draw::jsonc::parse(&std::fs::read_to_string(&m).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", m.display()));
+                    if let Err(e) = ectomatter_protocol::manifest::Manifest::of(&v) {
+                        found.push(format!("{}: {e}", m.strip_prefix(repo()).unwrap().display()));
+                    }
+                } else if p.is_dir() && !p.ends_with("module") && !p.ends_with("target") {
+                    dirs.push(p);
+                }
+            }
+        }
+        assert!(read > 2, "no package's manifest was read");
+        fail_on(found, "a manifest that isn't the protocol's");
+    }
+
     /// docs/core-protocol.md, section 9: "A frontend supports a range of
     /// versions and says which it speaks in `initialize`." Every package and
     /// every example in the doc speaks the protocol the app speaks.

@@ -49,7 +49,10 @@ fn latest(repo: &str, file: &str) -> Result<Vec<u8>, String> {
 pub fn release_manifest(repo: &str) -> Result<Value, String> {
     let b = latest(repo, "core.json")?;
     let t = String::from_utf8(b).map_err(|_| "its core.json isn’t text".to_string())?;
-    ectomatter_draw::jsonc::parse(&t).map_err(|e| format!("its core.json can’t be read: {e}"))
+    let m = ectomatter_draw::jsonc::parse(&t).map_err(|e| format!("its core.json can’t be read: {e}"))?;
+    // (a manifest that isn't the protocol's, a field misspelled or one it doesn't name, isn't taken)
+    ectomatter_protocol::manifest::Manifest::of(&m).map_err(|e| format!("its core.json isn’t a manifest Ectomatter reads: {e}"))?;
+    Ok(m)
 }
 
 /// Whether a manifest's package runs on this Ectomatter.
@@ -299,7 +302,7 @@ pub fn check(p: &Package, repo: &str, into: &Path) -> Status {
         return Status::Failed(format!("version {v} can’t be used: {why}"));
     }
     // (one that can do more on the computer waits for the person to say so)
-    let more = more_than(&m, &p.manifest.all);
+    let more = more_than(&m, &p.manifest.json());
     if !more.is_empty() {
         return Status::Asks(v.to_string(), more);
     }

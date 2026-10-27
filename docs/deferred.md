@@ -139,7 +139,14 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   them): every page's state is still the window's, as `Front`'s is one
   object, and Rust sets it on the window. A page's own state as a type (a
   Slint global per page, a Rust type per page) waits for both.
-- Untyped JSON at every file and protocol boundary.
+- Untyped JSON at most file and protocol boundaries. A package's manifest is
+  typed (`ectomatter_protocol::manifest`, every package's held to it by
+  `every_packages_manifest_is_the_protocols`), though what reads it here
+  still takes it as JSON in places (`packages.rs` `works_here`,
+  `systems_of`, `can_words`; `updates.rs` `more_than`; a game's start,
+  `launch`, inside it). Untyped yet: a device's description and its
+  capabilities (section 4 and 5), every call's params and answer, a
+  plugin's sections and cells, readings, and Ectomatter's own saved files.
 - The render tests (`apps/ectomatter/tests/renders.rs`) draw in a sandbox
   (bubblewrap) on a made-up desk, but the sandbox lends them this system's
   programs, libraries and typefaces (/usr, /etc/fonts), so their pictures

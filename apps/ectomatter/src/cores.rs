@@ -30,7 +30,7 @@ impl Core {
     /// touching the core.
     pub fn load(folder: &Path) -> Result<Core, String> {
         let manifest = crate::core_host::Manifest::read(folder)?;
-        let file = manifest.all["deviceFile"].as_str().ok_or_else(|| format!("the {} core names no device description", manifest.id))?;
+        let file = manifest.spec.device_file.as_deref().ok_or_else(|| format!("the {} core names no device description", manifest.id))?;
         let path = std::env::var_os("ECTOMATTER_CORE_DEVICE").map(PathBuf::from).unwrap_or_else(|| folder.join(file));
         let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let device = ectomatter_draw::jsonc::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -163,7 +163,7 @@ pub fn keyboard() -> Option<&'static Core> {
     static SHOWN: OnceLock<Option<Core>> = OnceLock::new();
     SHOWN
         .get_or_init(|| {
-            crate::packages::of(crate::packages::Kind::Core).into_iter().filter(|p| p.manifest.all["deviceFile"].is_string()).find_map(|p| match Core::load(&p.dir) {
+            crate::packages::of(crate::packages::Kind::Core).into_iter().filter(|p| p.manifest.spec.device_file.is_some()).find_map(|p| match Core::load(&p.dir) {
                 Ok(c) if c.device["kind"] == "keyboard" => {
                     // (a test reads it as its core, run with no device, describes it, as a check offscreen does)
                     #[cfg(test)]

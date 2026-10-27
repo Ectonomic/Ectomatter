@@ -1,7 +1,7 @@
 # The words of the core protocol (docs/core-protocol.md) that every core and
 # Ectomatter share: the names of keys, modifiers and media keys, and the
-# actions a control can be given. Cores built for WebAssembly use it too, so
-# it needs nothing but serde_json.
+# actions a control can be given, and a package's manifest, typed. Cores
+# built for WebAssembly use it too, so it needs nothing but serde.
 [package]
 name = "ectomatter-protocol"
 version = "0.1.0"
@@ -12,3 +12,4 @@ description = "The shared names and actions of Ectomatter's core protocol."
 
 [dependencies]
 serde_json.workspace = true
+serde.workspace = true

@@ -9,6 +9,7 @@
 //! - [Action]: what a control can be given, as the protocol writes it.
 
 pub mod keys;
+pub mod manifest;
 pub mod media;
 pub mod text;
 

@@ -1000,10 +1000,10 @@ fn view_box(svg: &str) -> Option<[f32; 4]> {
 pub fn works_with() -> String {
     let mut names: Vec<String> = Vec::new();
     for p in crate::packages::of(crate::packages::Kind::Core) {
-        let c = &p.manifest.all;
-        match c["devices"].as_array() {
-            Some(a) => names.extend(a.iter().filter_map(|n| n.as_str()).map(|n| format!("the {n}"))),
-            None => names.extend(c["name"].as_str().map(|n| format!("the {n}"))),
+        let c = &p.manifest.spec;
+        match &c.devices {
+            Some(a) => names.extend(a.iter().map(|n| format!("the {n}"))),
+            None => names.push(format!("the {}", c.name)),
         }
     }
     let list = match names.len() {

@@ -298,7 +298,7 @@ impl Hosted {
         let data = scratch.clone().unwrap_or_else(|| p.data());
         self.refused.remove(p.id());
         // (a manifest saying another version of the protocol is never started)
-        let speaks = p.manifest.all["protocol"].as_u64();
+        let speaks = Some(p.manifest.spec.protocol as u64);
         if speaks != Some(ectomatter_protocol::PROTOCOL as u64) {
             let e = format!("It speaks version {} of Ectomatter’s core protocol, and this Ectomatter speaks {}.", speaks.map_or("(none said)".to_string(), |n| n.to_string()), ectomatter_protocol::PROTOCOL);
             eprintln!("ectomatter: the {} {} wouldn’t start: {e}", p.id(), kind.word());

@@ -702,7 +702,8 @@ pub struct Manifest {
     module: PathBuf,
     matches: Vec<Match>,
     pub uses: Uses,
-    pub all: Value,
+    /// the manifest as the protocol types it (ectomatter_protocol::manifest)
+    pub spec: ectomatter_protocol::manifest::Manifest,
 }
 
 impl Manifest {
@@ -710,16 +711,24 @@ impl Manifest {
         let path = dir.join("core.json");
         let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let m = ectomatter_draw::jsonc::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-        let s = |k: &str| m[k].as_str().map(str::to_string).ok_or_else(|| format!("{} names no {k}", path.display()));
+        // (every field the protocol names and none it doesn't: a misspelled one is an error here)
+        let spec = ectomatter_protocol::manifest::Manifest::of(&m).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(Manifest {
-            id: s("id")?,
-            name: s("name")?,
-            version: s("version")?,
-            module: dir.join(s("module")?),
+            id: spec.id.clone(),
+            name: spec.name.clone(),
+            version: spec.version.clone(),
+            module: dir.join(&spec.module),
             matches: m["matches"].as_array().map(|a| a.iter().filter_map(Match::of).collect()).unwrap_or_default(),
             uses: Uses::of(&m["uses"]),
-            all: m,
+            spec,
         })
+    }
+
+    /// The manifest as JSON, as the protocol types it: for what reads a
+    /// manifest whether it's a package's here or a release's (packages.rs,
+    /// updates.rs).
+    pub fn json(&self) -> Value {
+        serde_json::to_value(&self.spec).unwrap_or_default()
     }
 
     /// Whether it reaches any USB device: a device's core does; a plugin
@@ -852,7 +861,7 @@ fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync
     let t0 = Instant::now();
     let engine = engine();
     let inbox: Inbox = std::sync::Arc::new(std::sync::Mutex::new(asked));
-    let word = crate::packages::Kind::of(&m.all).word();
+    let word = crate::packages::Kind::from(m.spec.kind()).word();
     let made = compiled(engine, &m.module)
         .map_err(|e| format!("the {} core's module ({}) would not load: {e}", m.id, m.module.display()))
         .and_then(|c| make(engine, &c, &m, &data, usb, computer, inbox.clone(), told.clone(), limits).map(|l| (c, l)));
@@ -984,7 +993,7 @@ fn why_stopped(trap: &wasmtime::Error, time: Duration) -> String {
 fn slow(m: &Manifest, what: &str, since: Instant) {
     let ms = since.elapsed().as_millis();
     if ms > 200 {
-        eprintln!("ectomatter: the {} {} took {ms} ms on {what}", m.id, crate::packages::Kind::of(&m.all).word());
+        eprintln!("ectomatter: the {} {} took {ms} ms on {what}", m.id, crate::packages::Kind::from(m.spec.kind()).word());
     }
 }
 

@@ -830,7 +830,7 @@ impl Front {
     pub(super) fn hand_values(&self, only: Option<&str>) {
         for r in &self.hosted.plugins {
             let id = r.package.id();
-            let has = r.package.manifest.all["adds"].as_array().is_some_and(|a| a.iter().any(|x| x == "settings"));
+            let has = r.package.manifest.spec.adds(ectomatter_protocol::manifest::Adds::Settings);
             if !has || only.is_some_and(|o| o != id) {
                 continue;
             }

@@ -12,6 +12,7 @@ repository = "https://github.com/Ectonomic/Ectomatter"
 # else is built with it. Objects keep the order they were written in.
 [workspace.dependencies]
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
+serde = { version = "1.0.229", features = ["derive"] }
 
 # The HDR keyboard is drawn on the CPU each time its light changes, and the
 # pieces it is drawn from are rendered with resvg; unoptimized, both are too

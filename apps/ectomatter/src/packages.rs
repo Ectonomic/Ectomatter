@@ -33,6 +33,15 @@ pub enum Kind {
     Plugin,
 }
 
+impl From<ectomatter_protocol::manifest::Kind> for Kind {
+    fn from(k: ectomatter_protocol::manifest::Kind) -> Kind {
+        match k {
+            ectomatter_protocol::manifest::Kind::Core => Kind::Core,
+            ectomatter_protocol::manifest::Kind::Plugin => Kind::Plugin,
+        }
+    }
+}
+
 impl Kind {
     /// What a manifest says it is: its `kind`, or where it has none, a core
     /// for a package that names the USB devices it reaches (its `matches`)
@@ -90,12 +99,12 @@ impl Package {
 
     /// What it's for, in its own words.
     pub fn description(&self) -> String {
-        self.manifest.all["description"].as_str().unwrap_or("").to_string()
+        self.manifest.spec.description.clone().unwrap_or_default()
     }
 
     /// Its glyph, an SVG file in its folder.
     pub fn glyph(&self) -> Option<PathBuf> {
-        let g = self.manifest.all["glyph"].as_str()?;
+        let g = self.manifest.spec.glyph.as_deref()?;
         let p = self.dir.join(g);
         (p.starts_with(&self.dir) && p.is_file()).then_some(p)
     }
@@ -103,7 +112,7 @@ impl Package {
     /// Where its releases are on GitHub, as "owner/name": as its manifest says,
     /// or for one added from a GitHub address, that address (kept beside it).
     pub fn repository(&self) -> Option<String> {
-        if let Some(r) = self.manifest.all["repository"].as_str() {
+        if let Some(r) = self.manifest.spec.repository.as_deref() {
             return repository_of(r);
         }
         let kept = std::fs::read(self.dir.parent()?.join("source.json")).ok()?;
@@ -112,23 +121,23 @@ impl Package {
 
     /// Whether it adds a section to each game's and app's page.
     pub fn adds_to_games(&self) -> bool {
-        self.manifest.all["adds"].as_array().is_some_and(|a| a.iter().any(|x| x == "game"))
+        self.manifest.spec.adds(ectomatter_protocol::manifest::Adds::Game)
     }
 
     /// Whether it works on this system: everywhere, unless its manifest
     /// names the systems it works on (`"systems": ["linux"]`); one that
     /// doesn't work here isn't offered here.
     pub fn works_here(&self) -> bool {
-        works_here(&self.manifest.all)
+        works_here(&self.manifest.json())
     }
 
     /// The systems it works on, by their names, as Settings tags it.
     pub fn systems(&self) -> Vec<&'static str> {
-        systems_of(&self.manifest.all)
+        systems_of(&self.manifest.json())
     }
 
     pub fn kind(&self) -> Kind {
-        Kind::of(&self.manifest.all)
+        Kind::from(self.manifest.spec.kind())
     }
 
     /// Its own folder of files, which it sees as /data: a core's in Ectomatter's
@@ -139,7 +148,7 @@ impl Package {
 
     /// What it can do on the computer, a sentence each, in Ectomatter's words.
     pub fn can(&self) -> Vec<String> {
-        can_words(&self.manifest.all)
+        can_words(&self.manifest.json())
     }
 
     /// The setting that turns it on or off. A keyboard's core is the
@@ -359,7 +368,9 @@ pub fn manifest_in_file(file: &Path) -> Result<Value, String> {
     let (root, _) = package_root(&mut z)?;
     let mut text = String::new();
     std::io::Read::read_to_string(&mut z.by_name(&format!("{root}core.json")).map_err(|e| e.to_string())?, &mut text).map_err(|e| e.to_string())?;
-    ectomatter_draw::jsonc::parse(&text).map_err(|e| format!("Its core.json can’t be read: {e}"))
+    let m = ectomatter_draw::jsonc::parse(&text).map_err(|e| format!("Its core.json can’t be read: {e}"))?;
+    ectomatter_protocol::manifest::Manifest::of(&m).map_err(|e| format!("Its core.json isn’t a manifest Ectomatter reads: {e}"))?;
+    Ok(m)
 }
 
 /// Where a package file's core.json is: at its top, or in the one folder at its top.
@@ -417,7 +428,7 @@ pub fn install_file(file: &Path, into: &Path) -> Result<Manifest, String> {
     let manifest = Manifest::read(&dir).inspect_err(|_| {
         let _ = std::fs::remove_dir_all(&dir);
     })?;
-    if !dir.join(manifest.all["module"].as_str().unwrap_or("core.wasm")).is_file() {
+    if !dir.join(&manifest.spec.module).is_file() {
         let _ = std::fs::remove_dir_all(&dir);
         return Err("That plugin is missing its module.".into());
     }
