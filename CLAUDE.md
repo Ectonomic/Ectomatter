@@ -39,6 +39,10 @@ This is where they live in this repository.
   Nothing of Grant's goes into the desk or the pictures.
   `ECTOMATTER_RENDERS=name,name` runs only those; `ECTOMATTER_RENDERS_LOG=1`
   keeps every page's log.
+- **Presenting through wgpu.** `crates/ectomatter-present` turns a composed
+  frame into HDR10, scRGB or SDR for a wgpu surface; its tests draw offscreen
+  on Mesa's lavapipe (Vulkan on the CPU, `VK_ICD_FILENAMES`), so they touch
+  no GPU: `cargo test --release -p ectomatter-present`.
 - **Log.** `~/.local/state/com.ectonomic.ectomatter/ectomatter.log`
   (`$XDG_STATE_HOME`), the run before's as `ectomatter.log.1`: the app's
   stderr is the file itself, so the terminal shows only where the log is.

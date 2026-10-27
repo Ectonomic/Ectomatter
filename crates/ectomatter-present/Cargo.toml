@@ -1,0 +1,15 @@
+# Ectomatter's frames shown on the GPU, in the screen's own color space: the
+# frame as Ectomatter composes it (premultiplied PQ, sRGB's primaries)
+# turned into HDR10, scRGB or SDR as the window's surface takes it, for the
+# shells that present through wgpu (Windows, macOS; Linux on request).
+[package]
+name = "ectomatter-present"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Ectomatter's frames presented through wgpu in HDR10, scRGB or SDR."
+
+[dependencies]
+wgpu = "30.0.1"
+bytemuck = "1"
