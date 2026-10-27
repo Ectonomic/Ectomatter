@@ -847,7 +847,7 @@ pub struct Front {
     /// Ectomatter's macros played, for the controls given one (made when first
     /// needed), and where its steps' jobs come back to be done (main.rs)
     typist: Option<crate::typist::Player>,
-    pub macro_jobs: Option<smithay_client_toolkit::reexports::calloop::channel::Sender<String>>,
+    pub macro_jobs: Option<crate::shell::Sender<String>>,
     /// a slider set to Nothing because the other took its job: the job it had
     idled: Vec<Option<String>>,
     last_sliders: Option<serde_json::Value>,

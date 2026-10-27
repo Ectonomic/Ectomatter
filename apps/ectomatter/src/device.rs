@@ -8,7 +8,7 @@
 use std::sync::mpsc;
 
 use serde_json::{Value, json};
-use smithay_client_toolkit::reexports::calloop::channel::Sender;
+use crate::shell::Sender;
 
 pub enum Ask {
     /// everything the editor shows: firmware, the active profile, every profile and macro

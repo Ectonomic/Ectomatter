@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use smithay_client_toolkit::reexports::calloop::channel::Sender;
+use crate::shell::Sender;
 
 use crate::core_host::Core;
 use crate::lighting::{Ctl, Stack};

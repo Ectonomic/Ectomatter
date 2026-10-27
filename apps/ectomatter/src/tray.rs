@@ -5,7 +5,7 @@
 //! Ectomatter in the tray.
 
 use ksni::blocking::TrayMethods;
-use smithay_client_toolkit::reexports::calloop::channel::Sender;
+use crate::shell::Sender;
 
 #[derive(Clone, Debug)]
 pub enum TrayAsk {

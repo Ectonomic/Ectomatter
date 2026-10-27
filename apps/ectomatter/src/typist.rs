@@ -183,7 +183,7 @@ pub struct Player {
 impl Player {
     /// The player, with its keyboard made when it first plays, and where it
     /// hands the jobs its macros' steps do (their ids, jobs.rs).
-    pub fn start(jobs: Option<smithay_client_toolkit::reexports::calloop::channel::Sender<String>>) -> Player {
+    pub fn start(jobs: Option<crate::shell::Sender<String>>) -> Player {
         let (tell, told) = mpsc::channel::<Cmd>();
         std::thread::Builder::new()
             .name("macros".into())

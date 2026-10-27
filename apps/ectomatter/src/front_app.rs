@@ -14,7 +14,7 @@
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
-use smithay_client_toolkit::reexports::calloop::channel::Sender;
+use crate::shell::Sender;
 
 /// Where Ectomatter is on the session bus, for KWin's script to call.
 pub const SERVICE: &str = "com.ectonomic.Ectomatter";

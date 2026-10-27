@@ -711,12 +711,12 @@ fn socket() -> PathBuf {
 /// Listening for games starting, on a thread of its own: each told to the
 /// window's loop, and the launcher answered once the game's changes are
 /// made, or after half a minute.
-pub fn listen(tell: smithay_client_toolkit::reexports::calloop::channel::Sender<Start>) {
+pub fn listen(tell: crate::shell::Sender<Start>) {
     listen_at(&socket(), tell);
 }
 
 /// The same, on the socket at `path` (a test's own).
-fn listen_at(path: &Path, tell: smithay_client_toolkit::reexports::calloop::channel::Sender<Start>) {
+fn listen_at(path: &Path, tell: crate::shell::Sender<Start>) {
     let path = path.to_path_buf();
     if let Some(d) = path.parent() {
         let _ = std::fs::create_dir_all(d);
