@@ -5,8 +5,9 @@ use super::*;
 impl Front {
     /// Draw the page from the page's state.
     pub fn refresh(&mut self) {
-        // (a device's page with no core for the device isn't shown: Home is)
-        if self.ui.get_place() == "keyboard" && crate::cores::keyboard().is_none() {
+        // (a device's page with no core for the device, or for a device
+        // Ectomatter hasn't met, isn't shown: Home is, which says to plug one in)
+        if matches!(self.ui.get_place().as_str(), "keyboard" | "mouse") && !self.devices_in_order().iter().any(|d| d.0 == self.ui.get_place().as_str()) {
             self.ui.set_place("home".into());
         }
         // (the page's sensors read only while Settings or the screen editor shows them)
@@ -645,8 +646,8 @@ impl Front {
 
     /// The devices Ectomatter shows, as they sit on Home's desk (left to right),
     /// then any not on it yet: each one's page, its name, what sort it is,
-    /// and whether it is plugged in. The keyboard is always among them, the
-    /// mouse once Ectomatter has met it; each by its key on the desk.
+    /// and whether it is plugged in. Each is among them once Ectomatter has
+    /// met it (`met`), as Home's desk has it; each by its key on the desk.
     pub fn devices_in_order(&self) -> Vec<(String, String, String, bool)> {
         let kb = |core: &crate::cores::Core| ("keyboard".to_string(), core.name().to_string(), "keyboard".to_string(), self.ui.get_conn_state() == 1);
         let mouse = || {
@@ -662,12 +663,21 @@ impl Front {
             }
             seen.push(id.to_string());
             match id {
-                k if k == crate::cores::keyboard_key() && !k.is_empty() => out.extend(crate::cores::keyboard().map(kb)),
-                m if m == crate::mouse::key() && !m.is_empty() && self.mouse.known() => out.push(mouse()),
+                k if k == crate::cores::keyboard_key() && self.met(k) => out.extend(crate::cores::keyboard().map(kb)),
+                m if m == crate::mouse::key() && self.met(m) => out.push(mouse()),
                 _ => {}
             }
         }
         out
+    }
+
+    /// Whether Ectomatter has met the device by this key: read it or heard
+    /// from it, this run or one before (Home's desk keeps its place).
+    pub(super) fn met(&self, key: &str) -> bool {
+        !key.is_empty()
+            && (self.desk.keeps(key)
+                || (key == crate::cores::keyboard_key() && (self.page.dev.is_some() || self.ui.get_conn_state() == 1))
+                || (key == crate::mouse::key() && self.mouse.known()))
     }
 
     /// The rail's devices, as they sit on Home's desk.

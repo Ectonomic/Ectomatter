@@ -7,13 +7,13 @@ impl Front {
     /// those it has kept a place for; each at its size, and whether it is
     /// plugged in.
     pub(super) fn desk_meet(&mut self) {
-        if let Some(core) = crate::cores::keyboard().filter(|_| self.page.dev.is_some() || self.desk.keeps(crate::cores::keyboard_key())) {
+        if let Some(core) = crate::cores::keyboard().filter(|_| self.met(crate::cores::keyboard_key())) {
             let size = crate::desk::size_of(&core.art, core.device["light"]["scale"].as_f64().unwrap_or(1.38) as f32);
             // (not yet known to be plugged in, it is drawn as plugged in: only a keyboard gone shows dimmed)
             let kind = core.device["kind"].as_str().unwrap_or("keyboard").to_string();
             self.desk.meet(crate::cores::keyboard_key(), core.name(), "keyboard", &kind, size, self.ui.get_conn_state() != 2, true);
         }
-        if !crate::mouse::key().is_empty() && (self.mouse.known() || self.desk.keeps(crate::mouse::key())) {
+        if self.met(crate::mouse::key()) {
             let dev = &self.mouse.state["device"];
             let v = crate::mouse_art::view();
             let per = dev["scale"].as_f64().unwrap_or(520.0 / 125.1) as f32;

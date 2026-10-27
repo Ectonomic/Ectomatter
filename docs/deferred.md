@@ -188,9 +188,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   by the last of them then aborted the process. Both core dumps of
   2026-10-26 were this, in snapshots (one the stranger test's run that
   stopped silently); no test makes it happen on purpose.
-- A device's page opened while its device isn't plugged in says it's reading
-  the device ("Reading your keyboard"), and its button stays on the rail:
-  the first-run render shows it (`first-keyboard`).
+- A keyboard Ectomatter has met, opened while it isn't plugged in, says
+  it's reading it ("Reading your keyboard") until its first read fails, then
+  shows the read's own error under "The editor cannot reach the keyboard"
+  (`front/mod.rs`, `Heard::State(Err)`): the words are the old editor's, and
+  nothing waits on the core's `device/added` to say it's unplugged. (A
+  device never met has no button on the rail and no page: `front/models.rs`,
+  `met`; the first-run renders hold it.)
 
 ## Before any repository goes public
 
