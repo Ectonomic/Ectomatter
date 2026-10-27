@@ -1331,7 +1331,9 @@ impl Front {
             found_rx: frx,
             search_menu: false,
             plugin_map: Default::default(),
-            levels: (254.0, 1000.0),
+            // (until the screens are read: SDR's white as BT.2408 has it, as
+            // main.rs `levels` takes for a screen that doesn't say)
+            levels: (203.0, 1000.0),
             screen_peak: 1000.0,
             restart: None,
             macros: None,
@@ -8495,6 +8497,12 @@ impl Front {
         }
     }
 
+    /// Where a scene's effect stands, in seconds: since it started playing,
+    /// or at the moment a snapshot fixes (`light_at`, as the keys' light).
+    fn scene_t(&self) -> f32 {
+        self.light_at.map_or_else(|| self.scene_t0.elapsed().as_secs_f32(), |ms| (ms / 1000.0) as f32)
+    }
+
     /// The keys' light now, if it has changed since it was last asked for.
     pub fn lights(&mut self) -> Option<Vec<Light>> {
         let t = self.light_at.unwrap_or_else(|| self.t0.elapsed().as_secs_f64() * 1000.0);
@@ -9186,7 +9194,7 @@ impl Front {
         self.ui.set_scene_tiles_on(tiles.is_some());
         show_rows(self.ui.get_scene_tiles(), |m| self.ui.set_scene_tiles(m), tiles.unwrap_or_default());
         sync_cells(&self.scene_cells, cells);
-        self.show_scene_strip(self.scene_t0.elapsed().as_secs_f32());
+        self.show_scene_strip(self.scene_t());
     }
 
     /// The scene form's effect tiles: each effect in the form's colors, the one chosen ticked.
@@ -9371,7 +9379,7 @@ impl Front {
             return;
         }
         let Some(scene) = self.playing() else { return };
-        let t = self.scene_t0.elapsed().as_secs_f32();
+        let t = self.scene_t();
         let places = self.desk_places();
         let (kb, mouse) = (scene.lights.part(crate::cores::keyboard_key()), scene.lights.part(crate::mouse::key()));
         let keys: HashMap<u32, [u8; 3]> = match &kb {

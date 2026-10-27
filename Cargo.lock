@@ -1178,6 +1178,7 @@ dependencies = [
  "i-slint-core",
  "ksni",
  "libc",
+ "png 0.17.16",
  "proc-macro2",
  "resvg 0.45.1",
  "rustybuzz",

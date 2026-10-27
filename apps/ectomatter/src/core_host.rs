@@ -120,6 +120,10 @@ pub trait Computer: Send + Sync {
     fn resolve(&self, path: &Path) -> Result<PathBuf, String>;
     fn nvidia(&self, pci: &str, what: &str) -> Result<Value, String>;
     fn fetch(&self, url: &str, timeout: Duration) -> Result<String, String>;
+    /// A connection to an address on this computer or its network.
+    fn connect(&self, at: std::net::SocketAddr, _timeout: Duration) -> Result<std::net::TcpStream, String> {
+        Err(format!("nothing listens at {at} on this computer"))
+    }
 }
 
 /// A path a manifest may name to read: absolute, with nothing that leads up.
@@ -320,6 +324,29 @@ impl Default for Limits {
 /// a call past its time stops within one tick.
 const TICK: Duration = Duration::from_millis(50);
 
+/// A package's module, compiled once for as long as Ectomatter runs: a
+/// package started again (turned off and on, or restarted after it stopped)
+/// takes the same one. Compiled code is never let go while the process
+/// exits, when a package's thread ending as Ectomatter quits would unload it
+/// under the exit's own cleanup and abort the process; a module replaced
+/// (its file changed, an update) lets the old one go then.
+fn compiled(engine: &Engine, module: &Path) -> wasmtime::Result<Component> {
+    type Kept = std::collections::HashMap<PathBuf, (Option<std::time::SystemTime>, u64, Component)>;
+    static KEPT: std::sync::OnceLock<std::sync::Mutex<Kept>> = std::sync::OnceLock::new();
+    let meta = std::fs::metadata(module)?;
+    let stamp = (meta.modified().ok(), meta.len());
+    let kept = || KEPT.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner());
+    if let Some((at, len, c)) = kept().get(module)
+        && (*at, *len) == stamp
+    {
+        return Ok(c.clone());
+    }
+    // (compiled with nothing held, so packages starting together compile together)
+    let c = Component::from_file(engine, module)?;
+    kept().insert(module.to_path_buf(), (stamp.0, stamp.1, c.clone()));
+    Ok(c)
+}
+
 /// The one engine every package runs on, its clock ticking on a thread of
 /// its own for as long as Ectomatter runs.
 fn engine() -> &'static Engine {
@@ -493,7 +520,7 @@ impl ectomatter::core::net::Host for Run {
             return Err(format!("{} may not connect to {address}", self.id));
         }
         let at = address_of(&address).ok_or_else(|| format!("{address} isn’t an address Ectomatter can connect to"))?;
-        let s = std::net::TcpStream::connect_timeout(&at, Duration::from_millis(timeout_ms.max(1) as u64)).map_err(|e| e.to_string())?;
+        let s = self.reach("network")?.connect(at, Duration::from_millis(timeout_ms.max(1) as u64))?;
         let _ = s.set_nodelay(true);
         self.table.push(Stream(s)).map_err(|e| e.to_string())
     }
@@ -793,11 +820,13 @@ struct Live {
 
 fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>, asked: Inbox, told: Told, limits: Limits) -> Result<Live, String> {
     std::fs::create_dir_all(data).map_err(|e| format!("{}: {e}", data.display()))?;
-    let wasi = WasiCtxBuilder::new()
-        .inherit_stderr()
-        .preopened_dir(data, "/data", FsPerms::ReadWrite)
-        .map_err(|e| format!("{}: {e}", data.display()))?
-        .build();
+    let mut wasi = WasiCtxBuilder::new();
+    wasi.inherit_stderr().preopened_dir(data, "/data", FsPerms::ReadWrite).map_err(|e| format!("{}: {e}", data.display()))?;
+    // (the time of day as Ectomatter has it, fixed for a snapshot)
+    if let Some(t) = crate::clock::fixed() {
+        wasi.wall_clock(crate::clock::Still(t));
+    }
+    let wasi = wasi.build();
     let memory = wasmtime::StoreLimitsBuilder::new().memory_size(limits.memory).trap_on_grow_failure(true).build();
     let run = Run { wasi, table: ResourceTable::new(), usb, matches: m.matches.clone(), uses: m.uses.clone(), computer, timers: Vec::new(), id: m.id.clone(), asked, held: VecDeque::new(), taken: Vec::new(), next_id: 0, told, limits: memory };
     let mut linker = Linker::<Run>::new(engine);
@@ -817,7 +846,7 @@ fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync
     let engine = engine();
     let inbox: Inbox = std::sync::Arc::new(std::sync::Mutex::new(asked));
     let word = crate::packages::Kind::of(&m.all).word();
-    let made = Component::from_file(engine, &m.module)
+    let made = compiled(engine, &m.module)
         .map_err(|e| format!("the {} core's module ({}) would not load: {e}", m.id, m.module.display()))
         .and_then(|c| make(engine, &c, &m, &data, usb, computer, inbox.clone(), told.clone(), limits).map(|l| (c, l)));
     let asked = inbox;

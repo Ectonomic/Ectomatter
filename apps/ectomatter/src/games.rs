@@ -676,7 +676,7 @@ fn running_now(programs: &[(String, PathBuf)]) -> Vec<Running> {
 }
 
 pub fn now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    crate::clock::now().as_secs()
 }
 
 /// When a process started, in seconds since 1970: the computer's start plus

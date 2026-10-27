@@ -74,9 +74,6 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   its buttons' pieces.
 - The mouse fixture the offscreen renders read was recorded from an older
   core; it's kept current by hand (the scratchpad's his-mouse-state3.json).
-- One run of `tests/stranger.rs`, beside another full build, saw the app stop
-  silently after its first lines; twelve runs since didn't. The test prints
-  how the app ended now.
 - The mouse lab's offscreen snapshot needs the keyboard's core: its readout
   is the keyboard's board's (`main.rs`, `snap_lab`).
 - The Z10's core sends only its name in `device/added`; the app reads the
@@ -134,7 +131,18 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - One object runs every page: `front.rs`, 10,506 lines, about 200 fields.
 - One window component holds every page: `ui/app.slint`, 7,236 lines.
 - Untyped JSON at every file and protocol boundary.
-- No test runs the whole app and compares its renders with approved pictures.
+- The render tests (`apps/ectomatter/tests/renders.rs`) draw on a made-up
+  desk, but some of what they draw can still come from the computer running
+  them: any typeface the system has that a page falls back to beyond
+  Ectomatter's own, and, where a page asks, the Steam games running now
+  (`steam.rs`, `running`, from /proc). Their pictures are
+  approved on Linux; another system draws no picture for them yet.
+- The made-up computer's files don't change, so the processor's load is
+  "unavailable" on every screen the render tests draw (`renders.rs`,
+  `computer`).
+- The render tests keep their desks in `/tmp/ectomatter-renders/` by a fixed
+  name (a game's prefix shows the path), so two runs at once on one computer
+  share them.
 - The design checks skip 501 lines marked art (`// art:` and its regions),
   capped at that (`tokens.rs`, `ART_LINES_AT_MOST`). Many aren't a device's
   own drawing but a page's pieces drawn by hand: the playlist's strip (73),
@@ -143,6 +151,17 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   (17). Each is a part to make, and the cap comes down as they go.
 - The log is copied from stderr on Linux and macOS only (`log.rs`, `tee`);
   on Windows nothing is written to the file yet.
+
+## Before any repository goes public
+
+- The tracked files hold Grant's own details, in tests and comments: his
+  town and its coordinates (`hosted.rs`, the weather tests), his monitors'
+  names and EDIDs (`hosted.rs` `Desk`, `monitors.rs`), his drives' serial
+  numbers (`crates/ectomatter-sensors/src/fake.rs`, `list.rs`), his
+  computer's name (`macro_page.rs`, `jobs.rs`, `setups.rs`, `described.rs`,
+  `picker.rs`, `crates/ectomatter-draw/src/hdr.rs`), his home folder's path
+  (`plugins/game-configurator/module/src/lib.rs`). Found with `git grep` on
+  2026-10-26. The history holds them too.
 
 ## Stage 5: Windows and macOS
 

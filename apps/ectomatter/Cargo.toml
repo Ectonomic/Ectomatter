@@ -59,6 +59,8 @@ flate2 = "1"
 # the boundary checks read the app's source as Rust, its tests set apart by line (boundaries.rs)
 syn = { version = "2", features = ["full", "parsing"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
+# the render tests read and write their pictures (tests/renders.rs)
+png = "0.17"
 
 [build-dependencies]
 slint-build = "1.18.1"

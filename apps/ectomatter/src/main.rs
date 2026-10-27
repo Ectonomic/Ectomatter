@@ -27,6 +27,7 @@ mod adapter;
 mod boxes;
 mod boundaries;
 mod clipboard;
+mod clock;
 mod commands;
 mod computer;
 mod core_host;
@@ -235,7 +236,7 @@ impl slint::platform::Platform for Platform {
         Ok(w)
     }
     fn duration_since_start(&self) -> Duration {
-        self.start.elapsed()
+        clock::animations(self.start)
     }
     // the desktop's clipboard, through Wayland's (clipboard.rs); none of the selection's
     fn set_clipboard_text(&self, text: &str, clipboard: slint::platform::Clipboard) {
@@ -596,6 +597,14 @@ fn main() {
     if snapshot.is_none() && !args.iter().any(|a| a == "--read-state") {
         log::start();
     }
+    // ECTOMATTER_NOW=seconds since 1970: the time of day a snapshot is drawn
+    // at, its animations stepped by frames (clock.rs), from before the window
+    // keeps any time
+    if snapshot.is_some()
+        && let Some(t) = std::env::var("ECTOMATTER_NOW").ok().and_then(|t| t.parse().ok())
+    {
+        clock::fix(Duration::from_secs(t));
+    }
     // what Ectomatter kept when it was named Ectodeck, moved to its own folders first
     old_name::move_old_home();
     // the typefaces legends can be set in: Ectomatter's own, the core's and
@@ -693,10 +702,20 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         .unwrap_or(SIZE);
     window.set_size(PhysicalSize::new(w, h));
     let settings = settings::Settings::load(config_dir().join("settings.json"));
-    let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
+    // ECTOMATTER_COMPUTER=FOLDER: the computer the packages reach is the one
+    // described there (computer::Described), not this one
+    let this: std::sync::Arc<dyn core_host::Computer> = match std::env::var_os("ECTOMATTER_COMPUTER") {
+        Some(f) => {
+            computer::describe(f.clone().into());
+            std::sync::Arc::new(computer::Described(f.into()))
+        }
+        None => std::sync::Arc::new(computer::ThisComputer::new()),
+    };
+    let mut hosted = hosted::Hosted::new(this);
     hosted.start_all(&settings);
     devices_described(&hosted);
     let mut front = Front::new(ui, hosted, None, true, settings);
+    front.levels.0 = reference;
     if let Some(state) = std::env::var_os("ECTOMATTER_STATE") {
         // (as the keyboard's core reads it, device/read)
         let dev: serde_json::Value = serde_json::from_slice(&std::fs::read(state).expect("the saved state")).expect("the saved state as JSON");
@@ -919,9 +938,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     // ECTOMATTER_PAUSE=ms: that long passes after the typing, before the clicks after
     // it (what was typed looked up, say)
     if let Some(ms) = std::env::var("ECTOMATTER_PAUSE").ok().and_then(|v| v.parse::<u64>().ok()) {
-        let end = Instant::now() + Duration::from_millis(ms);
-        while Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(16));
+        for _ in 0..clock::frames(ms) {
+            clock::frame();
             slint::platform::update_timers_and_animations();
             front.act();
         }
@@ -963,9 +981,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let position = if let [x, y] = at[..] { LogicalPosition::new(x, y) } else { LogicalPosition::new(700.0, 600.0) };
         window.dispatch_event(WindowEvent::PointerMoved { position });
         window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: -dy });
-        let end = Instant::now() + Duration::from_millis(400);
-        while Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(16));
+        for _ in 0..clock::frames(400) {
+            clock::frame();
             slint::platform::update_timers_and_animations();
         }
     }
@@ -1050,9 +1067,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     // let animations run their course, as the eye would see them settle
     if let Some(ms) = std::env::var("ECTOMATTER_WAIT").ok().and_then(|v| v.parse::<u64>().ok()) {
-        let end = Instant::now() + Duration::from_millis(ms);
-        while Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(16));
+        for _ in 0..clock::frames(ms) {
+            clock::frame();
             slint::platform::update_timers_and_animations();
             front.act();
         }
@@ -1514,9 +1530,8 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     // ECTOMATTER_WAIT=ms: let that long pass with the pointer where the
     // clicks left it, for what shows once the pointer rests
     if let Some(ms) = std::env::var("ECTOMATTER_WAIT").ok().and_then(|v| v.parse::<u64>().ok()) {
-        let end = Instant::now() + Duration::from_millis(ms);
-        while Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(16));
+        for _ in 0..clock::frames(ms) {
+            clock::frame();
             slint::platform::update_timers_and_animations();
             lab.act();
         }
@@ -1525,9 +1540,8 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         let position = LogicalPosition::new(w as f32 / 2.0, h as f32 / 2.0);
         window.dispatch_event(WindowEvent::PointerMoved { position });
         window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: -dy });
-        let end = Instant::now() + Duration::from_millis(400);
-        while Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(16));
+        for _ in 0..clock::frames(400) {
+            clock::frame();
             slint::platform::update_timers_and_animations();
         }
     }

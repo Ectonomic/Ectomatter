@@ -1,0 +1,6862 @@
+{
+ "path": "/dev/hidraw0",
+ "firmware": {
+  "kind": "custom",
+  "version": "1.174",
+  "build": 4,
+  "features": [
+   {
+    "id": "sliders.read",
+    "name": "Reading both sliders"
+   },
+   {
+    "id": "dimmer.set",
+    "name": "Setting the dimmer"
+   },
+   {
+    "id": "volume.quiet",
+    "name": "Freeing the volume slider"
+   },
+   {
+    "id": "dimmer.keep",
+    "name": "Keeping the dimmer where you set it"
+   },
+   {
+    "id": "fn.read",
+    "name": "Saying when Fn is held"
+   }
+  ],
+  "later": [
+   {
+    "id": "onboard.layout",
+    "name": "Keeping an onboard layout",
+    "since": 5,
+    "words": "Keeping an onboard layout (build 5)"
+   },
+   {
+    "id": "status.read",
+    "name": "Saying its mode and key rollover",
+    "since": 5,
+    "words": "Saying its mode and key rollover (build 5)"
+   }
+  ],
+  "words": "Ectomatter v1.174, build 4",
+  "tag": "Unofficial",
+  "chip": "Unofficial build 4",
+  "none": "Nothing Ectomatter controls yet. This build fixes how the volume slider steps."
+ },
+ "active": 1,
+ "profiles": {
+  "1": {
+   "name": "Everyday",
+   "keys": {
+    "base": {
+     "gpc": {
+      "profile": 2
+     },
+     "esc": {
+      "key": "Escape"
+     },
+     "f1": {
+      "key": "F1"
+     },
+     "f2": {
+      "key": "F2"
+     },
+     "f3": {
+      "key": "F3"
+     },
+     "f4": {
+      "key": "F4"
+     },
+     "f5": {
+      "key": "F5"
+     },
+     "f6": {
+      "key": "F6"
+     },
+     "f7": {
+      "key": "F7"
+     },
+     "f8": {
+      "key": "F8"
+     },
+     "f9": {
+      "key": "F9"
+     },
+     "f10": {
+      "key": "F10"
+     },
+     "f11": {
+      "key": "F11"
+     },
+     "f12": {
+      "key": "F12"
+     },
+     "print-screen": {
+      "key": "PrintScreen"
+     },
+     "scroll-lock": {
+      "key": "ScrollLock"
+     },
+     "pause": {
+      "key": "Pause"
+     },
+     "stop": {
+      "media": "Stop"
+     },
+     "previous": {
+      "media": "Previous"
+     },
+     "play": {
+      "media": "PlayPause"
+     },
+     "next": {
+      "media": "Next"
+     },
+     "e1": {
+      "media": "Mute"
+     },
+     "grave": {
+      "key": "Grave"
+     },
+     "1": {
+      "key": "1"
+     },
+     "2": {
+      "key": "2"
+     },
+     "3": {
+      "key": "3"
+     },
+     "4": {
+      "key": "4"
+     },
+     "5": {
+      "key": "5"
+     },
+     "6": {
+      "key": "6"
+     },
+     "7": {
+      "key": "7"
+     },
+     "8": {
+      "key": "8"
+     },
+     "9": {
+      "key": "9"
+     },
+     "0": {
+      "key": "0"
+     },
+     "minus": {
+      "key": "Minus"
+     },
+     "equals": {
+      "key": "Equal"
+     },
+     "backspace": {
+      "key": "Backspace"
+     },
+     "insert": {
+      "key": "Insert"
+     },
+     "home": {
+      "key": "Home"
+     },
+     "page-up": {
+      "key": "PageUp"
+     },
+     "num-lock": {
+      "key": "NumLock"
+     },
+     "keypad-slash": {
+      "key": "KeypadSlash"
+     },
+     "keypad-star": {
+      "key": "KeypadAsterisk"
+     },
+     "keypad-minus": {
+      "key": "KeypadMinus"
+     },
+     "e2": {
+      "macro": 3,
+      "plays": "once"
+     },
+     "tab": {
+      "key": "Tab"
+     },
+     "q": {
+      "key": "Q"
+     },
+     "w": {
+      "key": "W"
+     },
+     "e": {
+      "key": "E"
+     },
+     "r": {
+      "key": "R"
+     },
+     "t": {
+      "key": "T"
+     },
+     "y": {
+      "key": "Y"
+     },
+     "u": {
+      "key": "U"
+     },
+     "i": {
+      "key": "I"
+     },
+     "o": {
+      "key": "O"
+     },
+     "p": {
+      "key": "P"
+     },
+     "left-bracket": {
+      "key": "LeftBracket"
+     },
+     "right-bracket": {
+      "key": "RightBracket"
+     },
+     "backslash": {
+      "key": "Backslash"
+     },
+     "delete": {
+      "key": "Delete"
+     },
+     "end": {
+      "key": "End"
+     },
+     "page-down": {
+      "key": "PageDown"
+     },
+     "keypad-7": {
+      "key": "Keypad7"
+     },
+     "keypad-8": {
+      "key": "Keypad8"
+     },
+     "keypad-9": {
+      "key": "Keypad9"
+     },
+     "keypad-plus": {
+      "key": "KeypadPlus"
+     },
+     "e3": {
+      "macro": 2,
+      "plays": "once"
+     },
+     "caps-lock": {
+      "key": "CapsLock"
+     },
+     "a": {
+      "key": "A"
+     },
+     "s": {
+      "key": "S"
+     },
+     "d": {
+      "key": "D"
+     },
+     "f": {
+      "key": "F"
+     },
+     "g": {
+      "key": "G"
+     },
+     "h": {
+      "key": "H"
+     },
+     "j": {
+      "key": "J"
+     },
+     "k": {
+      "key": "K"
+     },
+     "l": {
+      "key": "L"
+     },
+     "semicolon": {
+      "key": "Semicolon"
+     },
+     "quote": {
+      "key": "Quote"
+     },
+     "enter": {
+      "key": "Enter"
+     },
+     "keypad-4": {
+      "key": "Keypad4"
+     },
+     "keypad-5": {
+      "key": "Keypad5"
+     },
+     "keypad-6": {
+      "key": "Keypad6"
+     },
+     "e4": {
+      "host": 0
+     },
+     "left-shift": {
+      "key": "LeftShift"
+     },
+     "z": {
+      "key": "Z"
+     },
+     "x": {
+      "key": "X"
+     },
+     "c": {
+      "key": "C"
+     },
+     "v": {
+      "key": "V"
+     },
+     "b": {
+      "key": "B"
+     },
+     "n": {
+      "key": "N"
+     },
+     "m": {
+      "key": "M"
+     },
+     "comma": {
+      "key": "Comma"
+     },
+     "period": {
+      "key": "Period"
+     },
+     "slash": {
+      "key": "Slash"
+     },
+     "right-shift": {
+      "key": "RightShift"
+     },
+     "e6": {
+      "off": true
+     },
+     "up": {
+      "key": "ArrowUp"
+     },
+     "e7": {
+      "off": true
+     },
+     "keypad-1": {
+      "key": "Keypad1"
+     },
+     "keypad-2": {
+      "key": "Keypad2"
+     },
+     "keypad-3": {
+      "key": "Keypad3"
+     },
+     "keypad-enter": {
+      "key": "KeypadEnter"
+     },
+     "e5": {
+      "host": 1
+     },
+     "left-ctrl": {
+      "key": "LeftCtrl"
+     },
+     "fn": {
+      "key": "LeftMeta"
+     },
+     "left-alt": {
+      "key": "LeftAlt"
+     },
+     "space": {
+      "key": "Space"
+     },
+     "right-alt": {
+      "key": "RightAlt"
+     },
+     "win": {
+      "fn": true
+     },
+     "menu": {
+      "key": "Menu"
+     },
+     "right-ctrl": {
+      "key": "RightCtrl"
+     },
+     "left": {
+      "key": "ArrowLeft"
+     },
+     "down": {
+      "key": "ArrowDown"
+     },
+     "right": {
+      "key": "ArrowRight"
+     },
+     "keypad-0": {
+      "key": "Keypad0"
+     },
+     "keypad-dot": {
+      "key": "KeypadPeriod"
+     }
+    },
+    "fn": {
+     "gpc": {
+      "own": "game-mode"
+     },
+     "esc": {
+      "key": "Escape"
+     },
+     "f1": {
+      "key": "F1"
+     },
+     "f2": {
+      "key": "F2"
+     },
+     "f3": {
+      "key": "F3"
+     },
+     "f4": {
+      "key": "F4"
+     },
+     "f5": {
+      "key": "F5"
+     },
+     "f6": {
+      "key": "F6"
+     },
+     "f7": {
+      "key": "F7"
+     },
+     "f8": {
+      "key": "F8"
+     },
+     "f9": {
+      "key": "F9"
+     },
+     "f10": {
+      "key": "F10"
+     },
+     "f11": {
+      "key": "F11"
+     },
+     "f12": {
+      "key": "F12"
+     },
+     "print-screen": {
+      "key": "PrintScreen"
+     },
+     "scroll-lock": {
+      "key": "ScrollLock"
+     },
+     "pause": {
+      "key": "Pause"
+     },
+     "stop": {
+      "media": "Stop"
+     },
+     "previous": {
+      "media": "Previous"
+     },
+     "play": {
+      "media": "PlayPause"
+     },
+     "next": {
+      "media": "Next"
+     },
+     "e1": {
+      "macro": 10,
+      "plays": "once"
+     },
+     "grave": {
+      "key": "Grave"
+     },
+     "1": {
+      "key": "1"
+     },
+     "2": {
+      "key": "2"
+     },
+     "3": {
+      "key": "3"
+     },
+     "4": {
+      "key": "4"
+     },
+     "5": {
+      "key": "5"
+     },
+     "6": {
+      "key": "6"
+     },
+     "7": {
+      "key": "7"
+     },
+     "8": {
+      "key": "8"
+     },
+     "9": {
+      "key": "9"
+     },
+     "0": {
+      "key": "0"
+     },
+     "minus": {
+      "key": "Minus"
+     },
+     "equals": {
+      "key": "Equal"
+     },
+     "backspace": {
+      "key": "Backspace"
+     },
+     "insert": {
+      "key": "Insert"
+     },
+     "home": {
+      "key": "Home"
+     },
+     "page-up": {
+      "key": "PageUp"
+     },
+     "num-lock": {
+      "key": "NumLock"
+     },
+     "keypad-slash": {
+      "key": "KeypadSlash"
+     },
+     "keypad-star": {
+      "key": "KeypadAsterisk"
+     },
+     "keypad-minus": {
+      "key": "KeypadMinus"
+     },
+     "e2": {
+      "off": true
+     },
+     "tab": {
+      "key": "Tab"
+     },
+     "q": {
+      "key": "Q"
+     },
+     "w": {
+      "key": "W"
+     },
+     "e": {
+      "key": "E"
+     },
+     "r": {
+      "key": "R"
+     },
+     "t": {
+      "key": "T"
+     },
+     "y": {
+      "key": "Y"
+     },
+     "u": {
+      "key": "U"
+     },
+     "i": {
+      "key": "I"
+     },
+     "o": {
+      "key": "O"
+     },
+     "p": {
+      "key": "P"
+     },
+     "left-bracket": {
+      "key": "LeftBracket"
+     },
+     "right-bracket": {
+      "key": "RightBracket"
+     },
+     "backslash": {
+      "key": "Backslash"
+     },
+     "delete": {
+      "key": "Delete"
+     },
+     "end": {
+      "key": "End"
+     },
+     "page-down": {
+      "key": "PageDown"
+     },
+     "keypad-7": {
+      "key": "Keypad7"
+     },
+     "keypad-8": {
+      "key": "Keypad8"
+     },
+     "keypad-9": {
+      "key": "Keypad9"
+     },
+     "keypad-plus": {
+      "key": "KeypadPlus"
+     },
+     "e3": {
+      "off": true
+     },
+     "caps-lock": {
+      "key": "CapsLock"
+     },
+     "a": {
+      "key": "A"
+     },
+     "s": {
+      "key": "S"
+     },
+     "d": {
+      "key": "D"
+     },
+     "f": {
+      "key": "F"
+     },
+     "g": {
+      "key": "G"
+     },
+     "h": {
+      "key": "H"
+     },
+     "j": {
+      "key": "J"
+     },
+     "k": {
+      "key": "K"
+     },
+     "l": {
+      "key": "L"
+     },
+     "semicolon": {
+      "key": "Semicolon"
+     },
+     "quote": {
+      "key": "Quote"
+     },
+     "enter": {
+      "key": "Enter"
+     },
+     "keypad-4": {
+      "key": "Keypad4"
+     },
+     "keypad-5": {
+      "key": "Keypad5"
+     },
+     "keypad-6": {
+      "key": "Keypad6"
+     },
+     "e4": {
+      "off": true
+     },
+     "left-shift": {
+      "key": "LeftShift"
+     },
+     "z": {
+      "key": "Z"
+     },
+     "x": {
+      "key": "X"
+     },
+     "c": {
+      "key": "C"
+     },
+     "v": {
+      "key": "V"
+     },
+     "b": {
+      "key": "B"
+     },
+     "n": {
+      "key": "N"
+     },
+     "m": {
+      "key": "M"
+     },
+     "comma": {
+      "key": "Comma"
+     },
+     "period": {
+      "key": "Period"
+     },
+     "slash": {
+      "key": "Slash"
+     },
+     "right-shift": {
+      "key": "RightShift"
+     },
+     "e6": {
+      "off": true
+     },
+     "up": {
+      "key": "ArrowUp"
+     },
+     "e7": {
+      "off": true
+     },
+     "keypad-1": {
+      "key": "Keypad1"
+     },
+     "keypad-2": {
+      "key": "Keypad2"
+     },
+     "keypad-3": {
+      "key": "Keypad3"
+     },
+     "keypad-enter": {
+      "key": "KeypadEnter"
+     },
+     "e5": {
+      "off": true
+     },
+     "left-ctrl": {
+      "key": "LeftCtrl"
+     },
+     "fn": {
+      "key": "LeftMeta"
+     },
+     "left-alt": {
+      "key": "LeftAlt"
+     },
+     "space": {
+      "key": "Space"
+     },
+     "right-alt": {
+      "key": "RightAlt"
+     },
+     "win": {
+      "fn": true
+     },
+     "menu": {
+      "key": "Menu"
+     },
+     "right-ctrl": {
+      "key": "RightCtrl"
+     },
+     "left": {
+      "key": "ArrowLeft"
+     },
+     "down": {
+      "key": "ArrowDown"
+     },
+     "right": {
+      "key": "ArrowRight"
+     },
+     "keypad-0": {
+      "key": "Keypad0"
+     },
+     "keypad-dot": {
+      "key": "KeypadPeriod"
+     }
+    }
+   },
+   "lighting": {
+    "keys": {
+     "effect": "static",
+     "sub": 0,
+     "effects": {
+      "static": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "brightness": 255,
+       "color": [
+        255,
+        0,
+        0
+       ]
+      },
+      "breathing": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "cycle": 1000,
+       "colors": [
+        {
+         "hold": 10,
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "hold": 10,
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        }
+       ]
+      },
+      "pulse": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "cycle": 6000,
+       "count": 7,
+       "on_hold": 10,
+       "off_hold": 10,
+       "background": {
+        "brightness": 255,
+        "color": [
+         0,
+         0,
+         0
+        ]
+       },
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "spiral": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "direction": 0,
+       "cycle": 3000,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "wave": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "direction": 2,
+       "cycle": 1000,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "trigger": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "submode": 0,
+       "shift": 100,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "stars": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "cycle": 500,
+       "brightness": 255
+      }
+     }
+    },
+    "screen": {
+     "color": {
+      "brightness": 255,
+      "color": [
+       255,
+       32,
+       0
+      ]
+     },
+     "apps": 47
+    },
+    "game_keys": 255
+   }
+  },
+  "2": {
+   "name": "Games",
+   "keys": {
+    "base": {
+     "gpc": {
+      "profile": 1
+     },
+     "esc": {
+      "key": "Escape"
+     },
+     "f1": {
+      "key": "F1"
+     },
+     "f2": {
+      "key": "F2"
+     },
+     "f3": {
+      "key": "F3"
+     },
+     "f4": {
+      "key": "F4"
+     },
+     "f5": {
+      "key": "F5"
+     },
+     "f6": {
+      "key": "F6"
+     },
+     "f7": {
+      "key": "F7"
+     },
+     "f8": {
+      "key": "F8"
+     },
+     "f9": {
+      "key": "F9"
+     },
+     "f10": {
+      "key": "F10"
+     },
+     "f11": {
+      "key": "F11"
+     },
+     "f12": {
+      "key": "F12"
+     },
+     "print-screen": {
+      "key": "PrintScreen"
+     },
+     "scroll-lock": {
+      "key": "ScrollLock"
+     },
+     "pause": {
+      "key": "Pause"
+     },
+     "stop": {
+      "media": "Stop"
+     },
+     "previous": {
+      "media": "Previous"
+     },
+     "play": {
+      "media": "PlayPause"
+     },
+     "next": {
+      "media": "Next"
+     },
+     "e1": {
+      "media": "Mute"
+     },
+     "grave": {
+      "key": "Grave"
+     },
+     "1": {
+      "key": "1"
+     },
+     "2": {
+      "key": "2"
+     },
+     "3": {
+      "key": "3"
+     },
+     "4": {
+      "key": "4"
+     },
+     "5": {
+      "key": "5"
+     },
+     "6": {
+      "key": "6"
+     },
+     "7": {
+      "key": "7"
+     },
+     "8": {
+      "key": "8"
+     },
+     "9": {
+      "key": "9"
+     },
+     "0": {
+      "key": "0"
+     },
+     "minus": {
+      "key": "Minus"
+     },
+     "equals": {
+      "key": "Equal"
+     },
+     "backspace": {
+      "key": "Backspace"
+     },
+     "insert": {
+      "key": "Insert"
+     },
+     "home": {
+      "key": "Home"
+     },
+     "page-up": {
+      "key": "PageUp"
+     },
+     "num-lock": {
+      "key": "NumLock"
+     },
+     "keypad-slash": {
+      "key": "KeypadSlash"
+     },
+     "keypad-star": {
+      "key": "KeypadAsterisk"
+     },
+     "keypad-minus": {
+      "key": "KeypadMinus"
+     },
+     "e2": {
+      "macro": 3,
+      "plays": "once"
+     },
+     "tab": {
+      "key": "Tab"
+     },
+     "q": {
+      "key": "Q"
+     },
+     "w": {
+      "key": "W"
+     },
+     "e": {
+      "key": "E"
+     },
+     "r": {
+      "key": "R"
+     },
+     "t": {
+      "key": "T"
+     },
+     "y": {
+      "key": "Y"
+     },
+     "u": {
+      "key": "U"
+     },
+     "i": {
+      "key": "I"
+     },
+     "o": {
+      "key": "O"
+     },
+     "p": {
+      "key": "P"
+     },
+     "left-bracket": {
+      "key": "LeftBracket"
+     },
+     "right-bracket": {
+      "key": "RightBracket"
+     },
+     "backslash": {
+      "key": "Backslash"
+     },
+     "delete": {
+      "key": "Delete"
+     },
+     "end": {
+      "key": "End"
+     },
+     "page-down": {
+      "key": "PageDown"
+     },
+     "keypad-7": {
+      "key": "Keypad7"
+     },
+     "keypad-8": {
+      "key": "ArrowUp"
+     },
+     "keypad-9": {
+      "key": "Keypad9"
+     },
+     "keypad-plus": {
+      "key": "KeypadPlus"
+     },
+     "e3": {
+      "macro": 2,
+      "plays": "once"
+     },
+     "caps-lock": {
+      "key": "CapsLock"
+     },
+     "a": {
+      "key": "A"
+     },
+     "s": {
+      "key": "S"
+     },
+     "d": {
+      "key": "D"
+     },
+     "f": {
+      "key": "F"
+     },
+     "g": {
+      "key": "G"
+     },
+     "h": {
+      "key": "H"
+     },
+     "j": {
+      "key": "J"
+     },
+     "k": {
+      "key": "K"
+     },
+     "l": {
+      "key": "L"
+     },
+     "semicolon": {
+      "key": "Semicolon"
+     },
+     "quote": {
+      "key": "Quote"
+     },
+     "enter": {
+      "key": "E"
+     },
+     "keypad-4": {
+      "key": "ArrowLeft"
+     },
+     "keypad-5": {
+      "key": "ArrowDown"
+     },
+     "keypad-6": {
+      "key": "ArrowRight"
+     },
+     "e4": {
+      "macro": 4,
+      "plays": "once"
+     },
+     "left-shift": {
+      "key": "LeftShift"
+     },
+     "z": {
+      "key": "Z"
+     },
+     "x": {
+      "key": "X"
+     },
+     "c": {
+      "key": "C"
+     },
+     "v": {
+      "key": "V"
+     },
+     "b": {
+      "key": "B"
+     },
+     "n": {
+      "key": "N"
+     },
+     "m": {
+      "key": "M"
+     },
+     "comma": {
+      "key": "Comma"
+     },
+     "period": {
+      "key": "Period"
+     },
+     "slash": {
+      "key": "Slash"
+     },
+     "right-shift": {
+      "key": "LeftShift"
+     },
+     "e6": {
+      "key": "Z"
+     },
+     "up": {
+      "key": "W"
+     },
+     "e7": {
+      "key": "X"
+     },
+     "keypad-1": {
+      "key": "P"
+     },
+     "keypad-2": {
+      "key": "Keypad2"
+     },
+     "keypad-3": {
+      "key": "Keypad3"
+     },
+     "keypad-enter": {
+      "key": "KeypadEnter"
+     },
+     "e5": {
+      "macro": 5,
+      "plays": "once"
+     },
+     "left-ctrl": {
+      "key": "LeftCtrl"
+     },
+     "fn": {
+      "key": "LeftMeta"
+     },
+     "left-alt": {
+      "key": "LeftAlt"
+     },
+     "space": {
+      "key": "Space"
+     },
+     "right-alt": {
+      "key": "RightAlt"
+     },
+     "win": {
+      "fn": true
+     },
+     "menu": {
+      "key": "Enter"
+     },
+     "right-ctrl": {
+      "key": "RightCtrl"
+     },
+     "left": {
+      "key": "A"
+     },
+     "down": {
+      "key": "S"
+     },
+     "right": {
+      "key": "D"
+     },
+     "keypad-0": {
+      "key": "KeypadPlus"
+     },
+     "keypad-dot": {
+      "key": "KeypadPeriod"
+     }
+    },
+    "fn": {
+     "gpc": {
+      "own": "game-mode"
+     },
+     "esc": {
+      "key": "Escape"
+     },
+     "f1": {
+      "key": "F1"
+     },
+     "f2": {
+      "key": "F2"
+     },
+     "f3": {
+      "key": "F3"
+     },
+     "f4": {
+      "key": "F4"
+     },
+     "f5": {
+      "key": "F5"
+     },
+     "f6": {
+      "key": "F6"
+     },
+     "f7": {
+      "key": "F7"
+     },
+     "f8": {
+      "key": "F8"
+     },
+     "f9": {
+      "key": "F9"
+     },
+     "f10": {
+      "key": "F10"
+     },
+     "f11": {
+      "key": "F11"
+     },
+     "f12": {
+      "key": "F12"
+     },
+     "print-screen": {
+      "key": "PrintScreen"
+     },
+     "scroll-lock": {
+      "key": "ScrollLock"
+     },
+     "pause": {
+      "key": "Pause"
+     },
+     "stop": {
+      "media": "Stop"
+     },
+     "previous": {
+      "media": "Previous"
+     },
+     "play": {
+      "media": "PlayPause"
+     },
+     "next": {
+      "media": "Next"
+     },
+     "e1": {
+      "macro": 10,
+      "plays": "once"
+     },
+     "grave": {
+      "key": "Grave"
+     },
+     "1": {
+      "key": "1"
+     },
+     "2": {
+      "key": "2"
+     },
+     "3": {
+      "key": "3"
+     },
+     "4": {
+      "key": "4"
+     },
+     "5": {
+      "key": "5"
+     },
+     "6": {
+      "key": "6"
+     },
+     "7": {
+      "key": "7"
+     },
+     "8": {
+      "key": "8"
+     },
+     "9": {
+      "key": "9"
+     },
+     "0": {
+      "key": "0"
+     },
+     "minus": {
+      "key": "Minus"
+     },
+     "equals": {
+      "key": "Equal"
+     },
+     "backspace": {
+      "key": "Backspace"
+     },
+     "insert": {
+      "key": "Insert"
+     },
+     "home": {
+      "key": "Home"
+     },
+     "page-up": {
+      "key": "PageUp"
+     },
+     "num-lock": {
+      "key": "NumLock"
+     },
+     "keypad-slash": {
+      "key": "KeypadSlash"
+     },
+     "keypad-star": {
+      "key": "KeypadAsterisk"
+     },
+     "keypad-minus": {
+      "key": "KeypadMinus"
+     },
+     "e2": {
+      "off": true
+     },
+     "tab": {
+      "key": "Tab"
+     },
+     "q": {
+      "key": "Q"
+     },
+     "w": {
+      "key": "W"
+     },
+     "e": {
+      "key": "E"
+     },
+     "r": {
+      "key": "R"
+     },
+     "t": {
+      "key": "T"
+     },
+     "y": {
+      "key": "Y"
+     },
+     "u": {
+      "key": "U"
+     },
+     "i": {
+      "key": "I"
+     },
+     "o": {
+      "key": "O"
+     },
+     "p": {
+      "key": "P"
+     },
+     "left-bracket": {
+      "key": "LeftBracket"
+     },
+     "right-bracket": {
+      "key": "RightBracket"
+     },
+     "backslash": {
+      "key": "Backslash"
+     },
+     "delete": {
+      "key": "Delete"
+     },
+     "end": {
+      "key": "End"
+     },
+     "page-down": {
+      "key": "PageDown"
+     },
+     "keypad-7": {
+      "key": "Keypad7"
+     },
+     "keypad-8": {
+      "key": "Keypad8"
+     },
+     "keypad-9": {
+      "key": "Keypad9"
+     },
+     "keypad-plus": {
+      "key": "KeypadPlus"
+     },
+     "e3": {
+      "off": true
+     },
+     "caps-lock": {
+      "key": "CapsLock"
+     },
+     "a": {
+      "key": "A"
+     },
+     "s": {
+      "key": "S"
+     },
+     "d": {
+      "key": "D"
+     },
+     "f": {
+      "key": "F"
+     },
+     "g": {
+      "profile": 1
+     },
+     "h": {
+      "key": "H"
+     },
+     "j": {
+      "key": "J"
+     },
+     "k": {
+      "key": "K"
+     },
+     "l": {
+      "key": "L"
+     },
+     "semicolon": {
+      "key": "Semicolon"
+     },
+     "quote": {
+      "key": "Quote"
+     },
+     "enter": {
+      "key": "Enter"
+     },
+     "keypad-4": {
+      "key": "Keypad4"
+     },
+     "keypad-5": {
+      "key": "Keypad5"
+     },
+     "keypad-6": {
+      "key": "Keypad6"
+     },
+     "e4": {
+      "off": true
+     },
+     "left-shift": {
+      "key": "LeftShift"
+     },
+     "z": {
+      "key": "Z"
+     },
+     "x": {
+      "key": "X"
+     },
+     "c": {
+      "key": "C"
+     },
+     "v": {
+      "key": "V"
+     },
+     "b": {
+      "key": "B"
+     },
+     "n": {
+      "key": "N"
+     },
+     "m": {
+      "key": "M"
+     },
+     "comma": {
+      "key": "Comma"
+     },
+     "period": {
+      "key": "Period"
+     },
+     "slash": {
+      "key": "Slash"
+     },
+     "right-shift": {
+      "key": "RightShift"
+     },
+     "e6": {
+      "off": true
+     },
+     "up": {
+      "key": "ArrowUp"
+     },
+     "e7": {
+      "off": true
+     },
+     "keypad-1": {
+      "key": "Keypad1"
+     },
+     "keypad-2": {
+      "key": "Keypad2"
+     },
+     "keypad-3": {
+      "key": "Keypad3"
+     },
+     "keypad-enter": {
+      "key": "KeypadEnter"
+     },
+     "e5": {
+      "off": true
+     },
+     "left-ctrl": {
+      "key": "LeftCtrl"
+     },
+     "fn": {
+      "key": "LeftMeta"
+     },
+     "left-alt": {
+      "key": "LeftAlt"
+     },
+     "space": {
+      "key": "Space"
+     },
+     "right-alt": {
+      "key": "RightAlt"
+     },
+     "win": {
+      "fn": true
+     },
+     "menu": {
+      "off": true
+     },
+     "right-ctrl": {
+      "key": "RightCtrl"
+     },
+     "left": {
+      "key": "ArrowLeft"
+     },
+     "down": {
+      "key": "ArrowDown"
+     },
+     "right": {
+      "key": "ArrowRight"
+     },
+     "keypad-0": {
+      "key": "Keypad0"
+     },
+     "keypad-dot": {
+      "key": "KeypadPeriod"
+     }
+    }
+   },
+   "lighting": {
+    "keys": {
+     "effect": "static",
+     "sub": 0,
+     "effects": {
+      "static": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "brightness": 128,
+       "color": [
+        255,
+        255,
+        255
+       ]
+      },
+      "breathing": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "cycle": 3000,
+       "colors": [
+        {
+         "hold": 10,
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "hold": 10,
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        }
+       ]
+      },
+      "pulse": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "cycle": 12000,
+       "count": 7,
+       "on_hold": 10,
+       "off_hold": 10,
+       "background": {
+        "brightness": 255,
+        "color": [
+         0,
+         0,
+         0
+        ]
+       },
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "spiral": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "direction": 255,
+       "cycle": 3000,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "wave": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "direction": 255,
+       "cycle": 3000,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "trigger": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "submode": 0,
+       "shift": 100,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "stars": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "cycle": 2000,
+       "brightness": 255
+      }
+     }
+    },
+    "screen": {
+     "color": {
+      "brightness": 255,
+      "color": [
+       255,
+       255,
+       255
+      ]
+     },
+     "apps": 47
+    },
+    "game_keys": 255
+   }
+  },
+  "3": {
+   "name": "DEFAULT 3",
+   "keys": {
+    "base": {
+     "gpc": {
+      "own": "game-mode"
+     },
+     "esc": {
+      "key": "Escape"
+     },
+     "f1": {
+      "key": "F1"
+     },
+     "f2": {
+      "key": "F2"
+     },
+     "f3": {
+      "key": "F3"
+     },
+     "f4": {
+      "key": "F4"
+     },
+     "f5": {
+      "key": "F5"
+     },
+     "f6": {
+      "key": "F6"
+     },
+     "f7": {
+      "key": "F7"
+     },
+     "f8": {
+      "key": "F8"
+     },
+     "f9": {
+      "key": "F9"
+     },
+     "f10": {
+      "key": "F10"
+     },
+     "f11": {
+      "key": "F11"
+     },
+     "f12": {
+      "key": "F12"
+     },
+     "print-screen": {
+      "key": "PrintScreen"
+     },
+     "scroll-lock": {
+      "key": "ScrollLock"
+     },
+     "pause": {
+      "key": "Pause"
+     },
+     "stop": {
+      "media": "Stop"
+     },
+     "previous": {
+      "media": "Previous"
+     },
+     "play": {
+      "media": "PlayPause"
+     },
+     "next": {
+      "media": "Next"
+     },
+     "e1": {
+      "off": true
+     },
+     "grave": {
+      "key": "Grave"
+     },
+     "1": {
+      "key": "1"
+     },
+     "2": {
+      "key": "2"
+     },
+     "3": {
+      "key": "3"
+     },
+     "4": {
+      "key": "4"
+     },
+     "5": {
+      "key": "5"
+     },
+     "6": {
+      "key": "6"
+     },
+     "7": {
+      "key": "7"
+     },
+     "8": {
+      "key": "8"
+     },
+     "9": {
+      "key": "9"
+     },
+     "0": {
+      "key": "0"
+     },
+     "minus": {
+      "key": "Minus"
+     },
+     "equals": {
+      "key": "Equal"
+     },
+     "backspace": {
+      "key": "Backspace"
+     },
+     "insert": {
+      "key": "Insert"
+     },
+     "home": {
+      "key": "Home"
+     },
+     "page-up": {
+      "key": "PageUp"
+     },
+     "num-lock": {
+      "key": "NumLock"
+     },
+     "keypad-slash": {
+      "key": "KeypadSlash"
+     },
+     "keypad-star": {
+      "key": "KeypadAsterisk"
+     },
+     "keypad-minus": {
+      "key": "KeypadMinus"
+     },
+     "e2": {
+      "off": true
+     },
+     "tab": {
+      "key": "Tab"
+     },
+     "q": {
+      "key": "Q"
+     },
+     "w": {
+      "key": "W"
+     },
+     "e": {
+      "key": "E"
+     },
+     "r": {
+      "key": "R"
+     },
+     "t": {
+      "key": "T"
+     },
+     "y": {
+      "key": "Y"
+     },
+     "u": {
+      "key": "U"
+     },
+     "i": {
+      "key": "I"
+     },
+     "o": {
+      "key": "O"
+     },
+     "p": {
+      "key": "P"
+     },
+     "left-bracket": {
+      "key": "LeftBracket"
+     },
+     "right-bracket": {
+      "key": "RightBracket"
+     },
+     "backslash": {
+      "key": "Backslash"
+     },
+     "delete": {
+      "key": "Delete"
+     },
+     "end": {
+      "key": "End"
+     },
+     "page-down": {
+      "key": "PageDown"
+     },
+     "keypad-7": {
+      "key": "Keypad7"
+     },
+     "keypad-8": {
+      "key": "Keypad8"
+     },
+     "keypad-9": {
+      "key": "Keypad9"
+     },
+     "keypad-plus": {
+      "key": "KeypadPlus"
+     },
+     "e3": {
+      "off": true
+     },
+     "caps-lock": {
+      "key": "CapsLock"
+     },
+     "a": {
+      "key": "A"
+     },
+     "s": {
+      "key": "S"
+     },
+     "d": {
+      "key": "D"
+     },
+     "f": {
+      "key": "F"
+     },
+     "g": {
+      "key": "G"
+     },
+     "h": {
+      "key": "H"
+     },
+     "j": {
+      "key": "J"
+     },
+     "k": {
+      "key": "K"
+     },
+     "l": {
+      "key": "L"
+     },
+     "semicolon": {
+      "key": "Semicolon"
+     },
+     "quote": {
+      "key": "Quote"
+     },
+     "enter": {
+      "key": "Enter"
+     },
+     "keypad-4": {
+      "key": "Keypad4"
+     },
+     "keypad-5": {
+      "key": "Keypad5"
+     },
+     "keypad-6": {
+      "key": "Keypad6"
+     },
+     "e4": {
+      "off": true
+     },
+     "left-shift": {
+      "key": "LeftShift"
+     },
+     "z": {
+      "key": "Z"
+     },
+     "x": {
+      "key": "X"
+     },
+     "c": {
+      "key": "C"
+     },
+     "v": {
+      "key": "V"
+     },
+     "b": {
+      "key": "B"
+     },
+     "n": {
+      "key": "N"
+     },
+     "m": {
+      "key": "M"
+     },
+     "comma": {
+      "key": "Comma"
+     },
+     "period": {
+      "key": "Period"
+     },
+     "slash": {
+      "key": "Slash"
+     },
+     "right-shift": {
+      "key": "RightShift"
+     },
+     "e6": {
+      "off": true
+     },
+     "up": {
+      "key": "ArrowUp"
+     },
+     "e7": {
+      "off": true
+     },
+     "keypad-1": {
+      "key": "Keypad1"
+     },
+     "keypad-2": {
+      "key": "Keypad2"
+     },
+     "keypad-3": {
+      "key": "Keypad3"
+     },
+     "keypad-enter": {
+      "key": "KeypadEnter"
+     },
+     "e5": {
+      "off": true
+     },
+     "left-ctrl": {
+      "key": "LeftCtrl"
+     },
+     "fn": {
+      "key": "LeftMeta"
+     },
+     "left-alt": {
+      "key": "LeftAlt"
+     },
+     "space": {
+      "key": "Space"
+     },
+     "right-alt": {
+      "key": "RightAlt"
+     },
+     "win": {
+      "fn": true
+     },
+     "menu": {
+      "key": "Menu"
+     },
+     "right-ctrl": {
+      "key": "RightCtrl"
+     },
+     "left": {
+      "key": "ArrowLeft"
+     },
+     "down": {
+      "key": "ArrowDown"
+     },
+     "right": {
+      "key": "ArrowRight"
+     },
+     "keypad-0": {
+      "key": "Keypad0"
+     },
+     "keypad-dot": {
+      "key": "KeypadPeriod"
+     }
+    },
+    "fn": {
+     "gpc": {
+      "own": "game-mode"
+     },
+     "esc": {
+      "key": "Escape"
+     },
+     "f1": {
+      "key": "F1"
+     },
+     "f2": {
+      "key": "F2"
+     },
+     "f3": {
+      "key": "F3"
+     },
+     "f4": {
+      "key": "F4"
+     },
+     "f5": {
+      "key": "F5"
+     },
+     "f6": {
+      "key": "F6"
+     },
+     "f7": {
+      "key": "F7"
+     },
+     "f8": {
+      "key": "F8"
+     },
+     "f9": {
+      "key": "F9"
+     },
+     "f10": {
+      "key": "F10"
+     },
+     "f11": {
+      "key": "F11"
+     },
+     "f12": {
+      "key": "F12"
+     },
+     "print-screen": {
+      "key": "PrintScreen"
+     },
+     "scroll-lock": {
+      "key": "ScrollLock"
+     },
+     "pause": {
+      "key": "Pause"
+     },
+     "stop": {
+      "media": "Stop"
+     },
+     "previous": {
+      "media": "Previous"
+     },
+     "play": {
+      "media": "PlayPause"
+     },
+     "next": {
+      "media": "Next"
+     },
+     "e1": {
+      "off": true
+     },
+     "grave": {
+      "key": "Grave"
+     },
+     "1": {
+      "key": "1"
+     },
+     "2": {
+      "key": "2"
+     },
+     "3": {
+      "key": "3"
+     },
+     "4": {
+      "key": "4"
+     },
+     "5": {
+      "key": "5"
+     },
+     "6": {
+      "key": "6"
+     },
+     "7": {
+      "key": "7"
+     },
+     "8": {
+      "key": "8"
+     },
+     "9": {
+      "key": "9"
+     },
+     "0": {
+      "key": "0"
+     },
+     "minus": {
+      "key": "Minus"
+     },
+     "equals": {
+      "key": "Equal"
+     },
+     "backspace": {
+      "key": "Backspace"
+     },
+     "insert": {
+      "key": "Insert"
+     },
+     "home": {
+      "key": "Home"
+     },
+     "page-up": {
+      "key": "PageUp"
+     },
+     "num-lock": {
+      "key": "NumLock"
+     },
+     "keypad-slash": {
+      "key": "KeypadSlash"
+     },
+     "keypad-star": {
+      "key": "KeypadAsterisk"
+     },
+     "keypad-minus": {
+      "key": "KeypadMinus"
+     },
+     "e2": {
+      "off": true
+     },
+     "tab": {
+      "key": "Tab"
+     },
+     "q": {
+      "key": "Q"
+     },
+     "w": {
+      "key": "W"
+     },
+     "e": {
+      "key": "E"
+     },
+     "r": {
+      "key": "R"
+     },
+     "t": {
+      "key": "T"
+     },
+     "y": {
+      "key": "Y"
+     },
+     "u": {
+      "key": "U"
+     },
+     "i": {
+      "key": "I"
+     },
+     "o": {
+      "key": "O"
+     },
+     "p": {
+      "key": "P"
+     },
+     "left-bracket": {
+      "key": "LeftBracket"
+     },
+     "right-bracket": {
+      "key": "RightBracket"
+     },
+     "backslash": {
+      "key": "Backslash"
+     },
+     "delete": {
+      "key": "Delete"
+     },
+     "end": {
+      "key": "End"
+     },
+     "page-down": {
+      "key": "PageDown"
+     },
+     "keypad-7": {
+      "key": "Keypad7"
+     },
+     "keypad-8": {
+      "key": "Keypad8"
+     },
+     "keypad-9": {
+      "key": "Keypad9"
+     },
+     "keypad-plus": {
+      "key": "KeypadPlus"
+     },
+     "e3": {
+      "off": true
+     },
+     "caps-lock": {
+      "key": "CapsLock"
+     },
+     "a": {
+      "key": "A"
+     },
+     "s": {
+      "key": "S"
+     },
+     "d": {
+      "key": "D"
+     },
+     "f": {
+      "key": "F"
+     },
+     "g": {
+      "key": "G"
+     },
+     "h": {
+      "key": "H"
+     },
+     "j": {
+      "key": "J"
+     },
+     "k": {
+      "key": "K"
+     },
+     "l": {
+      "key": "L"
+     },
+     "semicolon": {
+      "key": "Semicolon"
+     },
+     "quote": {
+      "key": "Quote"
+     },
+     "enter": {
+      "key": "Enter"
+     },
+     "keypad-4": {
+      "key": "Keypad4"
+     },
+     "keypad-5": {
+      "key": "Keypad5"
+     },
+     "keypad-6": {
+      "key": "Keypad6"
+     },
+     "e4": {
+      "off": true
+     },
+     "left-shift": {
+      "key": "LeftShift"
+     },
+     "z": {
+      "key": "Z"
+     },
+     "x": {
+      "key": "X"
+     },
+     "c": {
+      "key": "C"
+     },
+     "v": {
+      "key": "V"
+     },
+     "b": {
+      "key": "B"
+     },
+     "n": {
+      "key": "N"
+     },
+     "m": {
+      "key": "M"
+     },
+     "comma": {
+      "key": "Comma"
+     },
+     "period": {
+      "key": "Period"
+     },
+     "slash": {
+      "key": "Slash"
+     },
+     "right-shift": {
+      "key": "RightShift"
+     },
+     "e6": {
+      "off": true
+     },
+     "up": {
+      "key": "ArrowUp"
+     },
+     "e7": {
+      "off": true
+     },
+     "keypad-1": {
+      "key": "Keypad1"
+     },
+     "keypad-2": {
+      "key": "Keypad2"
+     },
+     "keypad-3": {
+      "key": "Keypad3"
+     },
+     "keypad-enter": {
+      "key": "KeypadEnter"
+     },
+     "e5": {
+      "off": true
+     },
+     "left-ctrl": {
+      "key": "LeftCtrl"
+     },
+     "fn": {
+      "key": "LeftMeta"
+     },
+     "left-alt": {
+      "key": "LeftAlt"
+     },
+     "space": {
+      "key": "Space"
+     },
+     "right-alt": {
+      "key": "RightAlt"
+     },
+     "win": {
+      "fn": true
+     },
+     "menu": {
+      "key": "Menu"
+     },
+     "right-ctrl": {
+      "key": "RightCtrl"
+     },
+     "left": {
+      "key": "ArrowLeft"
+     },
+     "down": {
+      "key": "ArrowDown"
+     },
+     "right": {
+      "key": "ArrowRight"
+     },
+     "keypad-0": {
+      "key": "Keypad0"
+     },
+     "keypad-dot": {
+      "key": "KeypadPeriod"
+     }
+    }
+   },
+   "lighting": {
+    "keys": {
+     "effect": "off",
+     "sub": 0,
+     "effects": {
+      "static": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "brightness": 255,
+       "color": [
+        255,
+        0,
+        0
+       ]
+      },
+      "breathing": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "cycle": 3000,
+       "colors": [
+        {
+         "hold": 10,
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "hold": 10,
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        }
+       ]
+      },
+      "pulse": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "cycle": 12000,
+       "count": 7,
+       "on_hold": 10,
+       "off_hold": 10,
+       "background": {
+        "brightness": 255,
+        "color": [
+         0,
+         0,
+         0
+        ]
+       },
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "spiral": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "direction": 0,
+       "cycle": 3000,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "wave": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "direction": 0,
+       "cycle": 3000,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "trigger": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "submode": 0,
+       "shift": 100,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "stars": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "cycle": 2000,
+       "brightness": 255
+      }
+     }
+    },
+    "screen": {
+     "color": {
+      "brightness": 255,
+      "color": [
+       0,
+       0,
+       0
+      ]
+     },
+     "apps": 47
+    },
+    "game_keys": 255
+   }
+  },
+  "4": {
+   "name": "DEFAULT 4",
+   "keys": {
+    "base": {
+     "gpc": {
+      "own": "game-mode"
+     },
+     "esc": {
+      "key": "Escape"
+     },
+     "f1": {
+      "key": "F1"
+     },
+     "f2": {
+      "key": "F2"
+     },
+     "f3": {
+      "key": "F3"
+     },
+     "f4": {
+      "key": "F4"
+     },
+     "f5": {
+      "key": "F5"
+     },
+     "f6": {
+      "key": "F6"
+     },
+     "f7": {
+      "key": "F7"
+     },
+     "f8": {
+      "key": "F8"
+     },
+     "f9": {
+      "key": "F9"
+     },
+     "f10": {
+      "key": "F10"
+     },
+     "f11": {
+      "key": "F11"
+     },
+     "f12": {
+      "key": "F12"
+     },
+     "print-screen": {
+      "key": "PrintScreen"
+     },
+     "scroll-lock": {
+      "key": "ScrollLock"
+     },
+     "pause": {
+      "key": "Pause"
+     },
+     "stop": {
+      "media": "Stop"
+     },
+     "previous": {
+      "media": "Previous"
+     },
+     "play": {
+      "media": "PlayPause"
+     },
+     "next": {
+      "media": "Next"
+     },
+     "e1": {
+      "off": true
+     },
+     "grave": {
+      "key": "Grave"
+     },
+     "1": {
+      "key": "1"
+     },
+     "2": {
+      "key": "2"
+     },
+     "3": {
+      "key": "3"
+     },
+     "4": {
+      "key": "4"
+     },
+     "5": {
+      "key": "5"
+     },
+     "6": {
+      "key": "6"
+     },
+     "7": {
+      "key": "7"
+     },
+     "8": {
+      "key": "8"
+     },
+     "9": {
+      "key": "9"
+     },
+     "0": {
+      "key": "0"
+     },
+     "minus": {
+      "key": "Minus"
+     },
+     "equals": {
+      "key": "Equal"
+     },
+     "backspace": {
+      "key": "Backspace"
+     },
+     "insert": {
+      "key": "Insert"
+     },
+     "home": {
+      "key": "Home"
+     },
+     "page-up": {
+      "key": "PageUp"
+     },
+     "num-lock": {
+      "key": "NumLock"
+     },
+     "keypad-slash": {
+      "key": "KeypadSlash"
+     },
+     "keypad-star": {
+      "key": "KeypadAsterisk"
+     },
+     "keypad-minus": {
+      "key": "KeypadMinus"
+     },
+     "e2": {
+      "off": true
+     },
+     "tab": {
+      "key": "Tab"
+     },
+     "q": {
+      "key": "Q"
+     },
+     "w": {
+      "key": "W"
+     },
+     "e": {
+      "key": "E"
+     },
+     "r": {
+      "key": "R"
+     },
+     "t": {
+      "key": "T"
+     },
+     "y": {
+      "key": "Y"
+     },
+     "u": {
+      "key": "U"
+     },
+     "i": {
+      "key": "I"
+     },
+     "o": {
+      "key": "O"
+     },
+     "p": {
+      "key": "P"
+     },
+     "left-bracket": {
+      "key": "LeftBracket"
+     },
+     "right-bracket": {
+      "key": "RightBracket"
+     },
+     "backslash": {
+      "key": "Backslash"
+     },
+     "delete": {
+      "key": "Delete"
+     },
+     "end": {
+      "key": "End"
+     },
+     "page-down": {
+      "key": "PageDown"
+     },
+     "keypad-7": {
+      "key": "Keypad7"
+     },
+     "keypad-8": {
+      "key": "Keypad8"
+     },
+     "keypad-9": {
+      "key": "Keypad9"
+     },
+     "keypad-plus": {
+      "key": "KeypadPlus"
+     },
+     "e3": {
+      "off": true
+     },
+     "caps-lock": {
+      "key": "CapsLock"
+     },
+     "a": {
+      "key": "A"
+     },
+     "s": {
+      "key": "S"
+     },
+     "d": {
+      "key": "D"
+     },
+     "f": {
+      "key": "F"
+     },
+     "g": {
+      "key": "G"
+     },
+     "h": {
+      "key": "H"
+     },
+     "j": {
+      "key": "J"
+     },
+     "k": {
+      "key": "K"
+     },
+     "l": {
+      "key": "L"
+     },
+     "semicolon": {
+      "key": "Semicolon"
+     },
+     "quote": {
+      "key": "Quote"
+     },
+     "enter": {
+      "key": "Enter"
+     },
+     "keypad-4": {
+      "key": "Keypad4"
+     },
+     "keypad-5": {
+      "key": "Keypad5"
+     },
+     "keypad-6": {
+      "key": "Keypad6"
+     },
+     "e4": {
+      "off": true
+     },
+     "left-shift": {
+      "key": "LeftShift"
+     },
+     "z": {
+      "key": "Z"
+     },
+     "x": {
+      "key": "X"
+     },
+     "c": {
+      "key": "C"
+     },
+     "v": {
+      "key": "V"
+     },
+     "b": {
+      "key": "B"
+     },
+     "n": {
+      "key": "N"
+     },
+     "m": {
+      "key": "M"
+     },
+     "comma": {
+      "key": "Comma"
+     },
+     "period": {
+      "key": "Period"
+     },
+     "slash": {
+      "key": "Slash"
+     },
+     "right-shift": {
+      "key": "RightShift"
+     },
+     "e6": {
+      "off": true
+     },
+     "up": {
+      "key": "ArrowUp"
+     },
+     "e7": {
+      "off": true
+     },
+     "keypad-1": {
+      "key": "Keypad1"
+     },
+     "keypad-2": {
+      "key": "Keypad2"
+     },
+     "keypad-3": {
+      "key": "Keypad3"
+     },
+     "keypad-enter": {
+      "key": "KeypadEnter"
+     },
+     "e5": {
+      "off": true
+     },
+     "left-ctrl": {
+      "key": "LeftCtrl"
+     },
+     "fn": {
+      "key": "LeftMeta"
+     },
+     "left-alt": {
+      "key": "LeftAlt"
+     },
+     "space": {
+      "key": "Space"
+     },
+     "right-alt": {
+      "key": "RightAlt"
+     },
+     "win": {
+      "fn": true
+     },
+     "menu": {
+      "key": "Menu"
+     },
+     "right-ctrl": {
+      "key": "RightCtrl"
+     },
+     "left": {
+      "key": "ArrowLeft"
+     },
+     "down": {
+      "key": "ArrowDown"
+     },
+     "right": {
+      "key": "ArrowRight"
+     },
+     "keypad-0": {
+      "key": "Keypad0"
+     },
+     "keypad-dot": {
+      "key": "KeypadPeriod"
+     }
+    },
+    "fn": {
+     "gpc": {
+      "own": "game-mode"
+     },
+     "esc": {
+      "key": "Escape"
+     },
+     "f1": {
+      "key": "F1"
+     },
+     "f2": {
+      "key": "F2"
+     },
+     "f3": {
+      "key": "F3"
+     },
+     "f4": {
+      "key": "F4"
+     },
+     "f5": {
+      "key": "F5"
+     },
+     "f6": {
+      "key": "F6"
+     },
+     "f7": {
+      "key": "F7"
+     },
+     "f8": {
+      "key": "F8"
+     },
+     "f9": {
+      "key": "F9"
+     },
+     "f10": {
+      "key": "F10"
+     },
+     "f11": {
+      "key": "F11"
+     },
+     "f12": {
+      "key": "F12"
+     },
+     "print-screen": {
+      "key": "PrintScreen"
+     },
+     "scroll-lock": {
+      "key": "ScrollLock"
+     },
+     "pause": {
+      "key": "Pause"
+     },
+     "stop": {
+      "media": "Stop"
+     },
+     "previous": {
+      "media": "Previous"
+     },
+     "play": {
+      "media": "PlayPause"
+     },
+     "next": {
+      "media": "Next"
+     },
+     "e1": {
+      "off": true
+     },
+     "grave": {
+      "key": "Grave"
+     },
+     "1": {
+      "key": "1"
+     },
+     "2": {
+      "key": "2"
+     },
+     "3": {
+      "key": "3"
+     },
+     "4": {
+      "key": "4"
+     },
+     "5": {
+      "key": "5"
+     },
+     "6": {
+      "key": "6"
+     },
+     "7": {
+      "key": "7"
+     },
+     "8": {
+      "key": "8"
+     },
+     "9": {
+      "key": "9"
+     },
+     "0": {
+      "key": "0"
+     },
+     "minus": {
+      "key": "Minus"
+     },
+     "equals": {
+      "key": "Equal"
+     },
+     "backspace": {
+      "key": "Backspace"
+     },
+     "insert": {
+      "key": "Insert"
+     },
+     "home": {
+      "key": "Home"
+     },
+     "page-up": {
+      "key": "PageUp"
+     },
+     "num-lock": {
+      "key": "NumLock"
+     },
+     "keypad-slash": {
+      "key": "KeypadSlash"
+     },
+     "keypad-star": {
+      "key": "KeypadAsterisk"
+     },
+     "keypad-minus": {
+      "key": "KeypadMinus"
+     },
+     "e2": {
+      "off": true
+     },
+     "tab": {
+      "key": "Tab"
+     },
+     "q": {
+      "key": "Q"
+     },
+     "w": {
+      "key": "W"
+     },
+     "e": {
+      "key": "E"
+     },
+     "r": {
+      "key": "R"
+     },
+     "t": {
+      "key": "T"
+     },
+     "y": {
+      "key": "Y"
+     },
+     "u": {
+      "key": "U"
+     },
+     "i": {
+      "key": "I"
+     },
+     "o": {
+      "key": "O"
+     },
+     "p": {
+      "key": "P"
+     },
+     "left-bracket": {
+      "key": "LeftBracket"
+     },
+     "right-bracket": {
+      "key": "RightBracket"
+     },
+     "backslash": {
+      "key": "Backslash"
+     },
+     "delete": {
+      "key": "Delete"
+     },
+     "end": {
+      "key": "End"
+     },
+     "page-down": {
+      "key": "PageDown"
+     },
+     "keypad-7": {
+      "key": "Keypad7"
+     },
+     "keypad-8": {
+      "key": "Keypad8"
+     },
+     "keypad-9": {
+      "key": "Keypad9"
+     },
+     "keypad-plus": {
+      "key": "KeypadPlus"
+     },
+     "e3": {
+      "off": true
+     },
+     "caps-lock": {
+      "key": "CapsLock"
+     },
+     "a": {
+      "key": "A"
+     },
+     "s": {
+      "key": "S"
+     },
+     "d": {
+      "key": "D"
+     },
+     "f": {
+      "key": "F"
+     },
+     "g": {
+      "key": "G"
+     },
+     "h": {
+      "key": "H"
+     },
+     "j": {
+      "key": "J"
+     },
+     "k": {
+      "key": "K"
+     },
+     "l": {
+      "key": "L"
+     },
+     "semicolon": {
+      "key": "Semicolon"
+     },
+     "quote": {
+      "key": "Quote"
+     },
+     "enter": {
+      "key": "Enter"
+     },
+     "keypad-4": {
+      "key": "Keypad4"
+     },
+     "keypad-5": {
+      "key": "Keypad5"
+     },
+     "keypad-6": {
+      "key": "Keypad6"
+     },
+     "e4": {
+      "off": true
+     },
+     "left-shift": {
+      "key": "LeftShift"
+     },
+     "z": {
+      "key": "Z"
+     },
+     "x": {
+      "key": "X"
+     },
+     "c": {
+      "key": "C"
+     },
+     "v": {
+      "key": "V"
+     },
+     "b": {
+      "key": "B"
+     },
+     "n": {
+      "key": "N"
+     },
+     "m": {
+      "key": "M"
+     },
+     "comma": {
+      "key": "Comma"
+     },
+     "period": {
+      "key": "Period"
+     },
+     "slash": {
+      "key": "Slash"
+     },
+     "right-shift": {
+      "key": "RightShift"
+     },
+     "e6": {
+      "off": true
+     },
+     "up": {
+      "key": "ArrowUp"
+     },
+     "e7": {
+      "off": true
+     },
+     "keypad-1": {
+      "key": "Keypad1"
+     },
+     "keypad-2": {
+      "key": "Keypad2"
+     },
+     "keypad-3": {
+      "key": "Keypad3"
+     },
+     "keypad-enter": {
+      "key": "KeypadEnter"
+     },
+     "e5": {
+      "off": true
+     },
+     "left-ctrl": {
+      "key": "LeftCtrl"
+     },
+     "fn": {
+      "key": "LeftMeta"
+     },
+     "left-alt": {
+      "key": "LeftAlt"
+     },
+     "space": {
+      "key": "Space"
+     },
+     "right-alt": {
+      "key": "RightAlt"
+     },
+     "win": {
+      "fn": true
+     },
+     "menu": {
+      "key": "Menu"
+     },
+     "right-ctrl": {
+      "key": "RightCtrl"
+     },
+     "left": {
+      "key": "ArrowLeft"
+     },
+     "down": {
+      "key": "ArrowDown"
+     },
+     "right": {
+      "key": "ArrowRight"
+     },
+     "keypad-0": {
+      "key": "Keypad0"
+     },
+     "keypad-dot": {
+      "key": "KeypadPeriod"
+     }
+    }
+   },
+   "lighting": {
+    "keys": {
+     "effect": "off",
+     "sub": 0,
+     "effects": {
+      "static": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "brightness": 255,
+       "color": [
+        255,
+        0,
+        0
+       ]
+      },
+      "breathing": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "cycle": 3000,
+       "colors": [
+        {
+         "hold": 10,
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "hold": 10,
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        }
+       ]
+      },
+      "pulse": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "cycle": 12000,
+       "count": 7,
+       "on_hold": 10,
+       "off_hold": 10,
+       "background": {
+        "brightness": 255,
+        "color": [
+         0,
+         0,
+         0
+        ]
+       },
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "spiral": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "direction": 255,
+       "cycle": 3000,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "wave": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "direction": 255,
+       "cycle": 3000,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "trigger": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "submode": 255,
+       "shift": 100,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "stars": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "cycle": 2000,
+       "brightness": 255
+      }
+     }
+    },
+    "screen": {
+     "color": {
+      "brightness": 255,
+      "color": [
+       0,
+       0,
+       0
+      ]
+     },
+     "apps": 47
+    },
+    "game_keys": 255
+   }
+  },
+  "5": {
+   "name": "DEFAULT 5",
+   "keys": {
+    "base": {
+     "gpc": {
+      "own": "game-mode"
+     },
+     "esc": {
+      "key": "Escape"
+     },
+     "f1": {
+      "key": "F1"
+     },
+     "f2": {
+      "key": "F2"
+     },
+     "f3": {
+      "key": "F3"
+     },
+     "f4": {
+      "key": "F4"
+     },
+     "f5": {
+      "key": "F5"
+     },
+     "f6": {
+      "key": "F6"
+     },
+     "f7": {
+      "key": "F7"
+     },
+     "f8": {
+      "key": "F8"
+     },
+     "f9": {
+      "key": "F9"
+     },
+     "f10": {
+      "key": "F10"
+     },
+     "f11": {
+      "key": "F11"
+     },
+     "f12": {
+      "key": "F12"
+     },
+     "print-screen": {
+      "key": "PrintScreen"
+     },
+     "scroll-lock": {
+      "key": "ScrollLock"
+     },
+     "pause": {
+      "key": "Pause"
+     },
+     "stop": {
+      "media": "Stop"
+     },
+     "previous": {
+      "media": "Previous"
+     },
+     "play": {
+      "media": "PlayPause"
+     },
+     "next": {
+      "media": "Next"
+     },
+     "e1": {
+      "off": true
+     },
+     "grave": {
+      "key": "Grave"
+     },
+     "1": {
+      "key": "1"
+     },
+     "2": {
+      "key": "2"
+     },
+     "3": {
+      "key": "3"
+     },
+     "4": {
+      "key": "4"
+     },
+     "5": {
+      "key": "5"
+     },
+     "6": {
+      "key": "6"
+     },
+     "7": {
+      "key": "7"
+     },
+     "8": {
+      "key": "8"
+     },
+     "9": {
+      "key": "9"
+     },
+     "0": {
+      "key": "0"
+     },
+     "minus": {
+      "key": "Minus"
+     },
+     "equals": {
+      "key": "Equal"
+     },
+     "backspace": {
+      "key": "Backspace"
+     },
+     "insert": {
+      "key": "Insert"
+     },
+     "home": {
+      "key": "Home"
+     },
+     "page-up": {
+      "key": "PageUp"
+     },
+     "num-lock": {
+      "key": "NumLock"
+     },
+     "keypad-slash": {
+      "key": "KeypadSlash"
+     },
+     "keypad-star": {
+      "key": "KeypadAsterisk"
+     },
+     "keypad-minus": {
+      "key": "KeypadMinus"
+     },
+     "e2": {
+      "off": true
+     },
+     "tab": {
+      "key": "Tab"
+     },
+     "q": {
+      "key": "Q"
+     },
+     "w": {
+      "key": "W"
+     },
+     "e": {
+      "key": "E"
+     },
+     "r": {
+      "key": "R"
+     },
+     "t": {
+      "key": "T"
+     },
+     "y": {
+      "key": "Y"
+     },
+     "u": {
+      "key": "U"
+     },
+     "i": {
+      "key": "I"
+     },
+     "o": {
+      "key": "O"
+     },
+     "p": {
+      "key": "P"
+     },
+     "left-bracket": {
+      "key": "LeftBracket"
+     },
+     "right-bracket": {
+      "key": "RightBracket"
+     },
+     "backslash": {
+      "key": "Backslash"
+     },
+     "delete": {
+      "key": "Delete"
+     },
+     "end": {
+      "key": "End"
+     },
+     "page-down": {
+      "key": "PageDown"
+     },
+     "keypad-7": {
+      "key": "Keypad7"
+     },
+     "keypad-8": {
+      "key": "Keypad8"
+     },
+     "keypad-9": {
+      "key": "Keypad9"
+     },
+     "keypad-plus": {
+      "key": "KeypadPlus"
+     },
+     "e3": {
+      "off": true
+     },
+     "caps-lock": {
+      "key": "CapsLock"
+     },
+     "a": {
+      "key": "A"
+     },
+     "s": {
+      "key": "S"
+     },
+     "d": {
+      "key": "D"
+     },
+     "f": {
+      "key": "F"
+     },
+     "g": {
+      "key": "G"
+     },
+     "h": {
+      "key": "H"
+     },
+     "j": {
+      "key": "J"
+     },
+     "k": {
+      "key": "K"
+     },
+     "l": {
+      "key": "L"
+     },
+     "semicolon": {
+      "key": "Semicolon"
+     },
+     "quote": {
+      "key": "Quote"
+     },
+     "enter": {
+      "key": "Enter"
+     },
+     "keypad-4": {
+      "key": "Keypad4"
+     },
+     "keypad-5": {
+      "key": "Keypad5"
+     },
+     "keypad-6": {
+      "key": "Keypad6"
+     },
+     "e4": {
+      "off": true
+     },
+     "left-shift": {
+      "key": "LeftShift"
+     },
+     "z": {
+      "key": "Z"
+     },
+     "x": {
+      "key": "X"
+     },
+     "c": {
+      "key": "C"
+     },
+     "v": {
+      "key": "V"
+     },
+     "b": {
+      "key": "B"
+     },
+     "n": {
+      "key": "N"
+     },
+     "m": {
+      "key": "M"
+     },
+     "comma": {
+      "key": "Comma"
+     },
+     "period": {
+      "key": "Period"
+     },
+     "slash": {
+      "key": "Slash"
+     },
+     "right-shift": {
+      "key": "RightShift"
+     },
+     "e6": {
+      "off": true
+     },
+     "up": {
+      "key": "ArrowUp"
+     },
+     "e7": {
+      "off": true
+     },
+     "keypad-1": {
+      "key": "Keypad1"
+     },
+     "keypad-2": {
+      "key": "Keypad2"
+     },
+     "keypad-3": {
+      "key": "Keypad3"
+     },
+     "keypad-enter": {
+      "key": "KeypadEnter"
+     },
+     "e5": {
+      "off": true
+     },
+     "left-ctrl": {
+      "key": "LeftCtrl"
+     },
+     "fn": {
+      "key": "LeftMeta"
+     },
+     "left-alt": {
+      "key": "LeftAlt"
+     },
+     "space": {
+      "key": "Space"
+     },
+     "right-alt": {
+      "key": "RightAlt"
+     },
+     "win": {
+      "fn": true
+     },
+     "menu": {
+      "key": "Menu"
+     },
+     "right-ctrl": {
+      "key": "RightCtrl"
+     },
+     "left": {
+      "key": "ArrowLeft"
+     },
+     "down": {
+      "key": "ArrowDown"
+     },
+     "right": {
+      "key": "ArrowRight"
+     },
+     "keypad-0": {
+      "key": "Keypad0"
+     },
+     "keypad-dot": {
+      "key": "KeypadPeriod"
+     }
+    },
+    "fn": {
+     "gpc": {
+      "own": "game-mode"
+     },
+     "esc": {
+      "key": "Escape"
+     },
+     "f1": {
+      "key": "F1"
+     },
+     "f2": {
+      "key": "F2"
+     },
+     "f3": {
+      "key": "F3"
+     },
+     "f4": {
+      "key": "F4"
+     },
+     "f5": {
+      "key": "F5"
+     },
+     "f6": {
+      "key": "F6"
+     },
+     "f7": {
+      "key": "F7"
+     },
+     "f8": {
+      "key": "F8"
+     },
+     "f9": {
+      "key": "F9"
+     },
+     "f10": {
+      "key": "F10"
+     },
+     "f11": {
+      "key": "F11"
+     },
+     "f12": {
+      "key": "F12"
+     },
+     "print-screen": {
+      "key": "PrintScreen"
+     },
+     "scroll-lock": {
+      "key": "ScrollLock"
+     },
+     "pause": {
+      "key": "Pause"
+     },
+     "stop": {
+      "media": "Stop"
+     },
+     "previous": {
+      "media": "Previous"
+     },
+     "play": {
+      "media": "PlayPause"
+     },
+     "next": {
+      "media": "Next"
+     },
+     "e1": {
+      "off": true
+     },
+     "grave": {
+      "key": "Grave"
+     },
+     "1": {
+      "key": "1"
+     },
+     "2": {
+      "key": "2"
+     },
+     "3": {
+      "key": "3"
+     },
+     "4": {
+      "key": "4"
+     },
+     "5": {
+      "key": "5"
+     },
+     "6": {
+      "key": "6"
+     },
+     "7": {
+      "key": "7"
+     },
+     "8": {
+      "key": "8"
+     },
+     "9": {
+      "key": "9"
+     },
+     "0": {
+      "key": "0"
+     },
+     "minus": {
+      "key": "Minus"
+     },
+     "equals": {
+      "key": "Equal"
+     },
+     "backspace": {
+      "key": "Backspace"
+     },
+     "insert": {
+      "key": "Insert"
+     },
+     "home": {
+      "key": "Home"
+     },
+     "page-up": {
+      "key": "PageUp"
+     },
+     "num-lock": {
+      "key": "NumLock"
+     },
+     "keypad-slash": {
+      "key": "KeypadSlash"
+     },
+     "keypad-star": {
+      "key": "KeypadAsterisk"
+     },
+     "keypad-minus": {
+      "key": "KeypadMinus"
+     },
+     "e2": {
+      "off": true
+     },
+     "tab": {
+      "key": "Tab"
+     },
+     "q": {
+      "key": "Q"
+     },
+     "w": {
+      "key": "W"
+     },
+     "e": {
+      "key": "E"
+     },
+     "r": {
+      "key": "R"
+     },
+     "t": {
+      "key": "T"
+     },
+     "y": {
+      "key": "Y"
+     },
+     "u": {
+      "key": "U"
+     },
+     "i": {
+      "key": "I"
+     },
+     "o": {
+      "key": "O"
+     },
+     "p": {
+      "key": "P"
+     },
+     "left-bracket": {
+      "key": "LeftBracket"
+     },
+     "right-bracket": {
+      "key": "RightBracket"
+     },
+     "backslash": {
+      "key": "Backslash"
+     },
+     "delete": {
+      "key": "Delete"
+     },
+     "end": {
+      "key": "End"
+     },
+     "page-down": {
+      "key": "PageDown"
+     },
+     "keypad-7": {
+      "key": "Keypad7"
+     },
+     "keypad-8": {
+      "key": "Keypad8"
+     },
+     "keypad-9": {
+      "key": "Keypad9"
+     },
+     "keypad-plus": {
+      "key": "KeypadPlus"
+     },
+     "e3": {
+      "off": true
+     },
+     "caps-lock": {
+      "key": "CapsLock"
+     },
+     "a": {
+      "key": "A"
+     },
+     "s": {
+      "key": "S"
+     },
+     "d": {
+      "key": "D"
+     },
+     "f": {
+      "key": "F"
+     },
+     "g": {
+      "key": "G"
+     },
+     "h": {
+      "key": "H"
+     },
+     "j": {
+      "key": "J"
+     },
+     "k": {
+      "key": "K"
+     },
+     "l": {
+      "key": "L"
+     },
+     "semicolon": {
+      "key": "Semicolon"
+     },
+     "quote": {
+      "key": "Quote"
+     },
+     "enter": {
+      "key": "Enter"
+     },
+     "keypad-4": {
+      "key": "Keypad4"
+     },
+     "keypad-5": {
+      "key": "Keypad5"
+     },
+     "keypad-6": {
+      "key": "Keypad6"
+     },
+     "e4": {
+      "off": true
+     },
+     "left-shift": {
+      "key": "LeftShift"
+     },
+     "z": {
+      "key": "Z"
+     },
+     "x": {
+      "key": "X"
+     },
+     "c": {
+      "key": "C"
+     },
+     "v": {
+      "key": "V"
+     },
+     "b": {
+      "key": "B"
+     },
+     "n": {
+      "key": "N"
+     },
+     "m": {
+      "key": "M"
+     },
+     "comma": {
+      "key": "Comma"
+     },
+     "period": {
+      "key": "Period"
+     },
+     "slash": {
+      "key": "Slash"
+     },
+     "right-shift": {
+      "key": "RightShift"
+     },
+     "e6": {
+      "off": true
+     },
+     "up": {
+      "key": "ArrowUp"
+     },
+     "e7": {
+      "off": true
+     },
+     "keypad-1": {
+      "key": "Keypad1"
+     },
+     "keypad-2": {
+      "key": "Keypad2"
+     },
+     "keypad-3": {
+      "key": "Keypad3"
+     },
+     "keypad-enter": {
+      "key": "KeypadEnter"
+     },
+     "e5": {
+      "off": true
+     },
+     "left-ctrl": {
+      "key": "LeftCtrl"
+     },
+     "fn": {
+      "key": "LeftMeta"
+     },
+     "left-alt": {
+      "key": "LeftAlt"
+     },
+     "space": {
+      "key": "Space"
+     },
+     "right-alt": {
+      "key": "RightAlt"
+     },
+     "win": {
+      "fn": true
+     },
+     "menu": {
+      "key": "Menu"
+     },
+     "right-ctrl": {
+      "key": "RightCtrl"
+     },
+     "left": {
+      "key": "ArrowLeft"
+     },
+     "down": {
+      "key": "ArrowDown"
+     },
+     "right": {
+      "key": "ArrowRight"
+     },
+     "keypad-0": {
+      "key": "Keypad0"
+     },
+     "keypad-dot": {
+      "key": "KeypadPeriod"
+     }
+    }
+   },
+   "lighting": {
+    "keys": {
+     "effect": "off",
+     "sub": 0,
+     "effects": {
+      "static": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "brightness": 255,
+       "color": [
+        255,
+        0,
+        0
+       ]
+      },
+      "breathing": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "cycle": 3000,
+       "colors": [
+        {
+         "hold": 10,
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "hold": 10,
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        }
+       ]
+      },
+      "pulse": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "cycle": 12000,
+       "count": 7,
+       "on_hold": 10,
+       "off_hold": 10,
+       "background": {
+        "brightness": 255,
+        "color": [
+         0,
+         0,
+         0
+        ]
+       },
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "spiral": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "direction": 255,
+       "cycle": 3000,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "wave": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "direction": 255,
+       "cycle": 3000,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "trigger": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "random": 0,
+       "submode": 255,
+       "shift": 100,
+       "count": 7,
+       "colors": [
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          128,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          255,
+          0
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          0,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          102,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          0,
+          255
+         ]
+        },
+        {
+         "brightness": 255,
+         "color": [
+          255,
+          255,
+          255
+         ]
+        }
+       ]
+      },
+      "stars": {
+       "zone": 128,
+       "start": 0,
+       "stop": 0,
+       "cycle": 2000,
+       "brightness": 255
+      }
+     }
+    },
+    "screen": {
+     "color": {
+      "brightness": 255,
+      "color": [
+       0,
+       0,
+       0
+      ]
+     },
+     "apps": 47
+    },
+    "game_keys": 255
+   }
+  }
+ },
+ "factory": {
+  "keys": {
+   "base": {
+    "gpc": {
+     "own": "game-mode"
+    },
+    "esc": {
+     "key": "Escape"
+    },
+    "f1": {
+     "key": "F1"
+    },
+    "f2": {
+     "key": "F2"
+    },
+    "f3": {
+     "key": "F3"
+    },
+    "f4": {
+     "key": "F4"
+    },
+    "f5": {
+     "key": "F5"
+    },
+    "f6": {
+     "key": "F6"
+    },
+    "f7": {
+     "key": "F7"
+    },
+    "f8": {
+     "key": "F8"
+    },
+    "f9": {
+     "key": "F9"
+    },
+    "f10": {
+     "key": "F10"
+    },
+    "f11": {
+     "key": "F11"
+    },
+    "f12": {
+     "key": "F12"
+    },
+    "print-screen": {
+     "key": "PrintScreen"
+    },
+    "scroll-lock": {
+     "key": "ScrollLock"
+    },
+    "pause": {
+     "key": "Pause"
+    },
+    "stop": {
+     "media": "Stop"
+    },
+    "previous": {
+     "media": "Previous"
+    },
+    "play": {
+     "media": "PlayPause"
+    },
+    "next": {
+     "media": "Next"
+    },
+    "e1": {
+     "off": true
+    },
+    "grave": {
+     "key": "Grave"
+    },
+    "1": {
+     "key": "1"
+    },
+    "2": {
+     "key": "2"
+    },
+    "3": {
+     "key": "3"
+    },
+    "4": {
+     "key": "4"
+    },
+    "5": {
+     "key": "5"
+    },
+    "6": {
+     "key": "6"
+    },
+    "7": {
+     "key": "7"
+    },
+    "8": {
+     "key": "8"
+    },
+    "9": {
+     "key": "9"
+    },
+    "0": {
+     "key": "0"
+    },
+    "minus": {
+     "key": "Minus"
+    },
+    "equals": {
+     "key": "Equal"
+    },
+    "backspace": {
+     "key": "Backspace"
+    },
+    "insert": {
+     "key": "Insert"
+    },
+    "home": {
+     "key": "Home"
+    },
+    "page-up": {
+     "key": "PageUp"
+    },
+    "num-lock": {
+     "key": "NumLock"
+    },
+    "keypad-slash": {
+     "key": "KeypadSlash"
+    },
+    "keypad-star": {
+     "key": "KeypadAsterisk"
+    },
+    "keypad-minus": {
+     "key": "KeypadMinus"
+    },
+    "e2": {
+     "off": true
+    },
+    "tab": {
+     "key": "Tab"
+    },
+    "q": {
+     "key": "Q"
+    },
+    "w": {
+     "key": "W"
+    },
+    "e": {
+     "key": "E"
+    },
+    "r": {
+     "key": "R"
+    },
+    "t": {
+     "key": "T"
+    },
+    "y": {
+     "key": "Y"
+    },
+    "u": {
+     "key": "U"
+    },
+    "i": {
+     "key": "I"
+    },
+    "o": {
+     "key": "O"
+    },
+    "p": {
+     "key": "P"
+    },
+    "left-bracket": {
+     "key": "LeftBracket"
+    },
+    "right-bracket": {
+     "key": "RightBracket"
+    },
+    "backslash": {
+     "key": "Backslash"
+    },
+    "delete": {
+     "key": "Delete"
+    },
+    "end": {
+     "key": "End"
+    },
+    "page-down": {
+     "key": "PageDown"
+    },
+    "keypad-7": {
+     "key": "Keypad7"
+    },
+    "keypad-8": {
+     "key": "Keypad8"
+    },
+    "keypad-9": {
+     "key": "Keypad9"
+    },
+    "keypad-plus": {
+     "key": "KeypadPlus"
+    },
+    "e3": {
+     "off": true
+    },
+    "caps-lock": {
+     "key": "CapsLock"
+    },
+    "a": {
+     "key": "A"
+    },
+    "s": {
+     "key": "S"
+    },
+    "d": {
+     "key": "D"
+    },
+    "f": {
+     "key": "F"
+    },
+    "g": {
+     "key": "G"
+    },
+    "h": {
+     "key": "H"
+    },
+    "j": {
+     "key": "J"
+    },
+    "k": {
+     "key": "K"
+    },
+    "l": {
+     "key": "L"
+    },
+    "semicolon": {
+     "key": "Semicolon"
+    },
+    "quote": {
+     "key": "Quote"
+    },
+    "enter": {
+     "key": "Enter"
+    },
+    "keypad-4": {
+     "key": "Keypad4"
+    },
+    "keypad-5": {
+     "key": "Keypad5"
+    },
+    "keypad-6": {
+     "key": "Keypad6"
+    },
+    "e4": {
+     "off": true
+    },
+    "left-shift": {
+     "key": "LeftShift"
+    },
+    "z": {
+     "key": "Z"
+    },
+    "x": {
+     "key": "X"
+    },
+    "c": {
+     "key": "C"
+    },
+    "v": {
+     "key": "V"
+    },
+    "b": {
+     "key": "B"
+    },
+    "n": {
+     "key": "N"
+    },
+    "m": {
+     "key": "M"
+    },
+    "comma": {
+     "key": "Comma"
+    },
+    "period": {
+     "key": "Period"
+    },
+    "slash": {
+     "key": "Slash"
+    },
+    "right-shift": {
+     "key": "RightShift"
+    },
+    "e6": {
+     "off": true
+    },
+    "up": {
+     "key": "ArrowUp"
+    },
+    "e7": {
+     "off": true
+    },
+    "keypad-1": {
+     "key": "Keypad1"
+    },
+    "keypad-2": {
+     "key": "Keypad2"
+    },
+    "keypad-3": {
+     "key": "Keypad3"
+    },
+    "keypad-enter": {
+     "key": "KeypadEnter"
+    },
+    "e5": {
+     "off": true
+    },
+    "left-ctrl": {
+     "key": "LeftCtrl"
+    },
+    "fn": {
+     "fn": true
+    },
+    "left-alt": {
+     "key": "LeftAlt"
+    },
+    "space": {
+     "key": "Space"
+    },
+    "right-alt": {
+     "key": "RightAlt"
+    },
+    "win": {
+     "key": "RightMeta"
+    },
+    "menu": {
+     "key": "Menu"
+    },
+    "right-ctrl": {
+     "key": "RightCtrl"
+    },
+    "left": {
+     "key": "ArrowLeft"
+    },
+    "down": {
+     "key": "ArrowDown"
+    },
+    "right": {
+     "key": "ArrowRight"
+    },
+    "keypad-0": {
+     "key": "Keypad0"
+    },
+    "keypad-dot": {
+     "key": "KeypadPeriod"
+    }
+   },
+   "fn": {
+    "gpc": {
+     "own": "game-mode"
+    },
+    "esc": {
+     "key": "Escape"
+    },
+    "f1": {
+     "key": "F1"
+    },
+    "f2": {
+     "key": "F2"
+    },
+    "f3": {
+     "key": "F3"
+    },
+    "f4": {
+     "key": "F4"
+    },
+    "f5": {
+     "key": "F5"
+    },
+    "f6": {
+     "key": "F6"
+    },
+    "f7": {
+     "key": "F7"
+    },
+    "f8": {
+     "key": "F8"
+    },
+    "f9": {
+     "key": "F9"
+    },
+    "f10": {
+     "key": "F10"
+    },
+    "f11": {
+     "key": "F11"
+    },
+    "f12": {
+     "key": "F12"
+    },
+    "print-screen": {
+     "key": "PrintScreen"
+    },
+    "scroll-lock": {
+     "key": "ScrollLock"
+    },
+    "pause": {
+     "key": "Pause"
+    },
+    "stop": {
+     "media": "Stop"
+    },
+    "previous": {
+     "media": "Previous"
+    },
+    "play": {
+     "media": "PlayPause"
+    },
+    "next": {
+     "media": "Next"
+    },
+    "e1": {
+     "off": true
+    },
+    "grave": {
+     "key": "Grave"
+    },
+    "1": {
+     "key": "1"
+    },
+    "2": {
+     "key": "2"
+    },
+    "3": {
+     "key": "3"
+    },
+    "4": {
+     "key": "4"
+    },
+    "5": {
+     "key": "5"
+    },
+    "6": {
+     "key": "6"
+    },
+    "7": {
+     "key": "7"
+    },
+    "8": {
+     "key": "8"
+    },
+    "9": {
+     "key": "9"
+    },
+    "0": {
+     "key": "0"
+    },
+    "minus": {
+     "key": "Minus"
+    },
+    "equals": {
+     "key": "Equal"
+    },
+    "backspace": {
+     "key": "Backspace"
+    },
+    "insert": {
+     "key": "Insert"
+    },
+    "home": {
+     "key": "Home"
+    },
+    "page-up": {
+     "key": "PageUp"
+    },
+    "num-lock": {
+     "key": "NumLock"
+    },
+    "keypad-slash": {
+     "key": "KeypadSlash"
+    },
+    "keypad-star": {
+     "key": "KeypadAsterisk"
+    },
+    "keypad-minus": {
+     "key": "KeypadMinus"
+    },
+    "e2": {
+     "off": true
+    },
+    "tab": {
+     "key": "Tab"
+    },
+    "q": {
+     "key": "Q"
+    },
+    "w": {
+     "key": "W"
+    },
+    "e": {
+     "key": "E"
+    },
+    "r": {
+     "key": "R"
+    },
+    "t": {
+     "key": "T"
+    },
+    "y": {
+     "key": "Y"
+    },
+    "u": {
+     "key": "U"
+    },
+    "i": {
+     "key": "I"
+    },
+    "o": {
+     "key": "O"
+    },
+    "p": {
+     "key": "P"
+    },
+    "left-bracket": {
+     "key": "LeftBracket"
+    },
+    "right-bracket": {
+     "key": "RightBracket"
+    },
+    "backslash": {
+     "key": "Backslash"
+    },
+    "delete": {
+     "key": "Delete"
+    },
+    "end": {
+     "key": "End"
+    },
+    "page-down": {
+     "key": "PageDown"
+    },
+    "keypad-7": {
+     "key": "Keypad7"
+    },
+    "keypad-8": {
+     "key": "Keypad8"
+    },
+    "keypad-9": {
+     "key": "Keypad9"
+    },
+    "keypad-plus": {
+     "key": "KeypadPlus"
+    },
+    "e3": {
+     "off": true
+    },
+    "caps-lock": {
+     "key": "CapsLock"
+    },
+    "a": {
+     "key": "A"
+    },
+    "s": {
+     "key": "S"
+    },
+    "d": {
+     "key": "D"
+    },
+    "f": {
+     "key": "F"
+    },
+    "g": {
+     "key": "G"
+    },
+    "h": {
+     "key": "H"
+    },
+    "j": {
+     "key": "J"
+    },
+    "k": {
+     "key": "K"
+    },
+    "l": {
+     "key": "L"
+    },
+    "semicolon": {
+     "key": "Semicolon"
+    },
+    "quote": {
+     "key": "Quote"
+    },
+    "enter": {
+     "key": "Enter"
+    },
+    "keypad-4": {
+     "key": "Keypad4"
+    },
+    "keypad-5": {
+     "key": "Keypad5"
+    },
+    "keypad-6": {
+     "key": "Keypad6"
+    },
+    "e4": {
+     "off": true
+    },
+    "left-shift": {
+     "key": "LeftShift"
+    },
+    "z": {
+     "key": "Z"
+    },
+    "x": {
+     "key": "X"
+    },
+    "c": {
+     "key": "C"
+    },
+    "v": {
+     "key": "V"
+    },
+    "b": {
+     "key": "B"
+    },
+    "n": {
+     "key": "N"
+    },
+    "m": {
+     "key": "M"
+    },
+    "comma": {
+     "key": "Comma"
+    },
+    "period": {
+     "key": "Period"
+    },
+    "slash": {
+     "key": "Slash"
+    },
+    "right-shift": {
+     "key": "RightShift"
+    },
+    "e6": {
+     "off": true
+    },
+    "up": {
+     "key": "ArrowUp"
+    },
+    "e7": {
+     "off": true
+    },
+    "keypad-1": {
+     "key": "Keypad1"
+    },
+    "keypad-2": {
+     "key": "Keypad2"
+    },
+    "keypad-3": {
+     "key": "Keypad3"
+    },
+    "keypad-enter": {
+     "key": "KeypadEnter"
+    },
+    "e5": {
+     "off": true
+    },
+    "left-ctrl": {
+     "key": "LeftCtrl"
+    },
+    "fn": {
+     "fn": true
+    },
+    "left-alt": {
+     "key": "LeftAlt"
+    },
+    "space": {
+     "key": "Space"
+    },
+    "right-alt": {
+     "key": "RightAlt"
+    },
+    "win": {
+     "key": "RightMeta"
+    },
+    "menu": {
+     "key": "Menu"
+    },
+    "right-ctrl": {
+     "key": "RightCtrl"
+    },
+    "left": {
+     "key": "ArrowLeft"
+    },
+    "down": {
+     "key": "ArrowDown"
+    },
+    "right": {
+     "key": "ArrowRight"
+    },
+    "keypad-0": {
+     "key": "Keypad0"
+    },
+    "keypad-dot": {
+     "key": "KeypadPeriod"
+    }
+   }
+  },
+  "lighting": {
+   "keys": {
+    "effect": "spiral",
+    "sub": 0,
+    "effects": {
+     "static": {
+      "zone": 128,
+      "start": 0,
+      "stop": 0,
+      "brightness": 255,
+      "color": [
+       255,
+       0,
+       0
+      ]
+     },
+     "breathing": {
+      "zone": 128,
+      "start": 0,
+      "stop": 0,
+      "random": 0,
+      "cycle": 3000,
+      "colors": [
+       {
+        "hold": 10,
+        "brightness": 255,
+        "color": [
+         255,
+         0,
+         0
+        ]
+       },
+       {
+        "hold": 10,
+        "brightness": 255,
+        "color": [
+         0,
+         255,
+         0
+        ]
+       }
+      ]
+     },
+     "pulse": {
+      "zone": 128,
+      "start": 0,
+      "stop": 0,
+      "random": 0,
+      "cycle": 12000,
+      "count": 7,
+      "on_hold": 10,
+      "off_hold": 10,
+      "background": {
+       "brightness": 255,
+       "color": [
+        0,
+        0,
+        0
+       ]
+      },
+      "colors": [
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         0,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         128,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         255,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         0,
+         255,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         0,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         102,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         255,
+         255
+        ]
+       }
+      ]
+     },
+     "spiral": {
+      "zone": 128,
+      "start": 0,
+      "stop": 0,
+      "direction": 255,
+      "cycle": 3000,
+      "count": 7,
+      "colors": [
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         0,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         128,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         255,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         0,
+         255,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         0,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         102,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         255,
+         255
+        ]
+       }
+      ]
+     },
+     "wave": {
+      "zone": 128,
+      "start": 0,
+      "stop": 0,
+      "random": 0,
+      "direction": 255,
+      "cycle": 3000,
+      "count": 7,
+      "colors": [
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         0,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         128,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         255,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         0,
+         255,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         0,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         102,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         255,
+         255
+        ]
+       }
+      ]
+     },
+     "trigger": {
+      "zone": 128,
+      "start": 0,
+      "stop": 0,
+      "random": 0,
+      "submode": 255,
+      "shift": 100,
+      "count": 7,
+      "colors": [
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         0,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         128,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         255,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         0,
+         255,
+         0
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         0,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         102,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         0,
+         255
+        ]
+       },
+       {
+        "brightness": 255,
+        "color": [
+         255,
+         255,
+         255
+        ]
+       }
+      ]
+     },
+     "stars": {
+      "zone": 128,
+      "start": 0,
+      "stop": 0,
+      "cycle": 2000,
+      "brightness": 255
+     }
+    }
+   },
+   "screen": {
+    "color": {
+     "brightness": 255,
+     "color": [
+      255,
+      255,
+      255
+     ]
+    },
+    "apps": 255
+   },
+   "game_keys": 191
+  }
+ },
+ "macros": {
+  "2": {
+   "name": "KDE Switch Desktop Left",
+   "editable": true,
+   "repeat": 0,
+   "unit": 1,
+   "length": 24,
+   "steps": [
+    {
+     "key": "LeftCtrl",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "ArrowLeft",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftCtrl",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "ArrowLeft",
+     "down": false,
+     "after": 0
+    }
+   ],
+   "run": 9
+  },
+  "3": {
+   "name": "KDE Switch Desktop Right",
+   "editable": true,
+   "repeat": 0,
+   "unit": 1,
+   "length": 24,
+   "steps": [
+    {
+     "key": "LeftCtrl",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "ArrowRight",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftCtrl",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "ArrowRight",
+     "down": false,
+     "after": 0
+    }
+   ],
+   "run": 9
+  },
+  "4": {
+   "name": "KDE Switch Desktop Up",
+   "editable": true,
+   "repeat": 0,
+   "unit": 1,
+   "length": 24,
+   "steps": [
+    {
+     "key": "LeftCtrl",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "ArrowUp",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftCtrl",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "ArrowUp",
+     "down": false,
+     "after": 0
+    }
+   ],
+   "run": 9
+  },
+  "5": {
+   "name": "KDE Switch Desktop Down",
+   "editable": true,
+   "repeat": 0,
+   "unit": 1,
+   "length": 24,
+   "steps": [
+    {
+     "key": "LeftCtrl",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "ArrowDown",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftCtrl",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "ArrowDown",
+     "down": false,
+     "after": 0
+    }
+   ],
+   "run": 9
+  },
+  "6": {
+   "name": "KDE Brightness Up",
+   "editable": true,
+   "repeat": 0,
+   "unit": 1,
+   "length": 24,
+   "steps": [
+    {
+     "key": "LeftCtrl",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "F12",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftCtrl",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "F12",
+     "down": false,
+     "after": 0
+    }
+   ],
+   "run": 9
+  },
+  "7": {
+   "name": "KDE Brightness Down",
+   "editable": true,
+   "repeat": 0,
+   "unit": 1,
+   "length": 24,
+   "steps": [
+    {
+     "key": "LeftCtrl",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "F11",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftCtrl",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "F11",
+     "down": false,
+     "after": 0
+    }
+   ],
+   "run": 9
+  },
+  "8": {
+   "name": "KDE Maximize Window",
+   "editable": true,
+   "repeat": 0,
+   "unit": 1,
+   "length": 16,
+   "steps": [
+    {
+     "key": "LeftMeta",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "PageUp",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "PageUp",
+     "down": false,
+     "after": 0
+    }
+   ],
+   "run": 9
+  },
+  "9": {
+   "name": "KDE Minimize Window",
+   "editable": true,
+   "repeat": 0,
+   "unit": 1,
+   "length": 16,
+   "steps": [
+    {
+     "key": "LeftMeta",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "PageDown",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "PageDown",
+     "down": false,
+     "after": 0
+    }
+   ],
+   "run": 9
+  },
+  "10": {
+   "name": "KDE Microphone Mute",
+   "editable": true,
+   "repeat": 0,
+   "unit": 1,
+   "length": 20,
+   "steps": [
+    {
+     "key": "LeftMeta",
+     "down": true,
+     "after": 0
+    },
+    {
+     "media": "Mute",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "LeftMeta",
+     "down": false,
+     "after": 0
+    },
+    {
+     "media": "Mute",
+     "down": false,
+     "after": 0
+    }
+   ],
+   "run": 9
+  }
+ },
+ "live": {
+  "mode": null,
+  "error": null
+ }
+}

@@ -27,6 +27,15 @@ This is where they live in this repository.
   the app runs (`cores::home()`): `ECTOMATTER_PACKAGES`, else the source
   folder above the program, else `share/ectomatter` beside its folder, else
   `XDG_DATA_DIRS`.
+- **Render tests.** `cargo test --release -p ectomatter --test renders`
+  (run by `tools/boundaries.sh` too): every page drawn offscreen on a made-up
+  desk (`apps/ectomatter/tests/renders/desk/`, a computer described in a
+  folder, a made-up Steam, the time fixed, no session) and held pixel for
+  pixel to `apps/ectomatter/tests/renders/approved/`, and every page drawn
+  twice the same. A page that changes writes its picture, where it differs
+  and its log to `target/renders/`; when the change is meant, look at them,
+  then `ECTOMATTER_APPROVE=1` the same command. Nothing of Grant's goes into
+  the desk or the pictures. `ECTOMATTER_RENDERS=name,name` runs only those.
 - **Log.** `~/.local/state/com.ectonomic.ectomatter/ectomatter.log`
   (`$XDG_STATE_HOME`), the run before's as `ectomatter.log.1`: everything
   the app writes to stderr, stamped. Snapshots and `--read-state` don't write

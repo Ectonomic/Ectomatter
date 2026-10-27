@@ -591,6 +591,13 @@ mod tests {
         fn fetch(&self, url: &str, _: std::time::Duration) -> Result<String, String> {
             Err(format!("this test’s computer is offline ({url})"))
         }
+        // (its own addresses reach the stand-ins the tests start, fake_openrgb's)
+        fn connect(&self, at: std::net::SocketAddr, timeout: std::time::Duration) -> Result<std::net::TcpStream, String> {
+            if !at.ip().is_loopback() {
+                return Err(format!("this test’s computer is offline ({at})"));
+            }
+            std::net::TcpStream::connect_timeout(&at, timeout).map_err(|e| e.to_string())
+        }
     }
 
     /// One package that comes with Ectomatter, started alone.

@@ -1451,8 +1451,7 @@ pub struct Moment {
 
 impl Moment {
     pub fn now() -> Moment {
-        let secs = unsafe { libc::time(std::ptr::null_mut()) };
-        Moment::at(secs)
+        Moment::at(crate::clock::now().as_secs() as libc::time_t)
     }
 
     /// The local time at a moment, in seconds since 1970.
@@ -1521,7 +1520,7 @@ fn hours(m: u64) -> String {
 }
 
 fn now_secs() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    crate::clock::now().as_secs()
 }
 
 fn fahrenheit(c: f64) -> f64 {

@@ -7,9 +7,17 @@
 
 use serde_json::{Value, json};
 
-/// A USB device by its ids.
-#[cfg(target_os = "linux")]
+/// A USB device by its ids: as the computer described for a snapshot has it,
+/// if there is one (computer::Described), else as this one has it.
 pub fn usb(vid: u16, pid: u16) -> Value {
+    match crate::computer::described() {
+        Some(c) => c.usb(vid, pid),
+        None => this_computers(vid, pid),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn this_computers(vid: u16, pid: u16) -> Value {
     use std::fs;
     let read = |p: &str| fs::read_to_string(p).map(|s| s.trim().to_string()).unwrap_or_default();
 
@@ -73,6 +81,6 @@ fn program_name(pid: u32) -> String {
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn usb(_: u16, _: u16) -> Value {
+fn this_computers(_: u16, _: u16) -> Value {
     json!({ "present": null, "reachable": null, "holders": [] })
 }
