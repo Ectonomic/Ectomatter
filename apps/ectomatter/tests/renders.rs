@@ -54,6 +54,8 @@ const SET_UP: &[Case] = &[
     Case { name: "home", size: WIDE, set: &[("ECTOMATTER_PLACE", "home")] },
     Case { name: "home-edit", size: WIDE, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_DESK", "edit")] },
     Case { name: "kb-keys", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard")] },
+    // (read, plugged in, and then not answering a read)
+    Case { name: "kb-stopped", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_UNREAD", "no reply")] },
     Case { name: "kb-light", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")] },
     Case { name: "kb-screen", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "440,63")] },
     Case { name: "kb-settings", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "522,63")] },

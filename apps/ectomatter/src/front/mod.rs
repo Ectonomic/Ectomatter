@@ -869,6 +869,10 @@ pub struct Front {
     /// needed), and where its steps' jobs come back to be done (main.rs)
     typist: Option<crate::typist::Player>,
     pub macro_jobs: Option<crate::shell::Sender<String>>,
+    /// whether the keyboard's core says the keyboard is plugged in (kept by the
+    /// keyboard's thread), and whether it did when last looked at
+    pub kb_there: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    kb_was_there: bool,
     /// a slider set to Nothing because the other took its job: the job it had
     idled: Vec<Option<String>>,
     last_sliders: Option<serde_json::Value>,
@@ -1355,6 +1359,8 @@ impl Front {
             game_now: None,
             typist: None,
             macro_jobs: None,
+            kb_there: None,
+            kb_was_there: true,
             idled,
             last_sliders: None,
             held: None,
@@ -1541,19 +1547,7 @@ impl Front {
             }
             device::Heard::State(Err(e)) => {
                 self.failed_at = Some(Instant::now());
-                if self.page.dev.is_none() {
-                    // (why, as the system shows the keyboard: not plugged in, not to be
-                    // opened, or there and not answering)
-                    let usb = crate::cores::keyboard().and_then(|k| self.packages.iter().find(|p| p.id() == k.id)).and_then(|p| p.manifest.usb_ids());
-                    let st = usb.map(|(v, p)| crate::devices::usb(v, p)).unwrap_or_default();
-                    let (title, text, bad) = unread(&st, &e);
-                    self.ui.set_conn_state(2);
-                    self.ui.set_conn_text(title.as_str().into());
-                    // (2 says it in the color of what's wrong; 3 in the page's own)
-                    self.ui.set_boot(if bad { 2 } else { 3 });
-                    self.ui.set_boot_title(title.into());
-                    self.ui.set_boot_text(text.into());
-                }
+                self.say_unread(&e);
             }
             device::Heard::Saved(n, r) => {
                 self.page.busy = false;
@@ -1659,8 +1653,35 @@ impl Front {
         self.refresh();
     }
 
+    /// The keyboard couldn't be read (`e`, its core's words), or is gone since it
+    /// was: its page says why, as the system shows the keyboard (not plugged in,
+    /// not to be opened, or there and not answering), in place of what's on it,
+    /// till it's read again.
+    fn say_unread(&mut self, e: &str) {
+        let usb = crate::cores::keyboard().and_then(|k| self.packages.iter().find(|p| p.id() == k.id)).and_then(|p| p.manifest.usb_ids());
+        let st = usb.map(|(v, p)| crate::devices::usb(v, p)).unwrap_or_default();
+        let (title, text, bad) = unread(&st, e);
+        self.ui.set_conn_state(2);
+        self.ui.set_conn_text(title.as_str().into());
+        // (2 says it in the color of what's wrong; 3 in the page's own)
+        self.ui.set_boot(if bad { 2 } else { 3 });
+        self.ui.set_boot_title(title.into());
+        self.ui.set_boot_text(text.into());
+    }
+
     /// Try the keyboard again a few seconds after it could not be read.
     pub fn retry(&mut self) {
+        // (one read before and unplugged since says so; plugged in again, it's read again)
+        if let Some(there) = self.kb_there.as_ref().map(|t| t.load(std::sync::atomic::Ordering::Relaxed)) {
+            if there != self.kb_was_there {
+                self.kb_was_there = there;
+                if !there && self.controlled && self.page.dev.is_some() {
+                    self.say_unread("the keyboard isn’t connected");
+                } else if there && self.controlled {
+                    self.ask_kb(device::Ask::State);
+                }
+            }
+        }
         if self.failed_at.is_some_and(|t| t.elapsed() > Duration::from_secs(3)) {
             self.failed_at = None;
             self.ask_kb(device::Ask::State);

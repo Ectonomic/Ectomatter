@@ -188,13 +188,11 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   by the last of them then aborted the process. Both core dumps of
   2026-10-26 were this, in snapshots (one the stranger test's run that
   stopped silently); no test makes it happen on purpose.
-- A keyboard whose read fails says why only until it's been read once
-  (`front/mod.rs`, `Heard::State(Err)`, `unread`: not plugged in, not to
-  be opened, not answering): one read before and then unplugged, or
-  stopped answering, keeps its page as last read, with nothing saying so
-  but the dot. (A device never met has no button on the rail and no page:
-  `front/models.rs`, `met`; the first-run renders hold it, and `kb-unplugged`
-  holds the words for one met and unplugged.)
+- A keyboard read once and then unplugged says so when its core tells
+  `device/removed` (`front/mod.rs`, `retry`, the keyboard's thread's
+  `there`), and is read again when it tells `device/added`; no test unplugs
+  one (the renders draw a read that failed, `kb-unplugged` and `kb-stopped`,
+  not the core's telling).
 
 ## Before any repository goes public
 

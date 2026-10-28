@@ -13,8 +13,9 @@
 //! `ectomatter --snapshot FILE` draws one frame at 1440 x 940 without a
 //! window and saves the picture as raw ABGR16161616, for checking. It reads
 //! the keyboard's state from ECTOMATTER_STATE (a file the window saves
-//! into ECTOMATTER_DUMP when it reads the keyboard), or that the read failed
-//! with ECTOMATTER_UNREAD's words (the core's), clicks where
+//! into ECTOMATTER_DUMP when it reads the keyboard), and that a read after
+//! it, or the only one, failed with ECTOMATTER_UNREAD's words (the core's),
+//! clicks where
 //! ECTOMATTER_CLICKS says ("x,y;x,y", logical pixels) and types
 //! ECTOMATTER_TYPE, so each state of the page can be checked offscreen.
 //!
@@ -633,7 +634,9 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         // (as the keyboard's core reads it, device/read)
         let dev: serde_json::Value = serde_json::from_slice(&std::fs::read(state).expect("the saved state")).expect("the saved state as JSON");
         front.heard(device::Heard::State(Ok(dev)));
-    } else if let Ok(e) = std::env::var("ECTOMATTER_UNREAD") {
+    }
+    // (and then, or instead, a read that failed)
+    if let Ok(e) = std::env::var("ECTOMATTER_UNREAD") {
         front.heard(device::Heard::State(Err(e)));
     }
     // (the packages' first answers in: their devices, sections and readings)
