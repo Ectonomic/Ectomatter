@@ -194,7 +194,12 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   (`front/mod.rs`, `Heard::State(Err)`): the words are the old editor's, and
   nothing waits on the core's `device/added` to say it's unplugged. (A
   device never met has no button on the rail and no page: `front/models.rs`,
-  `met`; the first-run renders hold it.)
+  `met`; the first-run renders hold it.) The same words show for a keyboard
+  that is plugged in but doesn't answer: on 2026-10-27 the core told
+  `device/added` and heard its keys, but every request on its command
+  interface took the kernel's 5 seconds to fail, and the page said "Keyboard
+  not connected". Nothing tells a keyboard that isn't there from one that
+  isn't answering.
 
 ## Before any repository goes public
 
