@@ -79,7 +79,7 @@ when present.
 
 ## License
 
-Copyright (C) 2026 Grant Garrison.
+Copyright (C) 2026 Ectonomic LLC. Made by Grant Garrison and Claude.
 
 Ectomatter, its cores and its plugins are free software under the GNU
 General Public License, version 3 (`LICENSE`): you may share and change

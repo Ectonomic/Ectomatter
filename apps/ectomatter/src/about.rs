@@ -1,4 +1,4 @@
-//! Ectomatter's About, Settings' last section: its version, who it's by, its
+//! Ectomatter's About, Settings' last section: its version, who made it and whose it is, its
 //! license, and the notices of what it's built from and carries, each to read.
 //! These are the GPLv3's Appropriate Legal Notices (its section 0): a copyright
 //! notice, that it comes with no warranty, that it may be shared under the
@@ -10,7 +10,17 @@ use std::sync::{mpsc, OnceLock};
 /// Its version, as its manifest has it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Who Ectomatter is by, as REUSE.toml's first table says (every file is
+/// Who made Ectomatter, as its manifest names them: "A and B", "A, B and C".
+pub fn authors() -> String {
+    let names: Vec<&str> = env!("CARGO_PKG_AUTHORS").split(':').filter(|n| !n.is_empty()).collect();
+    match names.split_last() {
+        Some((last, [])) => last.to_string(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        None => String::new(),
+    }
+}
+
+/// Whose Ectomatter is, as REUSE.toml's first table says (every file is
 /// theirs unless a later table names it): its year and name.
 pub fn copyright() -> &'static str {
     // (the key split, so this file doesn't show another's work: tools/notices.py)
@@ -116,6 +126,11 @@ mod tests {
         let c = copyright();
         let year = c.split(' ').next().unwrap_or_default();
         assert!(year.len() == 4 && year.chars().all(|d| d.is_ascii_digit()) && c.len() > 5, "no copyright from REUSE.toml: {c:?}");
+    }
+
+    #[test]
+    fn its_authors_are_its_manifests() {
+        assert!(!authors().is_empty() && !authors().contains(':'), "{:?}", authors());
     }
 
     #[test]

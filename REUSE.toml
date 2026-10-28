@@ -10,7 +10,7 @@ version = 1
 
 [[annotations]]
 path = "**"
-SPDX-FileCopyrightText = "2026 Grant Garrison"
+SPDX-FileCopyrightText = "2026 Ectonomic LLC"
 SPDX-License-Identifier = "GPL-3.0-only"
 
 # KDE's Wayland protocols, built into the window code (kde_output.rs, shadow.rs)
@@ -78,7 +78,7 @@ path = [
   "apps/ectomatter/ui/glyphs/mouse.svg",
   "apps/ectomatter/ui/glyphs/mark.svg",
 ]
-SPDX-FileCopyrightText = "2026 Grant Garrison"
+SPDX-FileCopyrightText = "2026 Ectonomic LLC"
 SPDX-License-Identifier = "GPL-3.0-only"
 
 # a keyboard screen's 5 by 7 letters, from Adafruit's GFX library (glcdfont.c)
@@ -91,7 +91,7 @@ SPDX-License-Identifier = "BSD-2-Clause"
 # draws them, a screen's typeface, which needs no license (Grant, 2026-10-27)
 [[annotations]]
 path = ["apps/ectomatter/data/z10font.json"]
-SPDX-FileCopyrightText = "2026 Grant Garrison"
+SPDX-FileCopyrightText = "2026 Ectonomic LLC"
 SPDX-License-Identifier = "GPL-3.0-only"
 
 # the glyphs typefaces lack, cut from DejaVu Sans Bold and Noto Sans Symbols

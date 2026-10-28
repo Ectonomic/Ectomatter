@@ -4,7 +4,7 @@
 //! its version and whether it's on, then the sections the plugins describe
 //! of themselves (the weather's place and units), drawn here; the sensors the
 //! Sensor Feed reads, and which the screens show; the HDR interface; and
-//! About: Ectomatter's version, who it's by, its license and the notices of
+//! About: Ectomatter's version, who made it and whose it is, its license and the notices of
 //! what it's built from (src/about.rs).
 
 use serde_json::{json, Value};
@@ -476,7 +476,8 @@ pub fn page(s: &State, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
 /// the style of a package's tile that holds Ectomatter's own mark (ui/system/cells.slint)
 const MARK: i32 = -2;
 
-/// Settings' About: Ectomatter's mark on its tile, its name and version; who it's by; its
+/// Settings' About: Ectomatter's mark on its tile, its name and version; who made it; whose
+/// it is; its
 /// license, what that lets a person do, and Read; the notices of what it's built from and
 /// carries, and Read (Ctl::AboutRead, 0 and 1); what went wrong with a Read, in amber
 /// under its row.
@@ -487,6 +488,7 @@ fn about_section(f: &mut Form, said: Option<&(i32, String)>) {
         let end = package_head(&mut c.cells, x, top, w, MARK, "Ectomatter");
         c.cells.push(text_cell(style::SMALL, x + size::ROW + space::PAD, end, w - size::ROW - space::PAD, line::NOTE, &format!("Version {}", crate::about::VERSION)));
         c.next(top, size::ROW);
+        c.fact("Authors", &crate::about::authors(), "");
         c.fact("Copyright", &format!("© {}", crate::about::copyright()), "");
         let trouble = |which: i32| said.filter(|(w, _)| *w == which).map(|(_, e)| e.as_str());
         read_row(c, "License", crate::about::license().0, 0, "You can share and change Ectomatter under this license. It comes with no warranty.", trouble(0));
@@ -850,7 +852,7 @@ mod tests {
         assert!(has(&format!("© {}", crate::about::copyright())) && has("no warranty") && has("share and change Ectomatter") && has(crate::about::license().0), "{words:?}");
         let reads: Vec<i32> = cells.iter().filter(|c| c.id == id(Ctl::AboutRead)).map(|c| c.index).collect();
         assert_eq!(reads, [0, 1], "a Read for the license, then the notices");
-        assert!(has(&format!("Version {}", crate::about::VERSION)));
+        assert!(has(&format!("Version {}", crate::about::VERSION)) && has(&crate::about::authors()));
         // (a Read that went wrong says so under its own row)
         let s = State { about: Some((1, "This copy of Ectomatter came without its notices.".into())), ..s };
         let cells = page(&s, 1440.0).0;
