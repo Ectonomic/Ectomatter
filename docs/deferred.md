@@ -259,6 +259,15 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Stage 1: installable on Linux
 
+- No package manager or browser in the app (Grant, 2026-10-28: "we need
+  this to be a part of the in app plugin and core manager and browser that
+  hasnt been built"). Settings adds a core or plugin only from a GitHub
+  address typed by hand (`front/home_desk.rs`, `add_package_form`), with
+  Review and Remove beside each; nothing lists the packages there are to
+  add. Adding a core for a new device writes no udev rule for that device
+  (`main.rs`, `udev_rules`, run once by `tools/install.sh`), so Linux won't
+  let Ectomatter open the device; the manager is where that rule gets
+  written, with the system's password prompt.
 - `tools/install.sh` lays Ectomatter out under a prefix (its programs, its
   packages as installed, a desktop entry and its icon, udev's rule made from
   the cores' manifests, the licenses), tried by `tests/install.rs`, and
