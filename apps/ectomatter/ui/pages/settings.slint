@@ -16,6 +16,9 @@ export component SettingsPage inherits Rectangle {
     in property <image> mouse-tile;
     in property <[image]> package-tiles;
     in property <image> mark-tile;
+    // what was just done here, or what went wrong (`said-bad`), in the bar
+    in property <string> said;
+    in property <bool> said-bad;
     in-out property <string> place;
     in property <length> settings-h;
     in-out property set-flick-content-height <=> set-flick.content-height;
@@ -42,5 +45,7 @@ export component SettingsPage inherits Rectangle {
     PageBar {
         y: 0;
         title: "Settings";
+        status: root.said;
+        status-bad: root.said-bad;
     }
 }

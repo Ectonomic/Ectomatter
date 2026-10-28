@@ -869,7 +869,7 @@ impl Front {
     /// One of a plugin's own settings set, kept, and handed to the plugin.
     pub(super) fn set_plugin_value(&mut self, plugin: &str, setting: &str, v: serde_json::Value) {
         if let Err(e) = self.settings.set(&format!("plugins.{plugin}.{setting}"), v) {
-            self.status(format!("The setting was not saved: {e}"), 2);
+            self.settings_say(format!("The setting was not saved: {e}"), true);
             return;
         }
         self.hand_values(Some(plugin));
@@ -1080,7 +1080,7 @@ impl Front {
                 self.start_package(p);
             }
         }
-        self.status(format!("Added {name}."), 1);
+        self.settings_say(format!("Added {name}."), false);
         self.refresh();
     }
 
@@ -1100,7 +1100,7 @@ impl Front {
         let dir = root.join(id);
         if dir.starts_with(&root) && dir != root {
             if let Err(e) = std::fs::remove_dir_all(&dir) {
-                self.status(format!("{name} wasn’t removed: {e}"), 2);
+                self.settings_say(format!("{name} wasn’t removed: {e}"), true);
                 return;
             }
         }
@@ -1114,7 +1114,7 @@ impl Front {
             }
         }
         self.hosted.forget_sections();
-        self.status(format!("Removed {name}."), 1);
+        self.settings_say(format!("Removed {name}."), false);
         self.refresh();
     }
 
@@ -1132,7 +1132,7 @@ impl Front {
             return;
         }
         if let Err(e) = self.settings.set(&p.switch(), serde_json::json!(on)) {
-            self.status(format!("The setting was not saved: {e}"), 2);
+            self.settings_say(format!("The setting was not saved: {e}"), true);
             return;
         }
         if p.kind() == crate::packages::Kind::Core {

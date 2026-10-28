@@ -36,7 +36,9 @@ This is where they live in this repository.
   same; every place of the window drawn. A page that changes writes its
   picture, where it differs and its log to `target/renders/`; when the change
   is meant, look at them, then `ECTOMATTER_APPROVE=1` the same command.
-  Nothing of Grant's goes into the desk or the pictures.
+  A third desk has met the keyboard (`desk/window.json`), which isn't
+  plugged in now (`kb-unplugged`). Nothing of Grant's goes into the desk or
+  the pictures.
   `ECTOMATTER_RENDERS=name,name` runs only those; `ECTOMATTER_RENDERS_LOG=1`
   keeps every page's log.
 - **Presenting through wgpu.** `crates/ectomatter-present` turns a composed

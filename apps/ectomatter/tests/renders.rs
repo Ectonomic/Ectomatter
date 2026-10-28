@@ -102,6 +102,11 @@ const FIRST_RUN: &[Case] = &[
     Case { name: "first-library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library")] },
 ];
 
+/// The keyboard's page on a desk where Ectomatter has met the keyboard
+/// (desk/window.json keeps its place) and it isn't plugged in now: its read
+/// failed, as its core says when nothing is there.
+const UNPLUGGED: &[Case] = &[Case { name: "kb-unplugged", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_UNREAD", "the keyboard isn't connected")] }];
+
 /// A folder of the test's own, empty, gone after it.
 struct Scratch(PathBuf);
 
@@ -485,7 +490,7 @@ fn check(desk: &Desk, cases: &[Case]) -> Vec<String> {
 fn chosen(cases: &[Case]) -> Vec<&Case> {
     let only: Vec<String> = std::env::var("ECTOMATTER_RENDERS").unwrap_or_default().split(',').filter(|n| !n.is_empty()).map(String::from).collect();
     for o in &only {
-        assert!(SET_UP.iter().chain(FIRST_RUN).any(|c| c.name.trim_end_matches(".window") == o), "ECTOMATTER_RENDERS names {o}, which is no page here");
+        assert!(SET_UP.iter().chain(FIRST_RUN).chain(UNPLUGGED).any(|c| c.name.trim_end_matches(".window") == o), "ECTOMATTER_RENDERS names {o}, which is no page here");
     }
     cases.iter().filter(|c| only.is_empty() || only.iter().any(|o| o == c.name.trim_end_matches(".window"))).collect()
 }
@@ -515,6 +520,18 @@ fn the_first_run_looks_as_approved() {
     built();
     let desk = Desk::new("first-run", false, false);
     let wrong = check(&desk, FIRST_RUN);
+    assert!(wrong.is_empty(), "pages that came out otherwise:\n  {}", wrong.join("\n  "));
+}
+
+/// A keyboard Ectomatter has met, not plugged in, says so on its page.
+#[test]
+fn a_met_keyboard_unplugged_says_so() {
+    built();
+    let desk = Desk::new("unplugged", false, false);
+    let kept = desk.scratch.0.join("config/com.ectonomic.ectomatter/window.json");
+    std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
+    std::fs::copy(here().join("tests/renders/desk/window.json"), &kept).unwrap();
+    let wrong = check(&desk, UNPLUGGED);
     assert!(wrong.is_empty(), "pages that came out otherwise:\n  {}", wrong.join("\n  "));
 }
 

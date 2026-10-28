@@ -274,7 +274,7 @@ impl Front {
     /// reader of the screen's readings; the editor's and the playlist's pictures read again.
     pub(super) fn keep_setup(&mut self, s: crate::sensors::Setup) {
         if let Err(e) = self.settings.set("sensors", s.to_json()) {
-            self.status(format!("The sensors were not saved: {e}"), 2);
+            self.settings_say(format!("The sensors were not saved: {e}"), true);
             return;
         }
         if let Some((_, cat, _)) = &self.sensors_seen {

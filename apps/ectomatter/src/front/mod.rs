@@ -513,6 +513,21 @@ const LAYOUT_PAGE: usize = 4;
 const PLAYLIST_PAGE: usize = 5;
 const MACRO_PAGE: usize = 7;
 
+/// What the keyboard's page says when the keyboard can't be read (`e`, the
+/// core's words), by how the system shows it (`st`, devices::usb's): not
+/// plugged in; plugged in but not to be opened by Ectomatter; there and not
+/// answering; or, where the system can't say, the core's own words. Its
+/// title, the line under it, and whether something's wrong (an unplugged
+/// keyboard is only away).
+fn unread(st: &serde_json::Value, e: &str) -> (String, String, bool) {
+    match (st["present"].as_bool(), st["reachable"].as_bool()) {
+        (Some(false), _) => ("Your keyboard isn’t plugged in".into(), "Plug it in. Ectomatter finds it within a few seconds.".into(), false),
+        (Some(true), Some(false)) => ("Ectomatter can’t open your keyboard".into(), "It’s plugged in, but this computer doesn’t let Ectomatter open it. Install Ectomatter’s package, then plug the keyboard in again.".into(), true),
+        (Some(true), _) => ("Your keyboard isn’t answering".into(), "It’s plugged in, but it stopped answering Ectomatter. Unplug it and plug it back in.".into(), true),
+        (None, _) => ("Ectomatter can’t reach your keyboard".into(), format!("{e}. Ectomatter tries again every few seconds."), true),
+    }
+}
+
 /// The page of the action menu a screen job is on.
 fn screen_page(code: u32) -> usize {
     if code >= keyboard::NEXT_PLAYLIST { PLAYLIST_PAGE } else { LAYOUT_PAGE }
@@ -734,6 +749,8 @@ pub struct Front {
     /// went wrong with the last
     about_read: Option<(i32, mpsc::Receiver<Result<(), String>>)>,
     about_said: Option<(i32, String)>,
+    /// what Settings' bar says, whether it's a problem, and since when
+    settings_said: Option<(String, bool, Instant)>,
     /// an added plugin asked about removing
     removing: Option<String>,
     mouse_icons: Option<(f32, f32, Vec<slint::Image>)>,
@@ -1216,6 +1233,7 @@ impl Front {
             run_pick: None,
             about_read: None,
             about_said: None,
+            settings_said: None,
             removing: None,
             mouse_icons: None,
             mouse_layers: None,
@@ -1481,6 +1499,15 @@ impl Front {
         self.status_at = Some(Instant::now());
     }
 
+    /// What was just done on Settings, or what went wrong (`bad`), in its bar: words that
+    /// go after a while, or a problem that stays until the next.
+    pub(super) fn settings_say(&mut self, text: impl Into<String>, bad: bool) {
+        let text = text.into();
+        self.ui.set_settings_said(text.as_str().into());
+        self.ui.set_settings_said_bad(bad);
+        self.settings_said = Some((text, bad, Instant::now()));
+    }
+
     /// The keyboard answered.
     pub fn heard(&mut self, h: device::Heard) {
         // a save or a switch of profile has the keyboard apply a stored profile again,
@@ -1515,11 +1542,17 @@ impl Front {
             device::Heard::State(Err(e)) => {
                 self.failed_at = Some(Instant::now());
                 if self.page.dev.is_none() {
+                    // (why, as the system shows the keyboard: not plugged in, not to be
+                    // opened, or there and not answering)
+                    let usb = crate::cores::keyboard().and_then(|k| self.packages.iter().find(|p| p.id() == k.id)).and_then(|p| p.manifest.usb_ids());
+                    let st = usb.map(|(v, p)| crate::devices::usb(v, p)).unwrap_or_default();
+                    let (title, text, bad) = unread(&st, &e);
                     self.ui.set_conn_state(2);
-                    self.ui.set_conn_text("Keyboard not connected".into());
-                    self.ui.set_boot(2);
-                    self.ui.set_boot_title("The editor cannot reach the keyboard".into());
-                    self.ui.set_boot_text(format!("{e}. Check that it is plugged in; Ectomatter tries again every few seconds.").into());
+                    self.ui.set_conn_text(title.as_str().into());
+                    // (2 says it in the color of what's wrong; 3 in the page's own)
+                    self.ui.set_boot(if bad { 2 } else { 3 });
+                    self.ui.set_boot_title(title.into());
+                    self.ui.set_boot_text(text.into());
                 }
             }
             device::Heard::Saved(n, r) => {
@@ -2511,6 +2544,10 @@ impl Front {
                         self.ui.set_status_text("".into());
                         self.ui.set_undo_shown(false);
                     }
+                    if self.settings_said.as_ref().is_some_and(|(_, bad, t)| !bad && t.elapsed() > Duration::from_secs(6)) {
+                        self.settings_said = None;
+                        self.ui.set_settings_said("".into());
+                    }
                 }
                 // (not while the window asks before deleting a layout)
                 Ask::Undo(redo) if self.deleting.is_none() => self.undo(redo),
@@ -3158,6 +3195,19 @@ pub fn sync_cells(model: &VecModel<Cell>, rows: Vec<Cell>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A keyboard that can't be read is said to be unplugged, not to be opened,
+    /// or not answering, as the system shows it; the core's words where it can't.
+    #[test]
+    fn an_unread_keyboard_says_why() {
+        let said = |present: serde_json::Value, reachable: serde_json::Value| unread(&serde_json::json!({ "present": present, "reachable": reachable }), "no reply").0;
+        assert_eq!(said(false.into(), serde_json::Value::Null), "Your keyboard isn’t plugged in");
+        assert_eq!(said(true.into(), false.into()), "Ectomatter can’t open your keyboard");
+        assert_eq!(said(true.into(), true.into()), "Your keyboard isn’t answering");
+        let (title, text, bad) = unread(&serde_json::Value::Null, "no reply");
+        assert_eq!((title.as_str(), text.as_str(), bad), ("Ectomatter can’t reach your keyboard", "no reply. Ectomatter tries again every few seconds.", true));
+        assert!(!unread(&serde_json::json!({ "present": false }), "").2, "an unplugged keyboard is only away");
+    }
 
     /// The keys' light glows up to Peak nits, but on a dimmer screen no
     /// higher than that screen's own peak; with the HDR interface off, or the

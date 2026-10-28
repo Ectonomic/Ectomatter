@@ -353,7 +353,7 @@ impl Front {
                     self.stop_preview();
                 }
                 if let Err(e) = self.settings.set(path, v) {
-                    self.status(format!("The setting was not saved: {e}"), 2);
+                    self.settings_say(format!("The setting was not saved: {e}"), true);
                     return;
                 }
                 // a change to what Ectomatter may use starts it again, back on Settings

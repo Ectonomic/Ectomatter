@@ -223,7 +223,8 @@ export component AppWindow inherits Window {
     // what was last done, in the device's bar: 0 said quietly, 1 went well, 2 went wrong
     in property <string> status-text;
     in property <int> status-kind;
-    // while the keyboard is read: 1 reading, 2 it could not be reached, 3 control is off; 0 read
+    // while the keyboard is read: 1 reading, 2 something's wrong (said in its color), 3 it
+    // isn't to be read now (control is off, or it isn't plugged in); 0 read
     in property <int> boot: 1;
     in property <string> boot-title: "Reading your keyboard";
     in property <string> boot-text: "Loading its profiles and macros. This takes a few seconds.";
@@ -250,6 +251,9 @@ export component AppWindow inherits Window {
     in property <[Cell]> cells;
     in property <length> tile-height;
     in property <length> settings-h;
+    // what Settings' bar says, and whether it's a problem
+    in property <string> settings-said;
+    in property <bool> settings-said-bad;
     out property <length> settings-scroll: settings-page.set-flick-content-y;
     // Settings scrolled to a place on its page (its Sensor Feed box), as far as it scrolls
     in property <length> settings-goto: -1px;
@@ -1103,6 +1107,8 @@ export component AppWindow inherits Window {
             mouse-tile: root.mouse-tile;
             package-tiles: root.package-tiles;
             mark-tile: root.mark-tile;
+            said: root.settings-said;
+            said-bad: root.settings-said-bad;
             place <=> root.place;
             settings-h: root.settings-h;
         }

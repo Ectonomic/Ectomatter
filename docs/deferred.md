@@ -188,18 +188,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   by the last of them then aborted the process. Both core dumps of
   2026-10-26 were this, in snapshots (one the stranger test's run that
   stopped silently); no test makes it happen on purpose.
-- A keyboard Ectomatter has met, opened while it isn't plugged in, says
-  it's reading it ("Reading your keyboard") until its first read fails, then
-  shows the read's own error under "The editor cannot reach the keyboard"
-  (`front/mod.rs`, `Heard::State(Err)`): the words are the old editor's, and
-  nothing waits on the core's `device/added` to say it's unplugged. (A
-  device never met has no button on the rail and no page: `front/models.rs`,
-  `met`; the first-run renders hold it.) The same words show for a keyboard
-  that is plugged in but doesn't answer: on 2026-10-27 the core told
-  `device/added` and heard its keys, but every request on its command
-  interface took the kernel's 5 seconds to fail, and the page said "Keyboard
-  not connected". Nothing tells a keyboard that isn't there from one that
-  isn't answering.
+- A keyboard whose read fails says why only until it's been read once
+  (`front/mod.rs`, `Heard::State(Err)`, `unread`: not plugged in, not to
+  be opened, not answering): one read before and then unplugged, or
+  stopped answering, keeps its page as last read, with nothing saying so
+  but the dot. (A device never met has no button on the rail and no page:
+  `front/models.rs`, `met`; the first-run renders hold it, and `kb-unplugged`
+  holds the words for one met and unplugged.)
 
 ## Before any repository goes public
 
@@ -302,11 +297,6 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   (GPLv3 section 6). Nothing is offered yet; a release needs them. Settings'
   About (`src/ecto_settings.rs`, `about_section`) has no row for the source
   either; it gets one when the repository has it.
-- Settings' own messages don't show on Settings: `Front::status` (a choice
-  not saved, `front/lighting_tab.rs`; a package added or not removed,
-  `front/home_desk.rs`) sets the words the keyboard's page alone shows
-  (`ui/app.slint` binds `status-text` there only). About's Read says what
-  went wrong in its own row instead (`read_row`).
 - About's Read opens `LICENSE` and `NOTICES` as the desktop opens a file
   (`src/about.rs`, `crate::games::open`); neither name has an extension,
   which Linux's `xdg-open` reads past but Windows' `start` asks about. No
