@@ -1,10 +1,12 @@
 // Lists down a page's side: the rail's items, and the anchoring column of a
-// device's page (its profiles) with its rows and its heading.
+// device's page (its profiles) with its rows and its heading; and the list of
+// packages to add, in Add a core and Add a plugin.
 
 import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
 import { PencilButton, MoreButton, RenameField } from "controls.slint";
 import { Tip } from "surfaces.slint";
+import { Tag } from "controls.slint";
 
 // a profile's button in the panel's head
 export struct ProfileItem {
@@ -22,6 +24,75 @@ export struct ProfileItem {
     c2: color,
     c3: color,
     c4: color,
+}
+
+// a package on the list of those Ectonomic reviewed: its name, who publishes it, what
+// it's for, how it stands here (Added, Comes with Ectomatter), and, chosen, what it can
+// reach on the computer, its version and its license, a line each
+export struct PackageItem {
+    name: string,
+    by: string,
+    about: string,
+    tag: string,
+    can: string,
+    chosen: bool,
+}
+
+// A package's row in that list, in a well: its name and who publishes it, its tag at the
+// end, what it's for under them, and, chosen, what it can reach under that; lit under the
+// pointer, and while chosen.
+export component PackageRow inherits Rectangle {
+    in property <PackageItem> item;
+    callback clicked;
+    height: words.preferred-height;
+    border-radius: Radius.control;
+    background: root.item.chosen ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-well : transparent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    words := VerticalLayout {
+        padding: Space.row;
+        spacing: Space.tight;
+        HorizontalLayout {
+            spacing: Space.inline;
+            Text {
+                text: root.item.name;
+                font-family: Font.ui;
+                font-size: Font.control;
+                font-weight: Font.medium;
+                color: Ink.bright;
+                vertical-alignment: center;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.item.by;
+                font-family: Font.ui;
+                font-size: Font.caption;
+                color: Ink.quiet;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if root.item.tag != "": VerticalLayout {
+                alignment: center;
+                Tag { text: root.item.tag; }
+            }
+        }
+        Text {
+            text: root.item.about;
+            font-family: Font.ui;
+            font-size: Font.caption;
+            color: Ink.soft;
+            wrap: word-wrap;
+        }
+        if root.item.chosen && root.item.can != "": Text {
+            text: root.item.can;
+            font-family: Font.ui;
+            font-size: Font.caption;
+            color: Ink.quiet;
+            wrap: word-wrap;
+        }
+    }
 }
 
 // an item on the rail: a square (Size.rail) with its glyph, which the rail's blade

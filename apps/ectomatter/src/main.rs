@@ -29,6 +29,7 @@
 #![deny(unconditional_recursion)]
 
 mod about;
+mod autostart;
 mod adapter;
 mod boxes;
 mod boundaries;
@@ -88,7 +89,9 @@ mod packages;
 mod picker;
 mod picture;
 mod profiles;
+mod permission;
 mod putback;
+mod registry;
 mod recording;
 mod screen_edit;
 mod screen_keys;
@@ -434,12 +437,9 @@ fn udev_rules(cores: &[packages::Package]) -> String {
     let mut out = String::from("# Ectomatter: the person at the computer may open the devices its cores reach\n# (written by `ectomatter --udev-rules`, from each core's manifest)\n");
     let mut seen = std::collections::BTreeSet::new();
     for p in cores {
-        for m in &p.manifest.spec.matches {
-            let (v, d) = (m.usb.vendor.to_lowercase(), m.usb.product.to_lowercase());
-            if seen.insert((v.clone(), d.clone())) {
-                out += &format!("# {} ({})\nSUBSYSTEM==\"hidraw\", ATTRS{{idVendor}}==\"{v}\", ATTRS{{idProduct}}==\"{d}\", TAG+=\"uaccess\"\n", p.manifest.name, p.id());
-            }
-        }
+        // (each device once, the rule a core added later gets of its own: permission.rs)
+        let new: Vec<(String, String)> = permission::devices(&p.manifest.json()).into_iter().filter(|d| seen.insert(d.clone())).collect();
+        out += &permission::rule(&p.manifest.name, p.id(), &new);
     }
     out
 }
@@ -482,6 +482,9 @@ fn main() {
     }
     if snapshot.is_none() && !args.iter().any(|a| a == "--read-state") {
         log::start();
+        // (an entry to start at login that names a program gone names this one, and
+        // waits for KWin: autostart.rs)
+        autostart::keep();
     }
     // ECTOMATTER_NOW=seconds since 1970: the time of day a snapshot is drawn
     // at, its animations stepped by frames (clock.rs), from before the window

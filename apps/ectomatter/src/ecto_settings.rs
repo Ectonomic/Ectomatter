@@ -81,8 +81,10 @@ pub struct DeviceRow {
     pub core: PackageRow,
     pub kind: String,
     pub present: bool,
-    /// whether the system lets Ectomatter open it (`None` where it isn't asked)
+    /// whether the system lets Ectomatter open it (`None` where it isn't asked), and
+    /// whether it has no rule that would, for Allow to write one (permission.rs)
     pub reachable: Option<bool>,
+    pub allow: bool,
     pub holders: Vec<String>,
     /// what another program having it open means for it
     pub holders_note: String,
@@ -120,6 +122,8 @@ pub struct State {
     /// what went wrong the last time About's Read was pressed: which (0 the
     /// license, 1 the notices), and what
     pub about: Option<(i32, String)>,
+    /// what starts at login (autostart.rs)
+    pub starts: crate::autostart::Starts,
 }
 
 /// A switch in a row's controls' column, its options' words and values; how wide it is.
@@ -441,6 +445,26 @@ pub fn page(s: &State, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
         sensors_box(&mut f, v, &mut map);
     }
 
+    // starting at login, as the system keeps it: this copy (On), none (Off), or, neither
+    // chosen, another copy, named under the note
+    section(&mut f, "Startup", |c| {
+        use crate::autostart::Starts;
+        c.row();
+        c.label("Start at login");
+        let top = c.y;
+        let now = match &s.starts {
+            Starts::This => "on",
+            Starts::No => "off",
+            Starts::Other(_) => "",
+        };
+        seg(c, top, Ctl::StartAtLogin, &[("on", "On"), ("off", "Off")], now);
+        let mut end = c.note(top + form::LINE, "Ectomatter starts in the tray when you log in. Off, it does nothing until you open it.");
+        if let Starts::Other(p) = &s.starts {
+            end = c.note(end, &format!("Another copy of Ectomatter starts at login now, from {}. On starts this copy instead.", p.display()));
+        }
+        c.next(top, end - top);
+    });
+
     // the HDR interface
     let hdr = &s.settings["hdr"];
     let on = hdr["lighting"].as_str() != Some("off");
@@ -675,6 +699,12 @@ fn devices_section(f: &mut Form, devices: &[DeviceRow]) {
             c.label_text("Permission");
             let top = c.y;
             match d.reachable {
+                // (no rule lets it be opened: Allow writes one, with the system's password prompt)
+                _ if d.allow => {
+                    state(c, top, 2, "Not granted");
+                    let ax = cx + size::DOT + space::INLINE + text::width(font::REGULAR, font::TEXT, "Not granted").ceil() + space::ROW - part::QUIET_PAD;
+                    form::link(&mut c.cells, ax, top, line::TEXT, "Allow", id(Ctl::PackageAllow), r.glyph as i32);
+                }
                 None => state(c, top, 0, "Not needed on this system"),
                 Some(_) if !d.present => state(c, top, 0, &format!("Checked when the {} is connected", d.kind)),
                 Some(true) => state(c, top, 1, "Granted"),
@@ -823,7 +853,7 @@ mod tests {
 
     /// The words on the page, each piece once.
     fn texts(devices: Vec<DeviceRow>) -> Vec<String> {
-        let s = State { sensors: None, devices, plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None };
+        let s = State { sensors: None, devices, plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
         page(&s, 1440.0).0.into_iter().map(|c| c.text.to_string()).filter(|t| !t.is_empty()).collect()
     }
 
@@ -836,8 +866,8 @@ mod tests {
             r.status = "1.2.0 asks to do more: waiting for your OK".into();
             r
         };
-        let core = DeviceRow { core: waiting(row("Logitech G502", 4, true, true, "")), kind: "mouse".into(), present: true, reachable: Some(true), holders: Vec::new(), holders_note: String::new() };
-        let s = State { sensors: None, devices: vec![core], plugins: vec![waiting(row("Weather Feed", 2, true, false, "")), row("Monitor Switcher", 3, true, true, "Up to date")], sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None };
+        let core = DeviceRow { core: waiting(row("Logitech G502", 4, true, true, "")), kind: "mouse".into(), present: true, reachable: Some(true), allow: false, holders: Vec::new(), holders_note: String::new() };
+        let s = State { sensors: None, devices: vec![core], plugins: vec![waiting(row("Weather Feed", 2, true, false, "")), row("Monitor Switcher", 3, true, true, "Up to date")], sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
         let cells = page(&s, 1440.0).0;
         let t: Vec<String> = cells.iter().map(|c| c.text.to_string()).collect();
         assert_eq!(t.iter().filter(|x| *x == "Review").count(), 2, "on the core and the plugin waiting, not the one up to date");
@@ -852,7 +882,7 @@ mod tests {
     fn about_gives_the_gplv3s_legal_notices() {
         // (GPLv3 section 0: a copyright notice; that there's no warranty; that it may be
         // shared under the license; how to read the license)
-        let s = State { sensors: None, devices: Vec::new(), plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None };
+        let s = State { sensors: None, devices: Vec::new(), plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
         let cells = page(&s, 1440.0).0;
         let words: Vec<String> = cells.iter().map(|c| c.text.to_string()).collect();
         let has = |w: &str| words.iter().any(|t| t.contains(w));
@@ -874,7 +904,7 @@ mod tests {
     #[test]
     fn peak_nits_reaches_the_brightest_screens_peak_on_a_dim_screen() {
         let settings = json!({ "hdr": { "lighting": "auto", "glow_limit": 1000.0 } });
-        let s = State { sensors: None, devices: Vec::new(), plugins: Vec::new(), sections: Vec::new(), settings, top_peak: 1000.0, reference: 73.0, about: None };
+        let s = State { sensors: None, devices: Vec::new(), plugins: Vec::new(), sections: Vec::new(), settings, top_peak: 1000.0, reference: 73.0, about: None, starts: crate::autostart::Starts::No };
         let cells = page(&s, 1440.0).0;
         let slider = cells.iter().find(|c| c.id == id(Ctl::PeakNits)).expect("the Peak nits slider");
         assert_eq!(slider.value, 1.0, "the saved 1000 at the right end");
@@ -888,7 +918,7 @@ mod tests {
     /// also have it open, and its core, which can be taken out once added.
     #[test]
     fn each_device_shows_with_its_core() {
-        let dev = |core, kind: &str, present, reachable, holders: &[&str]| DeviceRow { core, kind: kind.into(), present, reachable, holders: holders.iter().map(|h| h.to_string()).collect(), holders_note: "Another program has it open.".into() };
+        let dev = |core, kind: &str, present, reachable, holders: &[&str]| DeviceRow { core, kind: kind.into(), present, reachable, allow: false, holders: holders.iter().map(|h| h.to_string()).collect(), holders_note: "Another program has it open.".into() };
         let t = texts(vec![
             dev(row("EVGA Z10 RGB", 0, true, false, ""), "keyboard", true, Some(true), &[]),
             dev(row("SteelSeries Sensei 310", 1, true, false, ""), "mouse", false, Some(false), &["openrgb"]),

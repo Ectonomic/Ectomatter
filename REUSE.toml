@@ -94,6 +94,14 @@ path = ["apps/ectomatter/data/z10font.json"]
 SPDX-FileCopyrightText = "2026 Ectonomic LLC"
 SPDX-License-Identifier = "GPL-3.0-only"
 
+# Ectonomic's own: the list of packages it reviewed and its check. Its README
+# speaks of the licenses packages come under, which marks the folder as
+# holding others' work; nothing in it is.
+[[annotations]]
+path = ["registry/**"]
+SPDX-FileCopyrightText = "2026 Ectonomic LLC"
+SPDX-License-Identifier = "GPL-3.0-only"
+
 # the glyphs typefaces lack, cut from DejaVu Sans Bold and Noto Sans Symbols
 [[annotations]]
 path = [

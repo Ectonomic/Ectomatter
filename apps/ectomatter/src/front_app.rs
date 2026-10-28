@@ -239,6 +239,14 @@ pub fn keep(conn: &zbus::blocking::Connection) {
     use std::sync::atomic::Ordering;
     static TRIES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let (heard, loaded) = (HEARD.load(Ordering::Relaxed), LOADED.load(Ordering::Relaxed));
+    // (never loaded, as when Ectomatter starts at login before KWin is on the bus:
+    // tried again each time until it is)
+    if loaded == 0 {
+        if load(conn).is_ok() {
+            eprintln!("ectomatter: KWin tells Ectomatter the app in front");
+        }
+        return;
+    }
     if heard >= loaded || now_ms().saturating_sub(loaded) < 3000 || TRIES.fetch_add(1, Ordering::Relaxed) >= 3 {
         return;
     }

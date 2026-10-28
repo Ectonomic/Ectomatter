@@ -13,7 +13,9 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # stranger's computer has it (tests/stranger.rs), and its pages drawn on a
 # made-up desk, as approved (tests/renders.rs), and installed as
 # tools/install.sh lays it out (tests/install.rs), and as its RPM holds it
-# (tests/rpm.rs)
+# (tests/rpm.rs); and started with no compositor, as at login before KWin is
+# ready, and with KWin gone and back (tests/compositor.rs); and where it keeps
+# starting at login, as each system has it (autostart.rs)
 runs=(
   a_package_past_its_time_is_stopped_and_started_again
   a_package_out_of_memory_or_crashed_is_stopped_and_started_again
@@ -36,8 +38,10 @@ runs=(
   a_recipe_holds_only_what_its_plugins_manifest_names
   an_update_that_can_do_more_waits_and_a_package_must_match_its_checksum
   a_waiting_version_offers_review
+  each_systems_entry_starts_the_program_it_names
+  starting_at_login_is_written_where_the_desktop_reads_it
 )
-out=$(cargo test --release -p ectomatter --bin ectomatter -- --include-ignored boundar "${runs[@]}" 2>&1; cargo test --release -p ectomatter --test stranger -- --include-ignored 2>&1; cargo test --release -p ectomatter --test renders 2>&1; cargo test --release -p ectomatter --test install 2>&1; cargo test --release -p ectomatter --test rpm 2>&1)
+out=$(cargo test --release -p ectomatter --bin ectomatter -- --include-ignored boundar "${runs[@]}" 2>&1; cargo test --release -p ectomatter --test stranger -- --include-ignored 2>&1; cargo test --release -p ectomatter --test renders 2>&1; cargo test --release -p ectomatter --test install 2>&1; cargo test --release -p ectomatter --test rpm 2>&1; cargo test --release -p ectomatter --test compositor 2>&1)
 lines=$(printf '%s\n' "$out" | grep -E '^test .* \.\.\. (ok|FAILED)$' | sort)
 if [ -z "$lines" ]; then printf '%s\n' "$out" | tail -30; exit 2; fi
 held=$(printf '%s\n' "$lines" | grep -c ' ok$')
@@ -52,6 +56,19 @@ licenses=$(tools/licenses.sh); case $? in
   3) echo "  not yet    every_shipped_dependencys_license_is_approved (known failures, docs/deferred.md)"; not=$((not + 1)) ;;
   *) printf '%s\n' "$licenses"; echo "  FAILS      every_shipped_dependencys_license_is_approved: a crate or carried file not approved and not in docs/deferred.md, or a carried file not in REUSE.toml"; exit 1 ;;
 esac
+# (the list of packages, registry/packages.json: every package that comes
+# with Ectomatter, its release as tools/release-package.py makes it, held to
+# it by the check every change to the list must pass, registry/check.py)
+rel=target/registry-check
+rm -rf "$rel"
+for d in cores/*/ plugins/*/; do
+  [ ! -f "$d/core.json" ] || python3 -I tools/release-package.py "$d" --out "$rel" > /dev/null
+done
+if listed=$(python3 -I registry/check.py --releases "$rel"); then
+  echo "  holds      the_list_of_packages_is_as_they_are_released"; held=$((held + 1))
+else
+  printf '%s\n' "$listed"; echo "  FAILS      the_list_of_packages_is_as_they_are_released: a package changed since tools/list-packages.py wrote the list"; exit 1
+fi
 echo "$held hold, $not don't yet"
 # (a boundary test renamed or gone is a boundary no longer tried)
 for t in "${runs[@]}"; do

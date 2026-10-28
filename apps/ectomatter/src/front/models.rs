@@ -326,6 +326,10 @@ impl Front {
             // what the kernel says of the keyboard, looked at every two seconds (it
             // scans every process), not at every step of a slider
             let sensors = self.sensors_view();
+            // (what starts at login, looked at again every two seconds: another program may change it)
+            if self.starts.1.elapsed() > Duration::from_secs(2) {
+                self.starts = (crate::autostart::now(), Instant::now());
+            }
             self.hosted.poll();
             let st = crate::ecto_settings::State {
                 sensors: Some(sensors),
@@ -336,6 +340,7 @@ impl Front {
                 top_peak: self.levels.1,
                 reference: self.levels.0,
                 about: self.about_said.clone(),
+                starts: self.starts.0.clone(),
             };
             let (cells, h, map, pmap) = crate::ecto_settings::page(&st, self.ui.get_content_width());
             self.sensor_map = map;

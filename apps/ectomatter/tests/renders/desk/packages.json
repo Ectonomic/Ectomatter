@@ -1,0 +1,409 @@
+{
+  "format": 1,
+  "packages": [
+    {
+      "repository": "Ectonomic/ectomatter-evga-z10",
+      "publisher": "Ectonomic",
+      "versions": [
+        {
+          "manifest": {
+            "id": "evga-z10",
+            "kind": "core",
+            "name": "EVGA Z10 RGB",
+            "version": "1.0.0",
+            "protocol": 4,
+            "ectomatter": "0.1.0",
+            "module": "core.wasm",
+            "license": "GPL-3.0-only",
+            "description": "Keys, lighting and the screen of the EVGA Z10 RGB.",
+            "glyph": "glyph.svg",
+            "deviceFile": "device.json",
+            "devices": [
+              "EVGA Z10 RGB"
+            ],
+            "matches": [
+              {
+                "usb": {
+                  "vendor": "3842",
+                  "product": "2611",
+                  "usagePage": "0008",
+                  "usage": "004B"
+                }
+              },
+              {
+                "usb": {
+                  "vendor": "3842",
+                  "product": "2611",
+                  "interface": 1
+                }
+              },
+              {
+                "usb": {
+                  "vendor": "3842",
+                  "product": "2611",
+                  "interface": 0
+                }
+              },
+              {
+                "usb": {
+                  "vendor": "3842",
+                  "product": "2611",
+                  "interface": 2
+                }
+              }
+            ],
+            "uses": []
+          },
+          "sha256": "6cd5d7b083c6017cbf14eed4e06abbd4e9821e32dbe6e26c7ec970f6318f123c"
+        }
+      ]
+    },
+    {
+      "repository": "someone/ectomatter-example-mouse",
+      "publisher": "Someone Else",
+      "versions": [
+        {
+          "manifest": {
+            "id": "example-mouse",
+            "kind": "core",
+            "name": "Example Mouse",
+            "version": "1.2.0",
+            "protocol": 4,
+            "ectomatter": "0.1.0",
+            "module": "core.wasm",
+            "license": "GPL-3.0-only",
+            "description": "Buttons and lighting of the Example Mouse.",
+            "glyph": "glyph.svg",
+            "devices": [
+              "Example Mouse"
+            ],
+            "matches": [
+              {
+                "usb": {
+                  "vendor": "1A2B",
+                  "product": "3C4D",
+                  "interface": 0
+                }
+              }
+            ],
+            "uses": []
+          },
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "repository": "Ectonomic/ectomatter-steelseries-sensei-310",
+      "publisher": "Ectonomic",
+      "versions": [
+        {
+          "manifest": {
+            "id": "steelseries-sensei-310",
+            "kind": "core",
+            "name": "SteelSeries Sensei 310",
+            "version": "1.0.0",
+            "protocol": 4,
+            "ectomatter": "0.1.0",
+            "module": "core.wasm",
+            "license": "GPL-3.0-only",
+            "description": "Buttons, lighting and sensitivity of the SteelSeries Sensei 310.",
+            "glyph": "glyph.svg",
+            "devices": [
+              "SteelSeries Sensei 310"
+            ],
+            "matches": [
+              {
+                "usb": {
+                  "vendor": "1038",
+                  "product": "1722",
+                  "usagePage": "FFC0"
+                }
+              },
+              {
+                "usb": {
+                  "vendor": "1038",
+                  "product": "1722",
+                  "interface": 0
+                }
+              },
+              {
+                "usb": {
+                  "vendor": "1038",
+                  "product": "1722",
+                  "usagePage": "0001",
+                  "usage": "0006"
+                }
+              },
+              {
+                "usb": {
+                  "vendor": "1038",
+                  "product": "1722",
+                  "interface": 2
+                }
+              },
+              {
+                "usb": {
+                  "vendor": "1038",
+                  "product": "1722",
+                  "usagePage": "0001",
+                  "usage": "0002"
+                }
+              },
+              {
+                "usb": {
+                  "vendor": "1038",
+                  "product": "1722",
+                  "interface": 1
+                }
+              }
+            ],
+            "uses": []
+          },
+          "sha256": "07d6dd782817d020fc60c1caddd286e714566026cb5d35fcd71dd5821adfa1a5"
+        }
+      ]
+    },
+    {
+      "repository": "Ectonomic/ectomatter-game-configurator",
+      "publisher": "Ectonomic",
+      "versions": [
+        {
+          "manifest": {
+            "id": "game-configurator",
+            "kind": "plugin",
+            "name": "Game Configurator",
+            "version": "1.0.0",
+            "protocol": 4,
+            "ectomatter": "0.1.0",
+            "module": "core.wasm",
+            "license": "GPL-3.0-only",
+            "description": "Proton, prefixes, gamescope, GameMode and MangoHud for each game.",
+            "glyph": "glyph.svg",
+            "adds": [
+              "game"
+            ],
+            "systems": [
+              "linux"
+            ],
+            "uses": [
+              {
+                "launch": {
+                  "wrap": {
+                    "gamescope": {
+                      "options": {
+                        "-W": "number",
+                        "-H": "number",
+                        "-w": "number",
+                        "-h": "number",
+                        "-r": "number",
+                        "-F": "word",
+                        "-S": "word",
+                        "-f": null,
+                        "--hdr-enabled": null,
+                        "--hdr-itm-enabled": null,
+                        "--hdr-itm-sdr-nits": "number",
+                        "--hdr-itm-target-nits": "number",
+                        "--mangoapp": null
+                      },
+                      "last": "--"
+                    },
+                    "gamemoderun": {},
+                    "mangohud": {}
+                  },
+                  "tools": [
+                    "winecfg",
+                    "winetricks"
+                  ],
+                  "env": {
+                    "PROTON_ENABLE_HDR": "number",
+                    "PROTON_DLSS_UPGRADE": "number",
+                    "PROTON_FSR4_UPGRADE": "number",
+                    "PROTON_XESS_UPGRADE": "number",
+                    "PROTON_NO_NTSYNC": "number",
+                    "PROTON_NO_FSYNC": "number",
+                    "PROTON_USE_WINED3D": "number",
+                    "PROTON_LOG": "number",
+                    "PROTON_ENABLE_WAYLAND": "number",
+                    "PROTON_PREFER_SDL": "number",
+                    "PROTON_USE_SDL": "number",
+                    "PROTON_DISABLE_HIDRAW": "number",
+                    "PROTON_SONY_AUTO_XINPUT": "number",
+                    "PROTON_ENABLE_NVAPI": "number",
+                    "PROTON_HIDE_NVIDIA_GPU": "number",
+                    "DXVK_HDR": "number",
+                    "DXVK_FRAME_RATE": "number",
+                    "VKD3D_FRAME_RATE": "number",
+                    "ENABLE_GAMESCOPE_WSI": "number",
+                    "WINEDLLOVERRIDES": "list",
+                    "WINE_CPU_TOPOLOGY": "list",
+                    "SDL_GAMECONTROLLER_IGNORE_DEVICES": "list",
+                    "MANGOHUD_CONFIG": "list"
+                  }
+                }
+              }
+            ]
+          },
+          "sha256": "73c0a110e56497cb07a9d6a28daf452e07833e95ecb5c54a5adf7282d5d927e3"
+        }
+      ]
+    },
+    {
+      "repository": "Ectonomic/ectomatter-monitor-switcher",
+      "publisher": "Ectonomic",
+      "versions": [
+        {
+          "manifest": {
+            "id": "monitor-switcher",
+            "kind": "plugin",
+            "name": "Monitor Switcher",
+            "version": "1.0.0",
+            "protocol": 4,
+            "ectomatter": "0.1.0",
+            "module": "core.wasm",
+            "license": "GPL-3.0-only",
+            "description": "Brightness, resolution, HDR and more, set for each game.",
+            "glyph": "glyph.svg",
+            "adds": [
+              "game"
+            ],
+            "systems": [
+              "linux"
+            ],
+            "uses": [
+              "monitors"
+            ]
+          },
+          "sha256": "e06172c43e02e9b08cf53c8b6f5109dc9e51959797b45dd68c705e65a590918f"
+        }
+      ]
+    },
+    {
+      "repository": "Ectonomic/ectomatter-openrgb-link",
+      "publisher": "Ectonomic",
+      "versions": [
+        {
+          "manifest": {
+            "id": "openrgb-link",
+            "kind": "plugin",
+            "name": "OpenRGB Link",
+            "version": "1.0.0",
+            "protocol": 4,
+            "ectomatter": "0.1.0",
+            "module": "core.wasm",
+            "license": "GPL-3.0-only",
+            "description": "Lighting that OpenRGB controls, such as your RAM.",
+            "glyph": "glyph.svg",
+            "devices": [],
+            "uses": [
+              {
+                "network": "127.0.0.1:6742",
+                "to": "OpenRGB"
+              }
+            ]
+          },
+          "sha256": "d0e1aa1a2028e45caa483712d76b2fd80f9a794db8c6114b90e10450e00a543e"
+        }
+      ]
+    },
+    {
+      "repository": "Ectonomic/ectomatter-sensor-feed",
+      "publisher": "Ectonomic",
+      "versions": [
+        {
+          "manifest": {
+            "id": "sensor-feed",
+            "kind": "plugin",
+            "name": "Sensor Feed",
+            "version": "1.0.0",
+            "protocol": 4,
+            "ectomatter": "0.1.0",
+            "module": "core.wasm",
+            "license": "GPL-3.0-only",
+            "description": "Your computer’s temperatures, loads and fans, for screens that show them.",
+            "glyph": "glyph.svg",
+            "systems": [
+              "linux"
+            ],
+            "adds": [
+              "readings"
+            ],
+            "uses": [
+              {
+                "read": "/sys"
+              },
+              {
+                "read": "/proc/stat"
+              },
+              {
+                "read": "/proc/meminfo"
+              },
+              {
+                "read": "/proc/cpuinfo"
+              },
+              {
+                "read": "/usr/share/hwdata/pci.ids"
+              },
+              "nvidia"
+            ]
+          },
+          "sha256": "b70a59978e6771cf5737f7e87cfb6005f5346b4adb855f5cfdf9bbba26cb6f76"
+        }
+      ]
+    },
+    {
+      "repository": "Ectonomic/ectomatter-weather-feed",
+      "publisher": "Ectonomic",
+      "versions": [
+        {
+          "manifest": {
+            "id": "weather-feed",
+            "kind": "plugin",
+            "name": "Weather Feed",
+            "version": "1.0.0",
+            "protocol": 4,
+            "ectomatter": "0.1.0",
+            "module": "core.wasm",
+            "license": "GPL-3.0-only",
+            "description": "The weather and warnings where you are, for screens that show them.",
+            "glyph": "glyph.svg",
+            "adds": [
+              "settings",
+              "readings"
+            ],
+            "uses": [
+              {
+                "web": "api.open-meteo.com",
+                "to": "Open-Meteo"
+              },
+              {
+                "web": "air-quality-api.open-meteo.com",
+                "to": "Open-Meteo"
+              },
+              {
+                "web": "geocoding-api.open-meteo.com",
+                "to": "Open-Meteo"
+              },
+              {
+                "web": "photon.komoot.io",
+                "to": "Photon"
+              },
+              {
+                "web": "api.weather.gov",
+                "to": "the National Weather Service"
+              },
+              {
+                "web": "api.weather.gc.ca",
+                "to": "Environment and Climate Change Canada"
+              },
+              {
+                "web": "feeds.meteoalarm.org",
+                "to": "MeteoAlarm"
+              }
+            ]
+          },
+          "sha256": "59c3922565f740b2697ad8b4cf288b410f578bdb0f34a4c74eeceed3e9e5aefc"
+        }
+      ]
+    }
+  ]
+}

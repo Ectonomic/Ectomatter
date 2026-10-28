@@ -115,9 +115,14 @@ pub enum Ctl {
     PackageReview,
     /// Settings' About: Read, Ectomatter's license (0) or its notices (1)
     AboutRead,
+    /// Settings' Devices: Allow, a rule written for a core's devices with the system's
+    /// password prompt, by the core's place among the packages
+    PackageAllow,
+    /// Settings' Startup: Start at login, On (0) or Off (1)
+    StartAtLogin,
 }
 
-const CTLS: [Ctl; 61] = [
+const CTLS: [Ctl; 63] = [
     Ctl::None,
     Ctl::Paint,
     Ctl::Demo,
@@ -179,6 +184,8 @@ const CTLS: [Ctl; 61] = [
     Ctl::ScenePlugin,
     Ctl::PackageReview,
     Ctl::AboutRead,
+    Ctl::PackageAllow,
+    Ctl::StartAtLogin,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

@@ -69,6 +69,8 @@ const SET_UP: &[Case] = &[
     Case { name: "m-settings", size: WIDE, set: &[("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_MOUSE_TAB", "3")] },
     Case { name: "settings", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings")] },
     Case { name: "settings-tall", size: (1440, 3600), set: &[("ECTOMATTER_PLACE", "settings")] },
+    // (Add a core: the list of reviewed packages, desk/packages.json, a made-up one chosen)
+    Case { name: "add-core", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_REGISTRY", "/opt/ectomatter-source/apps/ectomatter/tests/renders/desk/packages.json"), ("ECTOMATTER_CLICKS", "160,740;520,524")] },
     Case { name: "library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library")] },
     Case { name: "library-games", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "296,63")] },
     Case { name: "library-apps", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "368,63")] },
@@ -183,11 +185,14 @@ fn steam(root: &Path, seen_at: &Path) {
 /// The computer the packages and Ectomatter reach (computer::Described): the
 /// sensors crate's made-up computer, its processor, board, cards and drives
 /// given made-up names; two made-up monitors; its NVIDIA card's readings;
-/// the weather's answers for a clear morning in Reykjavík; and, if `plugged`,
-/// the cores' devices plugged in. (Its files don't change, so the processor's
-/// load, the change between two readings of /proc/stat, is 0.)
+/// the weather's answers for a clear morning in Reykjavík; udev's rule for
+/// the cores that come with Ectomatter, where an install puts it; and, if
+/// `plugged`, the cores' devices plugged in. (Its files don't change, so the
+/// processor's load, the change between two readings of /proc/stat, is 0.)
 fn computer(dir: &Path, plugged: bool) {
     let files = dir.join("files");
+    let rules = Command::new(env!("CARGO_BIN_EXE_ectomatter")).arg("--udev-rules").env("ECTOMATTER_PACKAGES", repo()).output().unwrap();
+    put(&files.join("usr/lib/udev/rules.d/70-ectomatter.rules"), &String::from_utf8_lossy(&rules.stdout));
     ectomatter_sensors::fake::computer(&files);
     put(&files.join("proc/cpuinfo"), "processor\t: 0\nmodel name\t: Example 8-Core Processor\ncpu cores\t: 4\n");
     put(&files.join("proc/stat"), "cpu  4000 0 2000 32000 400 0 100 0 0 0\ncpu0 1000 0 500 8000 100 0 25 0 0 0\ncpu1 1000 0 500 8000 100 0 25 0 0 0\ncpu2 1000 0 500 8000 100 0 25 0 0 0\ncpu3 1000 0 500 8000 100 0 25 0 0 0\nbtime 1792670000\n");

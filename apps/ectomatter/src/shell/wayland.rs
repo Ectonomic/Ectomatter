@@ -303,9 +303,101 @@ where
     params.create(qh, tag)
 }
 
+/// What wakes the loop that's running now: the one waiting for a compositor,
+/// or the window's, each with a ping of its own.
+type Slot = std::sync::Arc<std::sync::Mutex<Option<calloop::ping::Ping>>>;
+
+/// Ectomatter at work from the start, with its window on the compositor
+/// whenever there's one to show it on: none yet at login, when Ectomatter can
+/// start before KWin is ready (as on 2026-10-28), and none for a while when
+/// KWin goes away and starts again. Without one, Ectomatter goes on as with
+/// its window closed into the tray (`wait`).
 pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, ui: AppWindow, settings: settings::Settings, reference: f64, gain: f32) {
-    let conn = Connection::connect_to_env().expect("a Wayland session");
-    let (globals, queue) = registry_queue_init::<App>(&conn).unwrap();
+    // Ectomatter's threads tell it through senders that ping the loop running now
+    let slot: Slot = Default::default();
+    let wake: shell::Wake = {
+        let slot = slot.clone();
+        std::sync::Arc::new(move || {
+            if let Some(p) = slot.lock().ok().as_deref().and_then(Option::as_ref) {
+                p.ping();
+            }
+        })
+    };
+    let mut s = Session::start(slint, made, ui, settings, reference, gain, &wake);
+    // `--hide`: started into the tray, as at login
+    let mut shown = !std::env::args().any(|a| a == "--hide");
+    let mut now = true;
+    while let Some(conn) = wait(&mut s, &slot, &mut shown, now) {
+        let (back, lost) = window(s, conn, &slot, shown);
+        s = back;
+        match lost {
+            Some(was) => (shown, now) = (was, false),
+            None => break,
+        }
+    }
+    s.finish();
+}
+
+/// Ectomatter with no compositor to show its window on: its devices, packages,
+/// tray and the app in front go on as with the window closed into the tray, and
+/// a compositor is looked for each second (at once where `now`). The tray's
+/// Open, meanwhile, has the window shown once there's one (`shown`). The
+/// compositor's connection; none once Ectomatter is to stop.
+fn wait(s: &mut Session, slot: &Slot, shown: &mut bool, now: bool) -> Option<Connection> {
+    if now && let Ok(c) = Connection::connect_to_env() {
+        return Some(c);
+    }
+    eprintln!("ectomatter: no compositor yet; Ectomatter works on without its window and shows it once there's one");
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        // (as Plasma's login starts programs on Fedora KDE 44 before KWin has told
+        // systemd where it is: the login entry waits for KWin, autostart.rs)
+        eprintln!("ectomatter: it was started without WAYLAND_DISPLAY, so no compositor will be found");
+    }
+    let mut event_loop: EventLoop<()> = EventLoop::try_new().expect("a loop to wait for the compositor in");
+    let (ping, ping_source) = calloop::ping::make_ping().expect("a ping for the waiting loop");
+    event_loop.handle().insert_source(ping_source, |_, _, _| {}).expect("the waiting loop takes what Ectomatter's threads tell it");
+    if let Ok(mut p) = slot.lock() {
+        *p = Some(ping);
+    }
+    s.front.set_hidden(true);
+    let mut looked = Instant::now();
+    loop {
+        if looked.elapsed() >= Duration::from_secs(1) {
+            looked = Instant::now();
+            if let Ok(c) = Connection::connect_to_env() {
+                eprintln!("ectomatter: the compositor is there");
+                return Some(c);
+            }
+        }
+        if let session::Step::Stop = s.step() {
+            return None;
+        }
+        for a in s.take(1.0) {
+            match a {
+                tray::TrayAsk::Open => *shown = true,
+                tray::TrayAsk::Device(d) => {
+                    *shown = true;
+                    s.front.ui.set_place(d.into());
+                }
+                tray::TrayAsk::Scene(_) | tray::TrayAsk::Quit => {}
+            }
+        }
+        // (what the page asks of its window comes of a press on it: none here)
+        let _ = s.front.act();
+        // (nothing drawn: the light and the tray's menus kept, as with the window closed)
+        s.compose(1.0, None, s.front.screen_peak, s.front.levels.1);
+        slint::platform::update_timers_and_animations();
+        let next = Duration::from_secs(1).saturating_sub(looked.elapsed());
+        let wait = [Some(next), slint::platform::duration_until_next_timer_update(), s.front.waiting()].into_iter().flatten().min();
+        let _ = event_loop.dispatch(wait, &mut ());
+    }
+}
+
+/// Ectomatter's window on the compositor `conn` reaches, shown or closed into
+/// the tray (`shown`), until Ectomatter is to stop (none) or the compositor
+/// goes away (whether the window was showing then).
+fn window(s: Session, conn: Connection, slot: &Slot, shown: bool) -> (Session, Option<bool>) {
+    let Ok((globals, queue)) = registry_queue_init::<App>(&conn) else { return (s, Some(shown)) };
     let qh = queue.handle();
     let mut event_loop: EventLoop<App> = EventLoop::try_new().unwrap();
     WaylandSource::new(conn.clone(), queue).insert(event_loop.handle()).unwrap();
@@ -324,13 +416,15 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
     window.set_app_id("com.ectonomic.ectomatter");
     window.set_min_size(Some(MIN_SIZE));
 
-    let desc = describe(&cm, &qh, reference, screens::screens().iter().filter_map(|s| s["peak"].as_f64()).fold(reference, f64::max), false, ());
+    let reference = s.pic.reference();
+    let desc = describe(&cm, &qh, reference, screens::screens().iter().filter_map(|sc| sc["peak"].as_f64()).fold(reference, f64::max), false, ());
     let cm_surface = cm.get_surface(window.wl_surface(), &qh, ());
 
     // Ectomatter's threads tell the window through senders that ping this loop
     let (ping, ping_source) = calloop::ping::make_ping().expect("a ping for the window's loop");
-    let wake: shell::Wake = std::sync::Arc::new(move || ping.ping());
-    let session = Session::start(slint, made, ui, settings, reference, gain, &wake);
+    if let Ok(mut p) = slot.lock() {
+        *p = Some(ping);
+    }
     let mut app = App {
         registry: RegistryState::new(&globals),
         seats: SeatState::new(&globals, &qh),
@@ -379,25 +473,30 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         subs: [None, None, None],
         keys_on: None,
         mods: Modifiers::default(),
-        s: session,
+        s,
     };
     event_loop
         .handle()
         .insert_source(ping_source, |_, _, app: &mut App| app.take())
         .expect("the window's loop takes what Ectomatter's threads tell it");
-    // `--hide`: started into the tray, as at login (with no tray to start into,
-    // the window shows, since closing it would quit)
-    if std::env::args().any(|a| a == "--hide") && app.s.tray.is_some() {
-        app.hide();
+    // started into the tray (`--hide`, as at login), or closed into it when the
+    // compositor went away: the window stays closed (with no tray to come back
+    // from, it shows: see the loop)
+    if shown {
+        app.s.front.set_hidden(false);
+    } else {
+        app.unmap();
     }
 
     // the picture's description has to be ready before the surface takes it
     while !app.ready && app.failed.is_none() {
-        event_loop.dispatch(Some(Duration::from_millis(50)), &mut app).unwrap();
+        if event_loop.dispatch(Some(Duration::from_millis(50)), &mut app).is_err() {
+            return app.lost();
+        }
     }
-    if let Some(e) = &app.failed {
+    if let Some(e) = app.failed.take() {
         eprintln!("ectomatter: the compositor refused the HDR picture: {e}");
-        return;
+        return (app.s, None);
     }
     cm_surface.set_image_description(&desc, app.intent);
     eprintln!("ectomatter: the compositor {} the mastering display's luminance", if app.mastering { "takes" } else { "does not take" });
@@ -426,8 +525,15 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         } else {
             [slint::platform::duration_until_next_timer_update(), app.s.front.waiting(), effect].into_iter().flatten().min()
         };
-        event_loop.dispatch(wait, &mut app).unwrap();
+        if event_loop.dispatch(wait, &mut app).is_err() {
+            return app.lost();
+        }
         slint::platform::update_timers_and_animations();
+        // closed into a tray that isn't there (none on this desktop, or gone a
+        // while): shown, as there's no other way back to it
+        if app.hidden && !app.s.tray_there() {
+            app.show();
+        }
         // ECTOMATTER_TRAYTEST: close into the tray once, three seconds in, to check the way back
         if let Some(t) = trial {
             if t.elapsed() > Duration::from_secs(3) {
@@ -467,7 +573,7 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
         }
 
     }
-    app.s.finish();
+    (app.s, None)
 }
 
 impl App {
@@ -603,6 +709,12 @@ impl App {
     fn open(&mut self, what: session::Open) {
         match self.s.open(what) {
             Some((which, session::Opened::New { window, title, size, min })) => self.subs[which] = Some(self.make_sub(window, &title, size, min)),
+            // (its window gone with a compositor that went away: made again, as it was)
+            Some((which, session::Opened::Again)) if self.subs[which].is_none() => {
+                if let (Some(w), Some((title, size, min))) = (self.s.windows[which].clone(), self.s.shapes[which].clone()) {
+                    self.subs[which] = Some(self.make_sub(w, &title, size, min));
+                }
+            }
             Some((which, session::Opened::Again)) => self.show_sub(which),
             None => {}
         }
@@ -804,10 +916,15 @@ impl App {
         self.s.front.hand_back();
         // (a scene being set, unkept: the scene on plays again)
         self.s.front.cancel_scene_form();
-        if self.s.tray.is_none() {
+        if !self.s.tray_there() {
             self.s.quit();
             return;
         }
+        self.unmap();
+    }
+
+    /// The window unmapped (without its buffer), and Ectomatter carrying on.
+    fn unmap(&mut self) {
         self.window.wl_surface().attach(None, 0, 0);
         self.window.commit();
         self.hidden = true;
@@ -816,6 +933,24 @@ impl App {
         self.configured = false;
         self.frame_pending = false;
         self.buffers.clear();
+    }
+
+    /// The compositor gone: each window of its own closed as though the person
+    /// had closed it (its page kept, its window made again when it's opened),
+    /// what the window had borrowed handed back, and Ectomatter on without its
+    /// window until there's a compositor again; whether the window was showing.
+    fn lost(self) -> (Session, Option<bool>) {
+        eprintln!("ectomatter: the compositor went away; Ectomatter works on without its window until there's one again");
+        let shown = !self.hidden;
+        let mut s = self.s;
+        for (which, sub) in self.subs.iter().enumerate() {
+            if sub.as_ref().is_some_and(|w| !w.hidden) {
+                s.closed(which);
+            }
+        }
+        s.front.hand_back();
+        s.front.cancel_scene_form();
+        (s, Some(shown))
     }
 
     /// Bring the window back: a first commit with no buffer, as when it was

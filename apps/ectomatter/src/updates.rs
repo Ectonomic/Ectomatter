@@ -26,7 +26,7 @@ use crate::packages::{self, Package};
 
 /// Where releases are: GitHub, or for a check another address that answers
 /// the same (ECTOMATTER_GITHUB).
-fn base() -> String {
+pub fn base() -> String {
     std::env::var("ECTOMATTER_GITHUB").ok().filter(|b| !b.is_empty()).unwrap_or_else(|| "https://github.com".into())
 }
 
@@ -36,11 +36,17 @@ fn agent() -> ureq::Agent {
 
 /// A file of a repository's latest release, as bytes.
 fn latest(repo: &str, file: &str) -> Result<Vec<u8>, String> {
-    let url = format!("{}/{repo}/releases/latest/download/{file}", base());
-    let r = agent().get(&url).call();
-    match r {
+    get(&format!("{}/{repo}/releases/latest/download/{file}", base())).map_err(|e| if e == NOT_THERE { format!("{repo} has no release with {file}") } else { e })
+}
+
+/// What `get` says of an address with nothing there.
+const NOT_THERE: &str = "nothing is there";
+
+/// A file at an address on the web, as bytes (64 MB at most).
+pub fn get(url: &str) -> Result<Vec<u8>, String> {
+    match agent().get(url).call() {
         Ok(mut res) => res.body_mut().with_config().limit(64 << 20).read_to_vec().map_err(|e| e.to_string()),
-        Err(ureq::Error::StatusCode(404)) => Err(format!("{repo} has no release with {file}")),
+        Err(ureq::Error::StatusCode(404)) => Err(NOT_THERE.into()),
         Err(e) => Err(e.to_string()),
     }
 }
@@ -119,7 +125,7 @@ fn as_expected(inside: &Value, expected: &Value) -> Result<(), String> {
 }
 
 /// A file's SHA-256, in hex.
-fn sha256(bytes: &[u8]) -> String {
+pub fn sha256(bytes: &[u8]) -> String {
     use sha2::Digest;
     sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -259,16 +265,29 @@ impl Checker {
     }
 }
 
-/// Each package with a repository, looked at where a day has passed since it last was.
+/// Each package on the list of reviewed packages (registry.rs), or with a
+/// repository, looked at where a day has passed since it last was: one on the
+/// list by the list's newest version, as reviewed; another by its repository's
+/// latest release.
 fn check_all(tx: &mpsc::Sender<String>) {
     let mut rec = record();
     let now = crate::games::now();
+    let listed = crate::registry::list().unwrap_or_default();
     for p in packages::all() {
-        let Some(repo) = p.repository() else { continue };
+        let on_list = on_list(&p, &listed);
+        let repo = p.repository();
+        if on_list.is_none() && repo.is_none() {
+            continue;
+        }
         if rec[p.id()]["at"].as_u64().is_some_and(|t| now.saturating_sub(t) < 24 * 60 * 60) {
             continue;
         }
-        let s = check(&p, &repo, &packages::added_dir(p.kind()));
+        let into = packages::added_dir(p.kind());
+        let s = match (on_list, repo) {
+            (Some(l), _) => check_listed(&p, l, &into),
+            (None, Some(repo)) => check(&p, &repo, &into),
+            (None, None) => continue,
+        };
         rec[p.id()] = match &s {
             Status::UpToDate(at) => json!({ "status": "up to date", "at": at }),
             Status::Updated(v) => json!({ "status": "updated", "version": v, "at": now }),
@@ -281,6 +300,30 @@ fn check_all(tx: &mpsc::Sender<String>) {
         if let Status::Updated(_) = s {
             let _ = tx.send(p.id().to_string());
         }
+    }
+}
+
+/// A package's entry on the list of reviewed packages: the one of its id, from
+/// the repository it came from where it says.
+pub fn on_list<'a>(p: &Package, listed: &'a [crate::registry::Listed]) -> Option<&'a crate::registry::Listed> {
+    let repo = p.repository();
+    listed.iter().find(|l| l.id() == p.id() && repo.as_ref().is_none_or(|r| r.eq_ignore_ascii_case(&l.repository)))
+}
+
+/// One package on the list checked: the list's version, and the package put
+/// in place (under `into`), as reviewed, if that's newer; one that can do more
+/// on the computer waits for the person.
+pub fn check_listed(p: &Package, l: &crate::registry::Listed, into: &Path) -> Status {
+    if packages::version_key(l.version()) <= packages::version_key(p.version()) {
+        return Status::UpToDate(crate::games::now());
+    }
+    let more = more_than(&l.manifest, &p.manifest.json());
+    if !more.is_empty() {
+        return Status::Asks(l.version().to_string(), more);
+    }
+    match crate::registry::install(l, into) {
+        Ok(m) => Status::Updated(m.version),
+        Err(e) => Status::Failed(e),
     }
 }
 
@@ -343,7 +386,7 @@ pub mod tests {
     }
 
     /// One test at a time names its fake GitHub (ECTOMATTER_GITHUB is the whole process's).
-    static GITHUB: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    pub static GITHUB: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// A stand-in for GitHub's releases on this computer: a repository's
     /// latest release's files by name, everything else not found. Its address.

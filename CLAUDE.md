@@ -91,6 +91,22 @@ This is where they live in this repository.
   the source folder, it writes them with `tools/notices.py` first);
   `tests/install.rs` holds an installed copy to read them where the
   install puts them.
+- **No compositor.** `apps/ectomatter/tests/compositor.rs` (run by
+  `tools/boundaries.sh`; needs `bwrap`, `kwin_wayland`, `dbus-run-session`)
+  starts Ectomatter with no compositor, as at login before KWin is ready,
+  then an off-screen KWin, kills it and starts another: Ectomatter works on
+  throughout and draws on each. Both run in sandboxes with no devices, so
+  KWin never reaches the GPU (an off-screen KWin outside one does, even
+  drawing on the CPU). Starting at login is `src/autostart.rs` (Settings,
+  Startup), with its unit ordered after KWin's.
+- **Packages from others.** `registry/` is the list of cores and plugins
+  Ectonomic reviewed (to be its own repository, Ectonomic/ectomatter-packages):
+  `packages.json`, each version's manifest and the checksum its package must
+  have; `check.py`, what every change to the list must pass (run by
+  `tools/boundaries.sh` against release files made here); its README, how to
+  send a package in. `tools/release-package.py` makes a package's release
+  files; `tools/list-packages.py` writes Ectomatter's own into the list after
+  a package changes. `docs/making-a-package.md` is for someone making one.
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 

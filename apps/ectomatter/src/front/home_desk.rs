@@ -802,15 +802,18 @@ impl Front {
     /// (looked at every two seconds at most), what it's called in words about
     /// it, and what another program having it open means for it.
     pub(super) fn device_rows(&mut self) -> Vec<crate::ecto_settings::DeviceRow> {
-        let ids: Vec<(String, Option<(u16, u16)>)> = self.packages.iter().filter(|p| p.kind() == crate::packages::Kind::Core).map(|p| (p.id().to_string(), p.manifest.usb_ids())).collect();
+        let ids: Vec<(String, Option<(u16, u16)>, serde_json::Value)> = self.packages.iter().filter(|p| p.kind() == crate::packages::Kind::Core).map(|p| (p.id().to_string(), p.manifest.usb_ids(), p.manifest.json())).collect();
         let rows = self.package_rows(crate::packages::Kind::Core);
         rows.into_iter()
             .zip(ids)
-            .map(|(core, (id, usb))| {
+            .map(|(core, (id, usb, manifest))| {
                 let st = match usb {
                     Some((vendor, product)) => {
                         if self.device_status.get(&id).is_none_or(|(t, _)| t.elapsed() > Duration::from_secs(2)) {
-                            self.device_status.insert(id.clone(), (Instant::now(), crate::devices::usb(vendor, product)));
+                            let mut st = crate::devices::usb(vendor, product);
+                            // (and whether this computer has a rule that lets it be opened)
+                            st["ruled"] = serde_json::json!(crate::permission::missing(&manifest).is_empty());
+                            self.device_status.insert(id.clone(), (Instant::now(), st));
                         }
                         self.device_status[&id].1.clone()
                     }
@@ -826,6 +829,8 @@ impl Front {
                     core,
                     present: st["present"].as_bool().unwrap_or(false),
                     reachable: st["reachable"].as_bool(),
+                    // (one Ectomatter opens already needs no rule, whatever its rule is called)
+                    allow: st["ruled"] == serde_json::json!(false) && st["reachable"] != serde_json::json!(true) && self.granting.is_none(),
                     // (each program once, in the same order every time)
                     holders: st["holders"].as_array().map(|a| a.iter().filter_map(|h| h["name"].as_str().map(String::from)).collect::<std::collections::BTreeSet<_>>().into_iter().collect()).unwrap_or_default(),
                     holders_note,
@@ -912,7 +917,7 @@ impl Front {
         self.ui.set_gl_modal(4);
         let word = f.kind.word();
         self.ui.set_gl_plugin_title(format!("Add a {word}").into());
-        self.ui.set_gl_plugin_sub(format!("From the {word}’s GitHub releases, or from its file. Ectomatter says what the {word} can do before you add it.").into());
+        self.ui.set_gl_plugin_sub(format!("From the {word}’s GitHub releases, or from its file. Nobody at Ectonomic has reviewed a {word} added this way; Ectomatter says what the {word} can reach before you add it.").into());
         // (the file by its name: the folder it's in says less than its name)
         self.ui.set_gl_plugin_file(f.file.as_ref().map(|p| p.file_name().map_or_else(|| p.to_string_lossy().to_string(), |n| n.to_string_lossy().to_string())).unwrap_or_default().into());
         let (mut can_add, mut state, mut bad) = (false, String::new(), false);
@@ -1081,6 +1086,10 @@ impl Front {
             }
         }
         self.settings_say(format!("Added {name}."), false);
+        // (a core's devices this computer has no rule for: the system's password prompt, once)
+        if let Some(m) = self.packages.iter().find(|p| p.id() == id && p.kind() == crate::packages::Kind::Core).map(|p| p.manifest.json()) {
+            self.allow_devices(&m);
+        }
         self.refresh();
     }
 

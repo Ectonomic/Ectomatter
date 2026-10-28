@@ -29,7 +29,7 @@ import "../../../crates/ectomatter-draw/typefaces/JetBrainsMono.ttf";
 import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 export { Ink }
 // The design system's parts (ui/system/), which every page is built from.
-import { ColorSquare, DialogHead, FormLabel, FormNote, FormWarning, CarryChip, ScreenBay, FormDialog, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
+import { ColorSquare, DialogHead, FormLabel, FormNote, FormWarning, CarryChip, ScreenBay, FormDialog, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn, PackageItem, PackageRow } from "system/system.slint";
 export { Typing, MenuRow, Cell, LaidBox, ProfileItem }
 
 // The rows and items the pages are handed, and the page parts drawn from them (pages/shared.slint).
@@ -157,6 +157,13 @@ export component AppWindow inherits Window {
     in property <bool> gl-plugin-bad;
     callback gl-plugin-choose-file();
     callback gl-plugin-typed();
+    // Add a core or Add a plugin from the list Ectonomic reviewed: its packages, the one
+    // chosen by a press, the dialog's button's word (Add, or Update), and the way to the
+    // form that adds one from an address or a file
+    in property <[PackageItem]> gl-browse;
+    in property <string> gl-browse-go: "Add";
+    callback gl-browse-pick(int);
+    callback gl-browse-other();
     in property <string> gl-script-limit-note;
     in property <bool> gl-script-editing;
     callback gl-script-wait-toggle();
@@ -1466,17 +1473,19 @@ export component AppWindow inherits Window {
     if root.gl-modal != 0: FormDialog {
         corner: root.radius;
         cancel => { root.gl-modal-close(); }
-        title: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 ? root.gl-plugin-title : root.gl-modal == 5 ? root.gl-var-title : "Add an app";
+        title: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 || root.gl-modal == 6 ? root.gl-plugin-title : root.gl-modal == 5 ? root.gl-var-title : "Add an app";
         text: root.gl-modal == 1 ? "Choose the game’s program. The game joins Games, with a page of its own." : root.gl-modal == 3 ? root.gl-script-sub
-            : root.gl-modal == 4 ? root.gl-plugin-sub : root.gl-modal == 5 ? root.gl-var-sub
+            : root.gl-modal == 4 || root.gl-modal == 6 ? root.gl-plugin-sub : root.gl-modal == 5 ? root.gl-var-sub
             : "Choose an app you’ve had open while Ectomatter was running. The app joins Apps, with a page of its own.";
-        go: (root.gl-modal == 3 && root.gl-script-editing) || (root.gl-modal == 5 && root.gl-var-editing) ? "Save" : "Add";
+        go: (root.gl-modal == 3 && root.gl-script-editing) || (root.gl-modal == 5 && root.gl-var-editing) ? "Save" : root.gl-modal == 6 ? root.gl-browse-go : "Add";
         go-enabled: root.gl-can-add;
         go-pressed => { root.gl-add-done(); }
         // (Remove, where the form changes a script or a value already there)
-        aside: (root.gl-modal == 3 && root.gl-script-editing) || (root.gl-modal == 5 && root.gl-var-editing) ? "Remove" : "";
+        aside: (root.gl-modal == 3 && root.gl-script-editing) || (root.gl-modal == 5 && root.gl-var-editing) ? "Remove" : root.gl-modal == 6 ? "From an address or a file…" : "";
         aside-pressed => {
-            if (root.gl-modal == 3) {
+            if (root.gl-modal == 6) {
+                root.gl-browse-other();
+            } else if (root.gl-modal == 3) {
                 root.gl-script-remove();
             } else {
                 root.gl-var-remove();
@@ -1519,6 +1528,32 @@ export component AppWindow inherits Window {
                 text <=> root.gl-name-typed;
                 accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
                 escape => { root.gl-modal-close(); }
+            }
+        }
+        // a core or plugin from the list Ectonomic reviewed, a row each in a well, the one
+        // chosen with what it can reach; then how it stands, as the form's
+        if root.gl-modal == 6: VerticalLayout {
+            spacing: 0;
+            if root.gl-browse.length > 0: Rectangle {
+                height: browse-rows.preferred-height;
+                border-radius: Radius.panel;
+                background: Ink.well;
+                browse-rows := VerticalLayout {
+                    padding: Space.inline;
+                    spacing: Space.list;
+                    for p[i] in root.gl-browse: PackageRow {
+                        item: p;
+                        clicked => { root.gl-browse-pick(i); }
+                    }
+                }
+            }
+            if root.gl-plugin-state != "" && root.gl-browse.length > 0: Rectangle { height: Space.inline; }
+            if root.gl-plugin-state != "": Text {
+                text: root.gl-plugin-state;
+                font-family: Font.ui;
+                font-size: Font.note;
+                color: root.gl-plugin-bad ? Ink.bad : Ink.quiet;
+                wrap: word-wrap;
             }
         }
         // a plugin: from its GitHub address or its file, and what it is once found

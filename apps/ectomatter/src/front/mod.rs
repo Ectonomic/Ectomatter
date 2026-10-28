@@ -26,6 +26,7 @@ mod game_starts;
 mod home_desk;
 mod lighting_tab;
 mod models;
+mod package_browser;
 mod scene_form;
 mod scene_list;
 mod screen_tab;
@@ -144,6 +145,9 @@ pub enum Ask {
     /// in Add a plugin: Choose…, and an address typed
     GlPluginFile,
     GlPluginTyped,
+    /// in the list of packages: a row pressed, and From an address or a file…
+    GlBrowsePick(i32),
+    GlBrowseOther,
     /// the Screen tab's Game launch: a row's checkbox, its layout's bar selected, its
     /// until menu (where it hangs), and a layout carried over its rows (which row, or
     /// -1, and its place in Layouts)
@@ -719,6 +723,10 @@ pub struct Front {
     /// the form for adding one, while it's open; the daily look for updates
     packages: Vec<crate::packages::Package>,
     package_form: Option<PackageForm>,
+    /// Add a core or Add a plugin, from the list Ectonomic reviewed; and a rule for a core's
+    /// devices being written, with the system's password prompt (the core's name)
+    browser: Option<package_browser::Browser>,
+    granting: Option<(String, mpsc::Receiver<Result<(), String>>)>,
     updates: crate::updates::Checker,
     /// each window open, by KWin's id for it, and the app it's from; the apps not
     /// run through Steam whose plugins' changes are made, from their first window
@@ -749,6 +757,8 @@ pub struct Front {
     /// went wrong with the last
     about_read: Option<(i32, mpsc::Receiver<Result<(), String>>)>,
     about_said: Option<(i32, String)>,
+    /// what starts at login, as the system keeps it (autostart.rs), and when it was looked at
+    starts: (crate::autostart::Starts, Instant),
     /// what Settings' bar says, whether it's a problem, and since when
     settings_said: Option<(String, bool, Instant)>,
     /// an added plugin asked about removing
@@ -1125,6 +1135,8 @@ impl Front {
         on!(on_gl_var_remove, Ask::GlVarRemove);
         on!(on_gl_var_typed, Ask::GlVarTyped);
         on!(on_gl_plugin_choose_file, Ask::GlPluginFile);
+        on!(on_gl_browse_pick, |i| Ask::GlBrowsePick(i));
+        on!(on_gl_browse_other, Ask::GlBrowseOther);
         on!(on_gl_plugin_typed, Ask::GlPluginTyped);
         on!(on_gl_row_on, |i| Ask::GlRowOn(i));
         on!(on_gl_row_pick, |i| Ask::GlRowPick(i));
@@ -1221,6 +1233,8 @@ impl Front {
             following: HashMap::new(),
             packages: Vec::new(),
             package_form: None,
+            browser: None,
+            granting: None,
             updates: crate::updates::Checker::start(),
             windows: HashMap::new(),
             app_sessions: Default::default(),
@@ -1237,6 +1251,7 @@ impl Front {
             run_pick: None,
             about_read: None,
             about_said: None,
+            starts: (crate::autostart::now(), Instant::now()),
             settings_said: None,
             removing: None,
             mouse_icons: None,
@@ -2351,6 +2366,10 @@ impl Front {
                     if self.package_form.is_some() {
                         self.package_form_tick();
                     }
+                    if self.browser.is_some() {
+                        self.browser_tick();
+                    }
+                    self.granting_tick();
                     while let Ok(id) = self.updates.updated.try_recv() {
                         // an update put in place: its plugin started again on it
                         self.give_packages();
@@ -2646,19 +2665,23 @@ impl Front {
                 Ask::GlPlay => self.games.play(&self.front_apps),
                 Ask::GlProgram => self.games.choose_program(),
                 Ask::GlAddDone => {
-                    if self.package_form.is_some() {
+                    if self.browser.is_some() {
+                        self.browse_add_done();
+                    } else if self.package_form.is_some() {
                         self.package_add_done();
                     } else {
                         self.games.add_done(&self.ui);
                     }
                 }
                 Ask::GlClose => {
-                    if self.package_form.take().is_some() {
+                    if self.browser.take().is_some() || self.package_form.take().is_some() {
                         self.ui.set_gl_modal(0);
                     } else {
                         self.games.close_form();
                     }
                 }
+                Ask::GlBrowsePick(i) => self.browse_pick(i),
+                Ask::GlBrowseOther => self.browse_other(),
                 Ask::GlPluginFile => {
                     if let Some(f) = &mut self.package_form {
                         if f.picking.is_none() {

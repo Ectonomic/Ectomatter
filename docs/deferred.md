@@ -256,18 +256,62 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   stand-in yet; they build because they find nothing.
   The Wayland shell refuses to open without the compositor's color
   management (`shell/wayland.rs`, `run`); the winit shell doesn't need it.
+- Start at login (Settings, Startup; `autostart.rs`) writes a value under
+  the Run key on Windows (with `reg`, and clears Task Manager's turning it
+  off) and a launch agent in `~/Library/LaunchAgents` on macOS. Neither has
+  run on its system: the text each writes is tested on Linux
+  (`each_systems_entry_starts_the_program_it_names`), the code type-checks
+  (`tools/check-systems.sh`). macOS's Login Items list shows a launch agent
+  under Allow in the Background, not as a login item; a login item proper
+  is `SMAppService` (macOS 13), which needs Ectomatter as an app bundle. With
+  no tray in the winit shell, Ectomatter started at login there shows its
+  window (`--hide` needs the tray).
+- The winit shell still needs its display at its start (`winit.rs`, `run`):
+  Windows and macOS have one before any program starts at login, but
+  `ECTOMATTER_SHELL=winit` on Linux before the compositor is ready ends.
 
 ## Stage 1: installable on Linux
 
-- No package manager or browser in the app (Grant, 2026-10-28: "we need
-  this to be a part of the in app plugin and core manager and browser that
-  hasnt been built"). Settings adds a core or plugin only from a GitHub
-  address typed by hand (`front/home_desk.rs`, `add_package_form`), with
-  Review and Remove beside each; nothing lists the packages there are to
-  add. Adding a core for a new device writes no udev rule for that device
-  (`main.rs`, `udev_rules`, run once by `tools/install.sh`), so Linux won't
-  let Ectomatter open the device; the manager is where that rule gets
-  written, with the system's password prompt.
+- Ectomatter started at login before KWin had told systemd where its display
+  is (Fedora KDE 44, 2026-10-28: Plasma's login starts programs then; KDE's
+  own video bridge failed the same way, and Fedora's forum has Thunderbird and
+  Yakuake doing it) is met by ordering the login entry's unit after KWin's
+  (`autostart.rs`, `ORDER`), Fedora's forum's fix for the video bridge. On a
+  desktop other than Plasma whose login does the same, Ectomatter starts with
+  no `WAYLAND_DISPLAY` and waits without its window for good, saying so in
+  its log (`shell/wayland.rs`, `wait`). The bug isn't reported to Fedora or
+  KDE: that waits for Grant (his account). The order's fix is tested in its
+  writing (`starting_at_login_is_written_where_the_desktop_reads_it`), not
+  by logging in.
+- The tray's icon waits for a desktop's tray that comes after Ectomatter, as
+  at login (`tray.rs`, `assume_sni_available`); no test has a desktop's tray
+  come late. A window of its own (the Macro Editor's, the lab's, the screen
+  layout editor's) is made again after the compositor goes and comes back
+  (`shell/wayland.rs`, `open`); `tests/compositor.rs` tries the main window
+  only.
+
+- The list of packages Ectonomic reviewed (`registry/`, Grant's go
+  2026-10-28) isn't published: its repository, Ectonomic/ectomatter-packages,
+  doesn't exist, so Add a core and Add a plugin say Ectomatter can't read the
+  list (`front/package_browser.rs`) until it does, and the daily check finds
+  no listed versions (`updates.rs`, `check_all`). The list pins packages
+  built on this computer (`tools/list-packages.py`); none of Ectonomic's
+  packages has a GitHub release yet, so `registry/check.py` without
+  `--releases` fails on each of them.
+- `registry/check.py` takes a release's files as given: nothing rebuilds a
+  package from its repository's source to see the release is what that
+  source makes. Nothing is signed either: the checksums pinned in the list
+  catch a release changed after review, as long as the list's own
+  repository isn't changed.
+- Add a core and Add a plugin show every listed package of the kind in one
+  well, with no search and no scrolling; a long list would run off the
+  dialog (`ui/app.slint`, `gl-modal == 6`).
+- Adding a package from the list runs untested past choosing it: the renders
+  draw the list and a package chosen (`add-core`), and the parts are tested
+  on their own (`registry.rs`, `permission.rs`), but nothing presses Add and
+  follows the package in and the password prompt.
+- No template repository for someone making a package: `docs/making-a-package.md`
+  points at the packages in this repository.
 - `tools/install.sh` lays Ectomatter out under a prefix (its programs, its
   packages as installed, a desktop entry and its icon, udev's rule made from
   the cores' manifests, the licenses), tried by `tests/install.rs`, and

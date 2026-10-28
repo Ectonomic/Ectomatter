@@ -50,6 +50,12 @@ impl Kept {
     }
 }
 
+/// How long the tray's icon may be out of the desktop's tray and the window
+/// still close into it: at login the desktop's tray comes a moment after its
+/// compositor, and back a moment after it restarts. Gone longer, or never
+/// there, the window shows, as there's no other way back to it.
+pub(crate) const TRAY_WAIT: Duration = Duration::from_secs(30);
+
 /// What Ectomatter is doing in its main window, apart from how the window is
 /// shown: the pages (`Front`), the picture they're composed into, the
 /// keyboards drawn for the page and for Home, their light and its simulation,
@@ -63,6 +69,9 @@ pub(crate) struct Session {
     /// layout editor's), once each is opened
     pub(crate) made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>,
     pub(crate) windows: [Option<Rc<MinimalSoftwareWindow>>; 3],
+    /// each window of its own's title, size and least size, to make its window
+    /// again after a compositor that went away
+    pub(crate) shapes: [Option<(String, (u32, u32), (u32, u32))>; 3],
     /// KWin's script, which tells Ectomatter the app in front, and when it was last looked at
     pub(crate) front_bus: Option<front_app::Bus>,
     pub(crate) kwin_looked: Instant,
@@ -761,6 +770,7 @@ impl Session {
         Session {
             made,
             windows: [None, None, None],
+            shapes: [None, None, None],
             inbox: Inbox { built, legends, sim, heard, locks, mouse: mouse_rx, jobs, news, front: front_rx, starts, tray: tray_rx },
             front_bus,
             kwin_looked: Instant::now(),
@@ -906,6 +916,7 @@ impl Session {
             let window = s.made.borrow().last().cloned().expect("the window's adapter");
             window.set_size(PhysicalSize::new(size.0, size.1));
             s.windows[which] = Some(window.clone());
+            s.shapes[which] = Some((title.clone(), size, min));
             Opened::New { window, title, size, min }
         };
         match what {
@@ -1053,6 +1064,12 @@ impl Session {
             }
             _ => {}
         }
+    }
+
+    /// Whether the window can close into the tray: the tray's icon is in the
+    /// desktop's tray, or was a moment ago (TRAY_WAIT).
+    pub(crate) fn tray_there(&self) -> bool {
+        self.tray.as_ref().is_some_and(|t| t.away().is_none_or(|a| a < TRAY_WAIT))
     }
 
     /// Quit as the tray's Quit does: each device its own again, and

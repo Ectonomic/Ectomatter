@@ -201,6 +201,22 @@ impl Front {
                 self.refresh();
                 return;
             }
+            Ctl::PackageAllow => {
+                if let Some(m) = self.packages.get(index).map(|p| p.manifest.json()) {
+                    self.allow_devices(&m);
+                }
+                self.refresh();
+                return;
+            }
+            Ctl::StartAtLogin => {
+                let on = index == 0;
+                if let Err(e) = crate::autostart::set(on) {
+                    self.settings_say(format!("Starting at login wasn’t turned {}: {e}.", if on { "on" } else { "off" }), true);
+                }
+                self.starts = (crate::autostart::now(), Instant::now());
+                self.refresh();
+                return;
+            }
             Ctl::AboutRead => {
                 self.close_menu();
                 self.about_said = None;
@@ -210,13 +226,19 @@ impl Front {
             }
             Ctl::PackageAdd => {
                 self.close_menu();
-                self.add_package_form(if index == 0 { crate::packages::Kind::Core } else { crate::packages::Kind::Plugin });
+                self.open_browser(if index == 0 { crate::packages::Kind::Core } else { crate::packages::Kind::Plugin }, None);
                 self.refresh();
                 return;
             }
             // (a newer version waiting: the form a package is added from, on its release)
             Ctl::PackageReview => {
                 let Some(p) = self.packages.get(index).cloned() else { return };
+                // (one from the list: its version waiting, chosen in the list)
+                if crate::registry::cached().is_some_and(|(l, _)| crate::updates::on_list(&p, &l).is_some()) {
+                    self.open_browser(p.kind(), Some(p.id()));
+                    self.refresh();
+                    return;
+                }
                 let Some(repo) = p.repository() else { return };
                 self.add_package_form(p.kind());
                 self.ui.set_gl_plugin_address(format!("github.com/{repo}").into());

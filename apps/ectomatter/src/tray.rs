@@ -28,7 +28,13 @@ struct Tray {
     scenes: Vec<(String, String)>,
     scene: Option<String>,
     icon: Vec<ksni::Icon>,
+    /// since when the desktop's tray hasn't had the icon: none while it has
+    away: Away,
 }
+
+/// Since when the desktop's tray hasn't had Ectomatter's icon, shared with the tray's thread.
+#[cfg(target_os = "linux")]
+type Away = std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>;
 
 #[cfg(target_os = "linux")]
 impl ksni::Tray for Tray {
@@ -43,6 +49,18 @@ impl ksni::Tray for Tray {
     }
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip { title: "Ectomatter".into(), ..Default::default() }
+    }
+    // the desktop's tray not there (not yet, at login, or gone): the icon goes in when it's back
+    fn watcher_offline(&self, _: ksni::OfflineReason) -> bool {
+        if let Ok(mut a) = self.away.lock() {
+            a.get_or_insert_with(std::time::Instant::now);
+        }
+        true
+    }
+    fn watcher_online(&self) {
+        if let Ok(mut a) = self.away.lock() {
+            *a = None;
+        }
     }
     fn activate(&mut self, _x: i32, _y: i32) {
         let _ = self.tell.send(TrayAsk::Open);
@@ -129,13 +147,18 @@ fn icon() -> Vec<ksni::Icon> {
 }
 
 #[cfg(target_os = "linux")]
-pub struct Handle(ksni::blocking::Handle<Tray>);
+pub struct Handle(ksni::blocking::Handle<Tray>, Away);
 
 #[cfg(target_os = "linux")]
 impl Handle {
     /// The devices, as they sit on Home's desk, each with whether it is there, for their entries.
     pub fn devices(&self, devices: Vec<(String, String, bool)>) {
         self.0.update(|t| t.devices = devices);
+    }
+
+    /// How long the desktop's tray has been without the icon: none while it has it.
+    pub fn away(&self) -> Option<std::time::Duration> {
+        self.1.lock().ok().and_then(|a| a.map(|t| t.elapsed()))
     }
 
     /// The scenes, for the Scene menu, and the one on.
@@ -149,8 +172,12 @@ impl Handle {
 
 #[cfg(target_os = "linux")]
 pub fn start(tell: Sender<TrayAsk>) -> Option<Handle> {
-    match (Tray { tell, devices: Vec::new(), scenes: Vec::new(), scene: None, icon: icon() }).spawn() {
-        Ok(h) => Some(Handle(h)),
+    let away = Away::default();
+    // (Ectomatter can start before the desktop's tray, as at login: its icon goes in once
+    // the tray is there, as the tray's library has it for a program that starts before
+    // its desktop is ready)
+    match (Tray { tell, devices: Vec::new(), scenes: Vec::new(), scene: None, icon: icon(), away: away.clone() }).assume_sni_available(true).spawn() {
+        Ok(h) => Some(Handle(h, away)),
         Err(e) => {
             eprintln!("ectomatter: no tray: {e}");
             None
@@ -190,6 +217,9 @@ pub struct Handle;
 impl Handle {
     pub fn devices(&self, _: Vec<(String, String, bool)>) {}
     pub fn scenes(&self, _: Vec<(String, String)>, _: Option<String>) {}
+    pub fn away(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
