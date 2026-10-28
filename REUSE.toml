@@ -87,11 +87,12 @@ path = ["apps/ectomatter/data/lcdfont.json", "design/lcdfont.json"]
 SPDX-FileCopyrightText = "2012 Adafruit Industries"
 SPDX-License-Identifier = "BSD-2-Clause"
 
-# the Z10 screen's own letters, read from its firmware
+# Ectomatter's own: the Z10 screen's letters, 8 by 8 dots as its firmware
+# draws them, a screen's typeface, which needs no license (Grant, 2026-10-27)
 [[annotations]]
 path = ["apps/ectomatter/data/z10font.json"]
-SPDX-FileCopyrightText = "EVGA Corporation"
-SPDX-License-Identifier = "LicenseRef-EVGA-Z10-Firmware"
+SPDX-FileCopyrightText = "2026 Grant Garrison"
+SPDX-License-Identifier = "GPL-3.0-only"
 
 # the glyphs typefaces lack, cut from DejaVu Sans Bold and Noto Sans Symbols
 [[annotations]]

@@ -1,3 +1,0 @@
-The EVGA Z10 RGB keyboard's screen letters, 8 by 8 cells from the space on,
-read from the keyboard's firmware (Z10_RGB_117.bin, which EVGA ships in
-EVGA Unleash RGB). EVGA Corporation gives no license for them.

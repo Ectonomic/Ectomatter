@@ -1,9 +1,13 @@
 # The licenses Ectomatter's dependencies may come under (tools/licenses.sh
 # holds the app and every package that comes with it to this list).
 # Ectomatter is under the GPLv3 (Grant, 2026-10-27), so a dependency under
-# it asks nothing more of Ectomatter. Each other license in `allow` is
-# permissive: it lets Ectomatter ship the dependency inside it with the
-# dependency's notice, and asks nothing of the rest. A dependency under
+# it asks nothing more of Ectomatter. Each other license in `allow`'s first
+# part is permissive: it lets Ectomatter ship the dependency inside it with
+# the dependency's notice, and asks nothing of the rest. Its second part is
+# the licenses of the files Ectomatter carries from others (REUSE.toml),
+# approved for them by Grant (2026-10-27): each asks for its notice, and the
+# typefaces' (OFL-1.1) and KDE's shadow protocol's (LGPL-2.1-or-later) that
+# those files stay under their own license. A dependency under
 # anything else isn't approved until it's added here, which is Grant's
 # call; one that offers a choice (`MIT OR Apache-2.0`) is approved when one
 # of its choices is. A license approved for some crates alone goes in an
@@ -32,5 +36,13 @@ allow = [
   "0BSD",
   "Unlicense",
   "CDLA-Permissive-2.0",
+  # the files carried from others (REUSE.toml)
+  "OFL-1.1",
+  "MIT-CMU",
+  "LGPL-2.1-or-later",
+  "Bitstream-Vera",
+  "LicenseRef-Arev",
+  "CC-BY-4.0",
+  "CC0-1.0",
 ]
 
