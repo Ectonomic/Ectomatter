@@ -335,6 +335,7 @@ impl Front {
                 settings: self.settings.all(),
                 top_peak: self.levels.1,
                 reference: self.levels.0,
+                about: self.about_said.clone(),
             };
             let (cells, h, map, pmap) = crate::ecto_settings::page(&st, self.ui.get_content_width());
             self.sensor_map = map;

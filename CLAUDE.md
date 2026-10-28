@@ -80,7 +80,11 @@ This is where they live in this repository.
   on one without a table. The install writes `NOTICES` (the app's, and each
   package's beside its manifest) with `tools/notices.py`: every library and
   carried file, and its license text; `tests/install.rs` holds it to Cargo's
-  own record of what ships.
+  own record of what ships. Settings' About (`src/about.rs`) shows the
+  GPLv3's legal notices and opens the license and the notices (run from
+  the source folder, it writes them with `tools/notices.py` first);
+  `tests/install.rs` holds an installed copy to read them where the
+  install puts them.
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 

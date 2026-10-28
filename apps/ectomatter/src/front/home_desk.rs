@@ -751,6 +751,25 @@ impl Front {
         self.ui.set_package_tiles(ModelRc::new(VecModel::from(tile)));
     }
 
+    /// Settings' About: a Read opened, or what went wrong with it said under its row.
+    pub(super) fn about_tick(&mut self) -> bool {
+        let Some((which, rx)) = &self.about_read else { return false };
+        let said = match rx.try_recv() {
+            Ok(r) => r.err(),
+            Err(mpsc::TryRecvError::Empty) => return false,
+            Err(mpsc::TryRecvError::Disconnected) => Some("It didn’t open.".to_string()),
+        };
+        if let Some(e) = &said {
+            eprintln!("ectomatter: About's Read: {e}");
+        }
+        self.about_said = said.map(|e| (*which, e));
+        self.about_read = None;
+        if self.ui.get_place() == "settings" {
+            self.refresh();
+        }
+        true
+    }
+
     /// Settings' Cores or Plugins: each package of that kind's row, by its place among all.
     pub(super) fn package_rows(&self, kind: crate::packages::Kind) -> Vec<crate::ecto_settings::PackageRow> {
         self.packages

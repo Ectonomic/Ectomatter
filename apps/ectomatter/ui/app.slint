@@ -45,6 +45,8 @@ export { KeyItem, Overlay, LayerItem, EffectItem, LibRow, LibGroup, LayerTab, Ch
 export component AppWindow inherits Window {
     in property <bool> is-maximized;
     in property <image> mark;
+    // (the same, on its tile in Settings' About)
+    in property <image> mark-tile;
     in property <image> home-glyph;
     in property <image> keyboard-glyph;
     in property <image> keyboard-tile;
@@ -1100,6 +1102,7 @@ export component AppWindow inherits Window {
             keyboard-tile: root.keyboard-tile;
             mouse-tile: root.mouse-tile;
             package-tiles: root.package-tiles;
+            mark-tile: root.mark-tile;
             place <=> root.place;
             settings-h: root.settings-h;
         }

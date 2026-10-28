@@ -730,6 +730,10 @@ pub struct Front {
     steam_busy: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// a program being chosen to run in a game's prefix, for that game
     run_pick: Option<(String, mpsc::Receiver<Option<std::path::PathBuf>>)>,
+    /// Settings' About: a Read being opened (0 the license, 1 the notices), and what
+    /// went wrong with the last
+    about_read: Option<(i32, mpsc::Receiver<Result<(), String>>)>,
+    about_said: Option<(i32, String)>,
     /// an added plugin asked about removing
     removing: Option<String>,
     mouse_icons: Option<(f32, f32, Vec<slint::Image>)>,
@@ -1210,6 +1214,8 @@ impl Front {
             jobs: Vec::new(),
             steam_busy: None,
             run_pick: None,
+            about_read: None,
+            about_said: None,
             removing: None,
             mouse_icons: None,
             mouse_layers: None,
@@ -2286,6 +2292,7 @@ impl Front {
                     }
                     news |= self.worker_told();
                     news |= self.launch_tick();
+                    news |= self.about_tick();
                     news |= self.games.typed_settled();
                     if self.package_form.is_some() {
                         self.package_form_tick();

@@ -26,6 +26,7 @@
 // it stops the build rather than warning (one slipped through in 1da0b0b).
 #![deny(unconditional_recursion)]
 
+mod about;
 mod adapter;
 mod boxes;
 mod boundaries;
@@ -221,6 +222,10 @@ fn config_dir() -> PathBuf {
 }
 fn data_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")).join("com.ectonomic.ectomatter")
+}
+/// and what it can make again whenever it's asked for (the notices, run from the source folder)
+fn cache_dir() -> PathBuf {
+    std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache")).join("com.ectonomic.ectomatter")
 }
 
 /// How bright the desktop's white is and how bright the keys' light can go
@@ -502,6 +507,8 @@ fn main() {
         setups::load_images(&core.id);
     }
     ectomatter_draw::print::warm();
+    // where its license and notices are, said in the log beside where its packages are
+    about::folder();
     // `--read-state FILE`: read the keyboard's state once, for the snapshots, and stop
     if let Some(path) = args.iter().position(|a| a == "--read-state").and_then(|i| args.get(i + 1)) {
         // (the keyboard's core alone, started as any core is)
@@ -530,6 +537,8 @@ fn main() {
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().expect("the main window's adapter");
     ui.set_mark(glyph(include_str!("../ui/glyphs/mark.svg"), 16, false));
+    // (and on its tile in Settings' About, at its own colors)
+    ui.set_mark_tile(glyph(include_str!("../ui/glyphs/mark.svg"), 88, false));
     ui.set_home_glyph(glyph(include_str!("../ui/glyphs/home.svg"), 22, true));
     ui.set_keyboard_glyph(glyph(include_str!("../ui/glyphs/keyboard.svg"), 22, true));
     ui.set_settings_glyph(glyph(include_str!("../ui/glyphs/settings.svg"), 22, true));

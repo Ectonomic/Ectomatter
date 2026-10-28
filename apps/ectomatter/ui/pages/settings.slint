@@ -15,6 +15,7 @@ export component SettingsPage inherits Rectangle {
     in property <image> keyboard-tile;
     in property <image> mouse-tile;
     in property <[image]> package-tiles;
+    in property <image> mark-tile;
     in-out property <string> place;
     in property <length> settings-h;
     in-out property set-flick-content-height <=> set-flick.content-height;
@@ -31,6 +32,7 @@ export component SettingsPage inherits Rectangle {
             glyph: root.keyboard-tile;
             glyph2: root.mouse-tile;
             glyphs: root.package-tiles;
+            logo: root.mark-tile;
             pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
             field-left(id, index, kept) => { root.cell-left(id, index, kept); }
             slide(id, v) => { root.cell-slide(id, v); }

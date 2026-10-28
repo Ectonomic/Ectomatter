@@ -56,6 +56,8 @@ export component CellView inherits Rectangle {
     // before its words (its value, one more than the chip's place)
     in property <image> glyph3;
     in property <[image]> chips;
+    // Ectomatter's own mark (a device glyph's style -2), at its own colors
+    in property <image> logo;
     x: root.c.x;
     y: root.c.y;
     width: root.c.w;
@@ -150,7 +152,8 @@ export component CellView inherits Rectangle {
         drop-shadow-offset-y: root.c.style == 27 ? Shadow.float.y : 0;
         drop-shadow-color: root.c.style == 27 ? Shadow.float.color : transparent;
     }
-    // a device's glyph on its square (style 1: the second device's, the mouse)
+    // a device's glyph on its square (style 1: the second device's, the mouse; -2:
+    // Ectomatter's mark, in Settings' About, at its own colors)
     if root.c.kind == 12: Rectangle {
         border-radius: Radius.panel;
         background: Ink.well;
@@ -158,8 +161,8 @@ export component CellView inherits Rectangle {
         Image {
             width: floor(parent.width * 0.625 / 1px) * 1px;
             height: self.width;
-            source: root.c.style == -1 ? root.glyph3 : root.c.style >= 2 ? root.glyphs[root.c.style - 2] : root.c.style == 1 ? root.glyph2 : root.glyph;
-            colorize: Ink.soft;
+            source: root.c.style == -2 ? root.logo : root.c.style == -1 ? root.glyph3 : root.c.style >= 2 ? root.glyphs[root.c.style - 2] : root.c.style == 1 ? root.glyph2 : root.glyph;
+            colorize: root.c.style == -2 ? transparent : Ink.soft;
         }
     }
     // the weather's box (style 1: a folder's path in a plugin's section, its corners

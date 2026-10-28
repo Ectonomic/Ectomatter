@@ -16,9 +16,11 @@ license text. A text many share is written once, under all their names.
       `unapproved ID PATH...`, and exits 1 when anything is printed
 
 Reads only this repository, Cargo's metadata and the crates' own folders.
+Runs the Cargo $CARGO names, else the one on the PATH.
 """
 import fnmatch
 import json
+import os
 import re
 import subprocess
 import sys
@@ -114,7 +116,7 @@ LICENSE_FILE = re.compile(r'(?i)^(licen[sc]e|copying|copyright|notice|unlicense|
 
 def shipped(manifest):
     md = json.loads(subprocess.run(
-        ['cargo', 'metadata', '--manifest-path', str(manifest), '--locked', '--all-features', '--format-version', '1'],
+        [os.environ.get('CARGO', 'cargo'), 'metadata', '--manifest-path', str(manifest), '--locked', '--all-features', '--format-version', '1'],
         check=True, capture_output=True, text=True).stdout)
     pk = {p['id']: p for p in md['packages']}
     nodes = {n['id']: n for n in md['resolve']['nodes']}

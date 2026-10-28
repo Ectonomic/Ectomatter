@@ -113,9 +113,11 @@ pub enum Ctl {
     /// Settings' Devices and Plugins: Review on a package whose newer version
     /// waits for the person, by its place among the packages
     PackageReview,
+    /// Settings' About: Read, Ectomatter's license (0) or its notices (1)
+    AboutRead,
 }
 
-const CTLS: [Ctl; 60] = [
+const CTLS: [Ctl; 61] = [
     Ctl::None,
     Ctl::Paint,
     Ctl::Demo,
@@ -176,6 +178,7 @@ const CTLS: [Ctl; 60] = [
     Ctl::ScenePart,
     Ctl::ScenePlugin,
     Ctl::PackageReview,
+    Ctl::AboutRead,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

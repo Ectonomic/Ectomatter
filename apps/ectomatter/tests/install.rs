@@ -158,4 +158,7 @@ fn an_install_lays_ectomatter_out_and_it_starts_from_there() {
     let share = usr.join("share/ectomatter");
     assert!(said.contains(&format!("its packages are in {}", usr.join("bin/../share/ectomatter").display())) || said.contains(&format!("its packages are in {}", share.display())), "not its installed packages:\n{said}");
     assert!(!said.contains(&repo().canonicalize().unwrap().display().to_string()), "it reached its source folder:\n{said}");
+    // and Settings' About reads its license and notices where the install put them
+    let read = said.lines().find_map(|l| l.strip_prefix("ectomatter: its license and notices are read from ")).map(PathBuf::from);
+    assert!(read.as_ref().is_some_and(|d| d.join("LICENSE").is_file() && d.join("NOTICES").is_file()), "its license and notices aren't where it reads them ({read:?}):\n{said}");
 }

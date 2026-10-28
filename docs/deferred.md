@@ -293,7 +293,18 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - The source beside each download: Ectomatter is under the GPLv3 (Grant,
   2026-10-27), which asks that
   directions to the source sit beside the program wherever it's offered
-  (GPLv3 section 6). Nothing is offered yet; a release needs them.
+  (GPLv3 section 6). Nothing is offered yet; a release needs them. Settings'
+  About (`src/ecto_settings.rs`, `about_section`) has no row for the source
+  either; it gets one when the repository has it.
+- Settings' own messages don't show on Settings: `Front::status` (a choice
+  not saved, `front/lighting_tab.rs`; a package added or not removed,
+  `front/home_desk.rs`) sets the words the keyboard's page alone shows
+  (`ui/app.slint` binds `status-text` there only). About's Read says what
+  went wrong in its own row instead (`read_row`).
+- About's Read opens `LICENSE` and `NOTICES` as the desktop opens a file
+  (`src/about.rs`, `crate::games::open`); neither name has an extension,
+  which Linux's `xdg-open` reads past but Windows' `start` asks about. No
+  install lays Ectomatter out on Windows or macOS yet.
 - The GitHub repositories exist in the Ectonomic organization
   (Ectonomic/Ectomatter and one per package, `ectomatter-<package id>`,
   public and empty since 2026-10-26); nothing is in them, and no package's
