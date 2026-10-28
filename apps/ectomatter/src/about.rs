@@ -10,14 +10,9 @@ use std::sync::{mpsc, OnceLock};
 /// Its version, as its manifest has it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Who made Ectomatter, as its manifest names them: "A and B", "A, B and C".
-pub fn authors() -> String {
-    let names: Vec<&str> = env!("CARGO_PKG_AUTHORS").split(':').filter(|n| !n.is_empty()).collect();
-    match names.split_last() {
-        Some((last, [])) => last.to_string(),
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-        None => String::new(),
-    }
+/// Who made Ectomatter, as its manifest names them, in its order.
+pub fn authors() -> Vec<&'static str> {
+    env!("CARGO_PKG_AUTHORS").split(':').filter(|n| !n.is_empty()).collect()
 }
 
 /// Whose Ectomatter is, as REUSE.toml's first table says (every file is
@@ -130,7 +125,7 @@ mod tests {
 
     #[test]
     fn its_authors_are_its_manifests() {
-        assert!(!authors().is_empty() && !authors().contains(':'), "{:?}", authors());
+        assert!(!authors().is_empty() && authors().iter().all(|n| !n.contains(':')), "{:?}", authors());
     }
 
     #[test]

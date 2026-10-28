@@ -488,7 +488,15 @@ fn about_section(f: &mut Form, said: Option<&(i32, String)>) {
         let end = package_head(&mut c.cells, x, top, w, MARK, "Ectomatter");
         c.cells.push(text_cell(style::SMALL, x + size::ROW + space::PAD, end, w - size::ROW - space::PAD, line::NOTE, &format!("Version {}", crate::about::VERSION)));
         c.next(top, size::ROW);
-        c.fact("Authors", &crate::about::authors(), "");
+        // (each author on a line of their own)
+        c.row();
+        c.label_text("Authors");
+        let top = c.y;
+        let mut end = top;
+        for name in crate::about::authors() {
+            end = c.value_lines(end, name);
+        }
+        c.next(top, end - top);
         c.fact("Copyright", &format!("© {}", crate::about::copyright()), "");
         let trouble = |which: i32| said.filter(|(w, _)| *w == which).map(|(_, e)| e.as_str());
         read_row(c, "License", crate::about::license().0, 0, "You can share and change Ectomatter under this license. It comes with no warranty.", trouble(0));
@@ -852,7 +860,7 @@ mod tests {
         assert!(has(&format!("© {}", crate::about::copyright())) && has("no warranty") && has("share and change Ectomatter") && has(crate::about::license().0), "{words:?}");
         let reads: Vec<i32> = cells.iter().filter(|c| c.id == id(Ctl::AboutRead)).map(|c| c.index).collect();
         assert_eq!(reads, [0, 1], "a Read for the license, then the notices");
-        assert!(has(&format!("Version {}", crate::about::VERSION)) && has(&crate::about::authors()));
+        assert!(has(&format!("Version {}", crate::about::VERSION)) && crate::about::authors().iter().all(|n| words.iter().any(|t| t == n)));
         // (a Read that went wrong says so under its own row)
         let s = State { about: Some((1, "This copy of Ectomatter came without its notices.".into())), ..s };
         let cells = page(&s, 1440.0).0;
