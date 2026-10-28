@@ -476,11 +476,10 @@ pub fn page(s: &State, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
 /// the style of a package's tile that holds Ectomatter's own mark (ui/system/cells.slint)
 const MARK: i32 = -2;
 
-/// Settings' About: Ectomatter's mark on its tile, its name and version; who made it; whose
-/// it is; its
-/// license, what that lets a person do, and Read; the notices of what it's built from and
-/// carries, and Read (Ctl::AboutRead, 0 and 1); what went wrong with a Read, in amber
-/// under its row.
+/// Settings' About: Ectomatter's mark on its tile, its name and version; whose it is; its
+/// license, what that lets a person do, and Read; who made it; the notices of what it's
+/// built from and carries, and Read (Ctl::AboutRead, 0 and 1); what went wrong with a
+/// Read, in amber under its row.
 fn about_section(f: &mut Form, said: Option<&(i32, String)>) {
     section(f, "About", |c| {
         c.row();
@@ -488,6 +487,9 @@ fn about_section(f: &mut Form, said: Option<&(i32, String)>) {
         let end = package_head(&mut c.cells, x, top, w, MARK, "Ectomatter");
         c.cells.push(text_cell(style::SMALL, x + size::ROW + space::PAD, end, w - size::ROW - space::PAD, line::NOTE, &format!("Version {}", crate::about::VERSION)));
         c.next(top, size::ROW);
+        c.fact("Copyright", &format!("© {}", crate::about::copyright()), "");
+        let trouble = |which: i32| said.filter(|(w, _)| *w == which).map(|(_, e)| e.as_str());
+        read_row(c, "License", crate::about::license().0, 0, "You can share and change Ectomatter under this license. It comes with no warranty.", trouble(0));
         // (each author on a line of their own)
         c.row();
         c.label_text("Authors");
@@ -497,9 +499,6 @@ fn about_section(f: &mut Form, said: Option<&(i32, String)>) {
             end = c.value_lines(end, name);
         }
         c.next(top, end - top);
-        c.fact("Copyright", &format!("© {}", crate::about::copyright()), "");
-        let trouble = |which: i32| said.filter(|(w, _)| *w == which).map(|(_, e)| e.as_str());
-        read_row(c, "License", crate::about::license().0, 0, "You can share and change Ectomatter under this license. It comes with no warranty.", trouble(0));
         read_row(c, "Credits", "Libraries, typefaces and files made by others", 1, "Each is under its own license, which the notices give in full.", trouble(1));
     });
 }
