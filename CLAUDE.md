@@ -51,6 +51,10 @@ This is where they live in this repository.
 - **Install.** `tools/install.sh [--prefix DIR] [--destdir DIR]` lays
   Ectomatter out as a Linux system has a program; `tests/install.rs` stages
   one and starts it from there (run by `tools/boundaries.sh`).
+  `tools/package-rpm.sh` makes the RPM of that layout
+  (`packaging/ectomatter.spec`, into `target/rpm`); `tests/rpm.rs` unpacks
+  it, holds it to the install file for file, and starts it (needs
+  `rpmbuild`, Fedora's `rpm-build`).
 - **Log.** `~/.local/state/com.ectonomic.ectomatter/ectomatter.log`
   (`$XDG_STATE_HOME`), the run before's as `ectomatter.log.1`: the app's
   stderr is the file itself, so the terminal shows only where the log is.

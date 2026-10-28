@@ -268,11 +268,17 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 - `tools/install.sh` lays Ectomatter out under a prefix (its programs, its
   packages as installed, a desktop entry and its icon, udev's rule made from
-  the cores' manifests, the licenses), tried by `tests/install.rs`; but
-  nothing makes a package of it (no RPM, deb or Flatpak), nothing removes
-  an install, udev isn't told to read its rules again, and the rule for a
-  core added later isn't written (`main.rs`, `udev_rules`, run once, at
-  install).
+  the cores' manifests, the licenses), tried by `tests/install.rs`, and
+  `tools/package-rpm.sh` makes an RPM of that (`packaging/ectomatter.spec`,
+  Grant's pick, 2026-10-27), tried by `tests/rpm.rs`. The RPM is made from
+  the programs built on this computer, for its system (Fedora 44, x86_64):
+  there is no source RPM (Cargo's libraries aren't vendored for a build
+  without the network), it isn't signed, and no other system's package
+  (deb) is made. udev reads the rules again where the system does that for
+  every package (Fedora's does); `%udev_rules_update` asks it to elsewhere.
+  An install by `tools/install.sh` alone has nothing that removes it, and
+  the rule for a core added later isn't written (`main.rs`, `udev_rules`,
+  run once, at install).
 - Installed (not run from the source folder), the lab saves a core's tuning
   as a whole copy of the core's file in the person's data folder
   (`cores.rs`, `tuning_written`), and the core is read from that copy from

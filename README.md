@@ -50,6 +50,9 @@ cargo test --release -p ectomatter
 ./target/release/ectomatter
 ```
 
+`tools/package-rpm.sh` makes the RPM (into `target/rpm`), after building
+everything above; `sudo dnf install target/rpm/ectomatter-*.rpm` installs it.
+
 ## The keyboard's library
 
 `evga-z10` finds the Z10 through hidapi by its LED-indicator collection
