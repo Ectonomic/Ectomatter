@@ -283,6 +283,11 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   KDE: that waits for Grant (his account). The order's fix is tested in its
   writing (`starting_at_login_is_written_where_the_desktop_reads_it`), not
   by logging in.
+- A render case that clicks (`ECTOMATTER_CLICKS` in `apps/ectomatter/tests/renders.rs`, the
+  `Case` list) aims at fixed coordinates, so a layout change makes it miss without failing:
+  add-core's first click missed Add a core once Startup moved to the top of Settings, and
+  the miss was approved in ac2a059 (the dialog never opened) until it was seen and aimed
+  again. Nothing checks that a click landed on what it means to press.
 - The tray's icon waits for a desktop's tray that comes after Ectomatter, as
   at login (`tray.rs`, `assume_sni_available`); no test has a desktop's tray
   come late. A window of its own (the Macro Editor's, the lab's, the screen
