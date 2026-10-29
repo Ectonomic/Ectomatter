@@ -383,7 +383,7 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   stretches an image without smoothing, so on a denser screen (1.5 or 2
   pixels a unit) its outline steps in bigger pixels than the words beside
   it. Drawn at the screen's own pixels it would cost two to four times the
-  processor's time (37 ms a frame for a 1380 by 936 page now,
+  processor's time (40 ms a frame for a 1380 by 936 page now,
   `blob::tests::blob_frame_time`; 30 frames a second, about a core).
 - The mock's grain over the page (3.5%, overlaid) is left out: on the
   page's gray it changes a pixel by under one level.

@@ -10,17 +10,18 @@ use crate::{AboutCredit, AboutFact, AboutLine};
 const FIRST: usize = 3;
 
 /// The Blob's frame is drawn a pixel to each of the page's units, however dense the screen:
-/// a 1380 by 936 page's frame takes 37 ms of one core's time (src/blob.rs, blob_frame_time),
+/// a 1380 by 936 page's frame takes 40 ms of one core's time (src/blob.rs, blob_frame_time),
 /// 30 frames a second about one core; a denser screen shows it a little softer.
 const BLOB_PER_UNIT: f32 = 1.0;
 
-/// About's own state: the credits (and their reading while they come), the Blob's clock
-/// and pokes, the size of the frame drawn last, what the page was last handed, and whether
-/// Credits is open.
+/// About's own state: the credits (and their reading while they come, and whether they're
+/// in, or known not to be), the Blob's clock and pokes, the size of the frame drawn last,
+/// what the page was last handed, and whether Credits is open.
 #[derive(Default)]
 pub(super) struct AboutState {
     credits: Option<Credits>,
     reading: Option<mpsc::Receiver<Result<Credits, String>>>,
+    settled: bool,
     asked: bool,
     since: Option<Instant>,
     pokes: Vec<(Duration, [f32; 2])>,
@@ -72,6 +73,12 @@ pub(crate) fn facts(credits: Option<&Credits>) -> Vec<FactKey> {
     out
 }
 
+/// About's foot as it stands: no facts until the credits are in, or known not to come;
+/// then they come once, in their place, rather than a stand-in that changes under the eye.
+fn foot(about: &AboutState) -> Vec<FactKey> {
+    if about.settled { facts(about.credits.as_ref()) } else { Vec::new() }
+}
+
 /// The GPLv3's notice in two lines as even as they come, so neither is left short.
 pub(crate) fn even_lines(words: &str) -> Vec<String> {
     let w: Vec<&str> = words.split(' ').collect();
@@ -83,6 +90,14 @@ pub(crate) fn even_lines(words: &str) -> Vec<String> {
 }
 
 impl Front {
+    /// About's credits asked for, away from the window's thread, as Ectomatter starts: made
+    /// from the history they take a moment, and About shows none until they're in.
+    pub(crate) fn ask_credits(&mut self) {
+        if self.about.reading.is_none() && !self.about.settled {
+            self.about.reading = Some(about::credits());
+        }
+    }
+
     /// Whether About is in front: Settings open on its last tab.
     pub(crate) fn about_shows(&self) -> bool {
         self.ui.get_place() == "settings" && self.settings_tab == crate::ecto_settings::Tab::About
@@ -141,11 +156,11 @@ impl Front {
     pub(super) fn show_about(&mut self) {
         if !self.about.asked {
             self.about.asked = true;
-            self.about.reading = Some(about::credits());
+            self.ask_credits();
             crate::motion::look();
         }
         self.credits_came();
-        let facts = facts(self.about.credits.as_ref());
+        let facts = foot(&self.about);
         let trouble = self.about_said.as_ref().map(|(_, e)| e.clone()).unwrap_or_default();
         let eyebrow = format!("Version {}", about::VERSION).to_uppercase();
         let now = (facts, trouble, eyebrow);
@@ -184,6 +199,7 @@ impl Front {
         };
         self.about.reading = None;
         self.about.credits = got;
+        self.about.settled = true;
         true
     }
 
@@ -246,6 +262,21 @@ mod tests {
         // (before the credits come, the manifest's authors)
         let none = facts(None);
         assert!(about::authors().iter().all(|a| none[0].1.iter().any(|l| l.0 == *a)));
+    }
+
+    /// The foot stays empty while the credits are being made, and shows them once they're
+    /// in; if they can't be made, the manifest's authors, once.
+    #[test]
+    fn the_foot_waits_for_the_credits_rather_than_changing() {
+        let (tx, rx) = mpsc::channel();
+        let mut a = AboutState { reading: Some(rx), ..Default::default() };
+        assert!(foot(&a).is_empty(), "a stand-in shown while the credits come");
+        tx.send(Ok(made_up(5, 2))).unwrap();
+        let got = a.reading.take().unwrap().try_recv().unwrap();
+        (a.credits, a.settled) = (got.ok(), true);
+        assert_eq!(foot(&a), facts(Some(&made_up(5, 2))));
+        let failed = AboutState { settled: true, ..Default::default() };
+        assert_eq!(foot(&failed), facts(None));
     }
 
     #[test]

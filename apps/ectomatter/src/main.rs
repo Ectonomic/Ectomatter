@@ -636,6 +636,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     hosted.start_all(&settings);
     devices_described(&hosted);
     let mut front = Front::new(ui, hosted, None, true, settings);
+    front.ask_credits();
     front.levels.0 = reference;
     if let Some(state) = std::env::var_os("ECTOMATTER_STATE") {
         // (as the keyboard's core reads it, device/read)

@@ -51,7 +51,7 @@ export component AboutPage inherits Rectangle {
     // the height of the page in view, which the Blob is drawn to; and the height the
     // column and the facts need, apart as the page has them
     in property <length> view-h;
-    out property <length> need: Space.margin + hero.preferred-height + Space.section + foot.preferred-height + Space.foot;
+    out property <length> need: Space.margin + hero.preferred-height + Space.section + root.foot-h + Space.foot;
     background: Ink.base;
     clip: true;
 
@@ -152,10 +152,13 @@ export component AboutPage inherits Rectangle {
 
     // the facts side by side, each as wide as a fact at most, narrower in a narrow window
     property <length> fact-w: min(Size.fact, (root.width - 2 * Space.margin - (root.facts.length - 1) * Space.facts) / max(1, root.facts.length));
+    // (as tall as the most a fact holds, whatever the facts are: a heading, three lines and
+    // a link, so neither the facts nor the column over them move when the credits come)
+    property <length> foot-h: Line.small + Space.label + 3 * Line.text + Space.tight + Size.quiet;
     foot := HorizontalLayout {
-        width: root.facts.length * root.fact-w + (root.facts.length - 1) * Space.facts;
+        width: max(0, root.facts.length * root.fact-w + (root.facts.length - 1) * Space.facts);
         x: (parent.width - self.width) / 2;
-        height: self.preferred-height;
+        height: root.foot-h;
         y: parent.height - Space.foot - self.height;
         spacing: Space.facts;
         for f in root.facts: VerticalLayout {

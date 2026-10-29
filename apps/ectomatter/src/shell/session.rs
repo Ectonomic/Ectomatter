@@ -733,6 +733,8 @@ impl Session {
         // the keyboard lit by the light setup in use, if it is one of the person's own
         let lit_by = cores::keyboard().and_then(|core| setups::in_use(&settings, &core.id).map(|s| setups::merged(&core.device_now()["light"], &s.changes)));
         let mut front = Front::new(ui, hosted, kb, controlled, settings);
+        // (About's credits made from the history now, so they're there when About opens)
+        front.ask_credits();
         front.kb_there = Some(z10_there.clone());
         (front.mouse.ask, front.mouse.tell) = mouse_ask.unzip();
         // the jobs Ectomatter's macros do as steps (a profile switched, a screen
