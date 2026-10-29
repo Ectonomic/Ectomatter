@@ -10,7 +10,9 @@ use crate::shell::Sender;
 
 #[derive(Clone, Debug)]
 pub enum TrayAsk {
-    Open,
+    /// the window brought to the person, with the activation token the press gave (none
+    /// from the tray yet: docs/deferred.md)
+    Open(Option<String>),
     Device(String),
     /// a scene chosen in the Scene menu, or No scene
     Scene(Option<String>),
@@ -63,11 +65,11 @@ impl ksni::Tray for Tray {
         }
     }
     fn activate(&mut self, _x: i32, _y: i32) {
-        let _ = self.tell.send(TrayAsk::Open);
+        let _ = self.tell.send(TrayAsk::Open(None));
     }
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::StandardItem;
-        let mut items: Vec<ksni::MenuItem<Self>> = vec![StandardItem { label: "Open Ectomatter".into(), activate: Box::new(|t: &mut Self| { let _ = t.tell.send(TrayAsk::Open); }), ..Default::default() }.into()];
+        let mut items: Vec<ksni::MenuItem<Self>> = vec![StandardItem { label: "Open Ectomatter".into(), activate: Box::new(|t: &mut Self| { let _ = t.tell.send(TrayAsk::Open(None)); }), ..Default::default() }.into()];
         for (place, name, on) in &self.devices {
             let place = place.clone();
             items.push(

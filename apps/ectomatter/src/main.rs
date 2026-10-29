@@ -86,6 +86,7 @@ mod mouse;
 mod mouse_art;
 mod nvml;
 mod old_name;
+mod once;
 mod overlays;
 mod packages;
 mod picker;
@@ -483,6 +484,12 @@ fn main() {
         return;
     }
     if snapshot.is_none() && !args.iter().any(|a| a == "--read-state") {
+        // (one Ectomatter for each person: opened again, the one running comes forward,
+        // before this one's log could take the place of its)
+        let after = args.iter().position(|a| a == "--after").and_then(|i| args.get(i + 1)).and_then(|p| p.parse().ok());
+        if once::running_already(args.iter().any(|a| a == "--hide"), after) {
+            return;
+        }
         log::start();
         // (an entry to start at login that names a program gone names this one, and
         // waits for KWin: autostart.rs)

@@ -396,3 +396,25 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   python3, git and Cargo); a source folder without its history (a release's
   archive) shows the manifest's authors and no models.
 
+## Coming to the person (2026-10-29)
+
+- A press on the tray's icon brings the window without the activation token
+  Plasma's tray hands the program it presses: the tray's library here
+  (ksni 0.3.6) doesn't take it (`tray.rs`, `TrayAsk::Open(None)`). A window
+  out of sight is opened again where the person is, which needs no token, but
+  one they can see behind others isn't raised. ksni 0.3.7 takes the token
+  (`current_xdg_activation_token`); it brings two crates Ectomatter doesn't
+  have yet (arc-swap, crossbeam-queue), which wait for Grant's word.
+- A window brought from another virtual desktop is opened again there
+  (`shell/wayland.rs`, `come_forward`): the compositor places it as a new
+  window, so where it was on its screen and whether it was maximized aren't
+  kept. A window the person can see on another screen is left there and
+  raised, not moved to theirs.
+- Ectomatter started again by itself (`--after`, `shell/session.rs`) waits
+  for the one before to go before it looks for one running (`once.rs`);
+  `tests/once.rs` doesn't try a start again, only an Ectomatter opened while
+  one runs.
+- Two Ectomatters started at the same moment, before either holds its name on
+  the session bus, both run (`once.rs`, `running_already`). On Windows and
+  macOS, and with no session bus, nothing stops a second one
+  (`#[cfg(not(target_os = "linux"))]` in `once.rs`).

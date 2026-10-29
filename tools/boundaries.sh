@@ -14,7 +14,8 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # made-up desk, as approved (tests/renders.rs), and installed as
 # tools/install.sh lays it out (tests/install.rs), and as its RPM holds it
 # (tests/rpm.rs); and started with no compositor, as at login before KWin is
-# ready, and with KWin gone and back (tests/compositor.rs); and where it keeps
+# ready, and with KWin gone and back (tests/compositor.rs); and opened again
+# while it runs, on another virtual desktop (tests/once.rs); and where it keeps
 # starting at login, as each system has it (autostart.rs)
 runs=(
   a_package_past_its_time_is_stopped_and_started_again
@@ -41,7 +42,7 @@ runs=(
   each_systems_entry_starts_the_program_it_names
   starting_at_login_is_written_where_the_desktop_reads_it
 )
-out=$(cargo test --release -p ectomatter --bin ectomatter -- --include-ignored boundar "${runs[@]}" 2>&1; cargo test --release -p ectomatter --test stranger -- --include-ignored 2>&1; cargo test --release -p ectomatter --test renders 2>&1; cargo test --release -p ectomatter --test install 2>&1; cargo test --release -p ectomatter --test rpm 2>&1; cargo test --release -p ectomatter --test compositor 2>&1)
+out=$(cargo test --release -p ectomatter --bin ectomatter -- --include-ignored boundar "${runs[@]}" 2>&1; cargo test --release -p ectomatter --test stranger -- --include-ignored 2>&1; cargo test --release -p ectomatter --test renders 2>&1; cargo test --release -p ectomatter --test install 2>&1; cargo test --release -p ectomatter --test rpm 2>&1; cargo test --release -p ectomatter --test compositor 2>&1; cargo test --release -p ectomatter --test once 2>&1)
 lines=$(printf '%s\n' "$out" | grep -E '^test .* \.\.\. (ok|FAILED)$' | sort)
 if [ -z "$lines" ]; then printf '%s\n' "$out" | tail -30; exit 2; fi
 held=$(printf '%s\n' "$lines" | grep -c ' ok$')

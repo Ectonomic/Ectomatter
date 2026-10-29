@@ -764,12 +764,16 @@ impl Session {
         // the app in front, as KWin tells it, for the profiles that follow one
         let (front_tx, front_rx) = shell::channel::<front_app::Front>(wake);
         let front_bus = front_app::start(front_tx);
+        // the tray, which the window closes into; and Ectomatter opened again, which
+        // brings this one forward as the tray's icon does
+        let (tray_tx, tray_rx) = shell::channel::<tray::TrayAsk>(wake);
+        if let Some(bus) = &front_bus {
+            once::answer(bus, tray_tx.clone());
+        }
         // games started through Ectomatter's launcher in Steam, each waiting for
         // its changes before it goes on
         let (starts_tx, starts) = shell::channel::<launcher::Start>(wake);
         launcher::listen(starts_tx);
-        // the tray, which the window closes into
-        let (tray_tx, tray_rx) = shell::channel::<tray::TrayAsk>(wake);
         let tray = tray::start(tray_tx);
         Session {
             made,
@@ -1117,7 +1121,7 @@ impl Session {
             self.front.scene_quit();
             self.front.settings.flush(true);
             if let Ok(me) = std::env::current_exe() {
-                let _ = std::process::Command::new(me).args(["--place", &place]).spawn();
+                let _ = std::process::Command::new(me).args(["--place", &place, "--after", &std::process::id().to_string()]).spawn();
             }
             return Step::Stop;
         }

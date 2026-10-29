@@ -152,6 +152,9 @@ pub(crate) struct App {
     scale: u32,
     configured: bool,
     maximized: bool,
+    /// whether the compositor says the person can't see the window: on another
+    /// virtual desktop, or minimized (xdg-shell's suspended state)
+    suspended: bool,
     frame_pending: bool,
     exit: bool,
     /// the last button press, which a move or a resize is started from
@@ -374,7 +377,7 @@ fn wait(s: &mut Session, slot: &Slot, shown: &mut bool, now: bool) -> Option<Con
         }
         for a in s.take(1.0) {
             match a {
-                tray::TrayAsk::Open => *shown = true,
+                tray::TrayAsk::Open(_) => *shown = true,
                 tray::TrayAsk::Device(d) => {
                     *shown = true;
                     s.front.ui.set_place(d.into());
@@ -412,9 +415,7 @@ fn window(s: Session, conn: Connection, slot: &Slot, shown: bool) -> (Session, O
 
     let surface = compositor.create_surface(&qh);
     let window = xdg.create_window(surface, WindowDecorations::RequestClient, &qh);
-    window.set_title("Ectomatter");
-    window.set_app_id("com.ectonomic.ectomatter");
-    window.set_min_size(Some(MIN_SIZE));
+    name(&window, "Ectomatter", MIN_SIZE);
 
     let reference = s.pic.reference();
     let desc = describe(&cm, &qh, reference, screens::screens().iter().filter_map(|sc| sc["peak"].as_f64()).fold(reference, f64::max), false, ());
@@ -451,6 +452,7 @@ fn window(s: Session, conn: Connection, slot: &Slot, shown: bool) -> (Session, O
         scale: 1,
         configured: false,
         maximized: false,
+        suspended: false,
         frame_pending: false,
         exit: false,
         press: 0,
@@ -582,9 +584,9 @@ impl App {
     fn take(&mut self) {
         for a in self.s.take(self.scale as f32) {
             match a {
-                tray::TrayAsk::Open => self.show(),
+                tray::TrayAsk::Open(token) => self.come_forward(token),
                 tray::TrayAsk::Device(d) => {
-                    self.show();
+                    self.come_forward(None);
                     self.s.front.ui.set_place(d.into());
                 }
                 tray::TrayAsk::Scene(_) | tray::TrayAsk::Quit => {}
@@ -687,9 +689,7 @@ impl App {
     fn make_sub(&mut self, slint: Rc<MinimalSoftwareWindow>, title: &str, size: (u32, u32), min: (u32, u32)) -> SubWin {
         let surface = self.compositor.create_surface(&self.qh);
         let window = self._xdg.create_window(surface, WindowDecorations::RequestClient, &self.qh);
-        window.set_title(title);
-        window.set_app_id("com.ectonomic.ectomatter");
-        window.set_min_size(Some(min));
+        name(&window, title, min);
         window.commit();
         SubWin { window, slint, size, margins: Margins::default(), scale: 1, configured: false, maximized: false, frame_pending: false, hidden: false, full: true, buffers: Vec::new(), px: Vec::new(), at: (0.0, 0.0), inside: false, held: false }
     }
@@ -700,6 +700,9 @@ impl App {
             if sw.hidden {
                 sw.hidden = false;
                 sw.full = true;
+                if let Some((title, _, min)) = &self.s.shapes[which] {
+                    name(&sw.window, title, *min);
+                }
                 sw.window.commit();
             }
         }
@@ -953,6 +956,26 @@ impl App {
         (s, Some(shown))
     }
 
+    /// The window brought to the person (the tray's icon pressed, or Ectomatter
+    /// opened again): shown, if it was closed into the tray; made again, if the
+    /// person can't see it (on another virtual desktop, or minimized), as a window
+    /// just opened goes on the desktop and the screen they're on; and raised with
+    /// the press's activation token, where there is one.
+    fn come_forward(&mut self, token: Option<String>) {
+        match forward(self.hidden, self.suspended) {
+            Forward::Show => self.show(),
+            Forward::Again => {
+                eprintln!("ectomatter: the window was out of sight, so it's opened again where the person is");
+                self.unmap();
+                self.show();
+            }
+            Forward::Raise => {}
+        }
+        if let (Some(a), Some(token)) = (&self.activation, token) {
+            a.activate::<App>(self.window.wl_surface(), token);
+        }
+    }
+
     /// Bring the window back: a first commit with no buffer, as when it was
     /// made, and the compositor answers with its size.
     fn show(&mut self) {
@@ -961,8 +984,10 @@ impl App {
         }
         eprintln!("ectomatter: shown again from the tray");
         self.hidden = false;
+        self.suspended = false;
         self.s.front.set_hidden(false);
         self.s.full = true;
+        name(&self.window, "Ectomatter", MIN_SIZE);
         self.window.commit();
         // (one hidden before it was first shown, as at login, has its size already: the
         // compositor sends nothing new, so it's drawn now)
@@ -1174,6 +1199,7 @@ impl WindowHandler for App {
             self.s.slint.set_size(PhysicalSize::new(w * self.scale, h * self.scale));
             self.s.full = true;
         }
+        self.suspended = configure.state.contains(smithay_client_toolkit::reexports::csd_frame::WindowState::SUSPENDED);
         let maximized = configure.is_maximized();
         if maximized != self.maximized {
             self.maximized = maximized;
@@ -1548,6 +1574,37 @@ impl ActivationHandler for App {
         if let Some(a) = &self.activation {
             a.activate::<App>(self.window.wl_surface(), token);
         }
+    }
+}
+
+/// A window's title, its app (the desktop entry the taskbar shows it by) and
+/// its smallest size, told the compositor as it's made, and again each time it's
+/// shown after it was closed: unmapped, a window is made again from nothing, and
+/// KWin forgets all three.
+fn name(window: &Window, title: &str, min: (u32, u32)) {
+    window.set_title(title);
+    window.set_app_id("com.ectonomic.ectomatter");
+    window.set_min_size(Some(min));
+}
+
+/// What bringing the window to the person takes: showing it, closed into the
+/// tray (`hidden`); making it again, where the compositor says the person can't
+/// see it (`suspended`), so it opens where they are; or only raising it, where
+/// they can.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Forward {
+    Show,
+    Again,
+    Raise,
+}
+
+fn forward(hidden: bool, suspended: bool) -> Forward {
+    if hidden {
+        Forward::Show
+    } else if suspended {
+        Forward::Again
+    } else {
+        Forward::Raise
     }
 }
 
