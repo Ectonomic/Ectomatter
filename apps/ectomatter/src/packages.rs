@@ -70,6 +70,14 @@ impl Kind {
             Kind::Plugin => "plugin",
         }
     }
+
+    /// The kind as a person reads it in a window: a core is a device core.
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Core => "device core",
+            Kind::Plugin => "plugin",
+        }
+    }
 }
 
 #[derive(Clone)]

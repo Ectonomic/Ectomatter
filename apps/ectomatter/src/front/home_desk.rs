@@ -915,7 +915,7 @@ impl Front {
     pub(super) fn show_package_form(&mut self) {
         let Some(f) = &self.package_form else { return };
         self.ui.set_gl_modal(4);
-        let word = f.kind.word();
+        let word = f.kind.name();
         self.ui.set_gl_plugin_title(format!("Add a {word}").into());
         self.ui.set_gl_plugin_sub(format!("From the {word}’s GitHub releases, or from its file. Nobody at Ectonomic has reviewed a {word} added this way; Ectomatter says what the {word} can reach before you add it.").into());
         // (the file by its name: the folder it's in says less than its name)

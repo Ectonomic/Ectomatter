@@ -261,6 +261,9 @@ export component AppWindow inherits Window {
     // what Settings' bar says, and whether it's a problem
     in property <string> settings-said;
     in property <bool> settings-said-bad;
+    // Settings' tab open (src/ecto_settings.rs, Tab), and a tab chosen in its bar
+    in-out property <int> settings-tab;
+    callback settings-tab-chosen(int);
     out property <length> settings-scroll: settings-page.set-flick-content-y;
     // Settings scrolled to a place on its page (its Sensor Feed box), as far as it scrolls
     in property <length> settings-goto: -1px;
@@ -1116,6 +1119,8 @@ export component AppWindow inherits Window {
             mark-tile: root.mark-tile;
             said: root.settings-said;
             said-bad: root.settings-said-bad;
+            tab: root.settings-tab;
+            tab-chosen(i) => { root.settings-tab-chosen(i); }
             place <=> root.place;
             settings-h: root.settings-h;
         }

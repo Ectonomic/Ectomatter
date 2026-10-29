@@ -243,8 +243,22 @@ impl Front {
     }
 
     /// Settings, at its Sensor Feed box (from the screen editor's From line, or its Shows menu).
+    /// A Settings tab opened from its bar: kept for next time, its page from its top.
+    pub fn open_settings_tab(&mut self, tab: crate::ecto_settings::Tab) {
+        if self.settings_tab == tab {
+            return;
+        }
+        self.settings_tab = tab;
+        crate::uistate::set("settings_tab", serde_json::json!(tab.name()));
+        self.ui.set_settings_goto(-1.0);
+        self.ui.set_settings_goto(0.0);
+        self.refresh();
+    }
+
     pub fn show_sensors(&mut self) {
         self.ui.set_place("settings".into());
+        // (the sensors are on General)
+        self.settings_tab = crate::ecto_settings::Tab::General;
         self.refresh();
         let to = (self.sensor_map.top - 24.0).max(0.0);
         self.ui.set_settings_goto(-1.0);
@@ -266,8 +280,7 @@ impl Front {
             self.sensors_seen = Some((Instant::now(), cat, values));
         }
         let (_, cat, values) = self.sensors_seen.clone().unwrap();
-        let from = self.hosted.readings().with_catalog().and_then(|id| self.hosted.name_of(&id)).unwrap_or_else(|| "Sensors".into());
-        crate::ecto_settings::Sensors { from, cat, setup: crate::sensors::setup(), values, tab: self.sensor_tab, open: self.sensor_open.clone(), renaming: self.renaming.clone() }
+        crate::ecto_settings::Sensors { cat, setup: crate::sensors::setup(), values, tab: self.sensor_tab, open: self.sensor_open.clone(), renaming: self.renaming.clone() }
     }
 
     /// The sensors' choices changed: kept in the settings, and gone by at once by every

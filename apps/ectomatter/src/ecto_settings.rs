@@ -29,8 +29,6 @@ const CTRL: f32 = crate::tokens::size::LABEL + crate::tokens::space::PAD;
 /// sensor being renamed with what is typed so far.
 #[derive(Clone)]
 pub struct Sensors {
-    /// the name of the plugin that lists them, as its manifest gives it
-    pub from: String,
     pub cat: Catalog,
     pub setup: crate::sensors::Setup,
     pub values: HashMap<String, Val>,
@@ -185,12 +183,13 @@ struct Row<'a> {
     tip: Option<(String, String)>,
 }
 
-/// The Sensor Feed box in Ectomatter's Settings: a tab for each part of the computer (the Screen tab's
+/// The Sensors box in Ectomatter's Settings (General): a tab for each part of the computer (the Screen tab's
 /// own tabs), the open one's device and where its readings come from, then its rows, each
 /// sensor a checkbox with its name, its driver's name and its reading, three to a line; long
 /// runs of like readings folded into one line that opens; and at its foot what checking does.
 fn sensors_box(f: &mut Form, v: &Sensors, map: &mut SensorMap) {
-    f.heading(&v.from, "");
+    // (Ectomatter's box for every reading a plugin gives, whichever plugin)
+    f.heading("Sensors", "");
     map.top = f.y - line::NOTE - space::LABEL;
     let (x0, w0) = (f.x, f.w);
     let parts = v.cat.parts();
@@ -424,14 +423,76 @@ fn chip(out: &mut Vec<Cell>, v: &Sensors, checked: &BTreeSet<String>, part: Part
     }
 }
 
-/// The page, a form (src/form.rs) `room` across under the page's bar, Space.margin
-/// down (Settings has no hint over it).
-pub fn page(s: &State, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
-    let mut f = Form::new(X0, crate::tokens::space::MARGIN, room - 2.0 * X0);
+/// Settings' tabs, in the bar's order: Ectomatter's own settings and what plugins add to
+/// them; a box for each device; a box for each plugin; About.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tab {
+    #[default]
+    General,
+    Devices,
+    Plugins,
+    About,
+}
 
-    // starting at login, as the system keeps it: this copy (On), none (Off), or, neither
-    // chosen, another copy, named under the note
-    section(&mut f, "Startup", |c| {
+impl Tab {
+    pub const ALL: [Tab; 4] = [Tab::General, Tab::Devices, Tab::Plugins, Tab::About];
+
+    /// The tab at a place in the bar (the first where there's none there).
+    pub fn at(i: i32) -> Tab {
+        Tab::ALL.get(i.max(0) as usize).copied().unwrap_or_default()
+    }
+
+    /// The tab's name, as the bar and a saved place have it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Tab::General => "General",
+            Tab::Devices => "Devices",
+            Tab::Plugins => "Plugins",
+            Tab::About => "About",
+        }
+    }
+
+    /// The tab a name names, in any case.
+    pub fn named(n: &str) -> Option<Tab> {
+        Tab::ALL.into_iter().find(|t| t.name().eq_ignore_ascii_case(n))
+    }
+}
+
+/// A tab's page, a form (src/form.rs) `room` across under the page's bar, Space.margin
+/// down (Settings has no hint over it).
+pub fn page(s: &State, tab: Tab, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
+    let mut f = Form::new(X0, crate::tokens::space::MARGIN, room - 2.0 * X0);
+    let (mut map, mut pmap) = (SensorMap::default(), PluginMap::default());
+    match tab {
+        Tab::General => {
+            ectomatter_section(&mut f, s);
+            // the sections the plugins describe of themselves, each titled in its plugin's words
+            for p in &s.sections {
+                plugin_section(&mut f, p, &mut pmap);
+            }
+            // every sensor on the computer, a tab for each part, and which the screen's layouts can show
+            if let Some(v) = &s.sensors {
+                sensors_box(&mut f, v, &mut map);
+            }
+        }
+        // each device with its core, a box each, then Add a device core
+        Tab::Devices => devices_section(&mut f, &s.devices),
+        // each plugin, a box each, then Add a plugin
+        Tab::Plugins => packages_section(&mut f, "Plugins", 1, &s.plugins, "Add a plugin", "Ectomatter checks each plugin’s GitHub releases for updates once a day."),
+        // (the window draws About itself: ui/pages/about.slint)
+        Tab::About => about_section(&mut f, s.about.as_ref()),
+    }
+    let (cells, h) = f.end();
+    (cells, h, map, pmap)
+}
+
+/// Ectomatter's own settings, in one box: whether it starts at login, as the system keeps
+/// it (this copy, On; none, Off; or, neither chosen, another copy, named under the note),
+/// and the HDR interface with its Peak nits.
+fn ectomatter_section(f: &mut Form, s: &State) {
+    let hdr = &s.settings["hdr"];
+    let on = hdr["lighting"].as_str() != Some("off");
+    section(f, "Ectomatter", |c| {
         use crate::autostart::Starts;
         c.row();
         c.label("Start at login");
@@ -447,28 +508,6 @@ pub fn page(s: &State, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
             end = c.note(end, &format!("Another copy of Ectomatter starts at login now, from {}. On starts this copy instead.", p.display()));
         }
         c.next(top, end - top);
-    });
-
-    // each device with its core, then Add a core; then the plugins
-    devices_section(&mut f, &s.devices);
-    packages_section(&mut f, "Plugins", 1, &s.plugins, "Add a plugin", "Ectomatter checks each plugin’s GitHub releases for updates once a day.");
-
-    // the sections the plugins describe of themselves
-    let mut pmap = PluginMap::default();
-    for p in &s.sections {
-        plugin_section(&mut f, p, &mut pmap);
-    }
-
-    // every sensor on the computer, a tab for each part, and which the screen's layouts can show
-    let mut map = SensorMap::default();
-    if let Some(v) = &s.sensors {
-        sensors_box(&mut f, v, &mut map);
-    }
-
-    // the HDR interface
-    let hdr = &s.settings["hdr"];
-    let on = hdr["lighting"].as_str() != Some("off");
-    section(&mut f, "HDR", |c| {
         c.row();
         c.label("HDR interface");
         let top = c.y;
@@ -490,11 +529,6 @@ pub fn page(s: &State, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
         c.cells.push(text_cell(style::VALUE, cx + cw - vw, top, vw, form::LINE, &format!("{} nits", nits.round())));
         c.next(top, form::LINE);
     });
-
-    about_section(&mut f, s.about.as_ref());
-
-    let (cells, h) = f.end();
-    (cells, h, map, pmap)
 }
 
 /// the style of a package's tile that holds Ectomatter's own mark (ui/system/cells.slint)
@@ -667,8 +701,13 @@ fn plugin_section(f: &mut Form, p: &PluginSection, map: &mut PluginMap) {
 /// and its Core (the version, where it stands, what it's for and what it can
 /// do); then Add a core, and how updates come.
 fn devices_section(f: &mut Form, devices: &[DeviceRow]) {
-    section(f, "Devices", |c| {
-        for d in devices {
+    f.heading("Devices", "");
+    for (k, d) in devices.iter().enumerate() {
+        // (each device's box Space.row under the one before)
+        if k > 0 {
+            f.gap(space::ROW);
+        }
+        f.card(|c| {
             let r = &d.core;
             // the device: its glyph, its name and how it is
             let line = if !r.on {
@@ -743,13 +782,10 @@ fn devices_section(f: &mut Form, devices: &[DeviceRow]) {
                 end = form::warning(&mut c.cells, cx, end + space::TIGHT, cw, w);
             }
             c.next(top, end - top);
-        }
-        // Add a core, and how updates come
-        c.row();
-        let (x, top, w) = (c.inner_x(), c.y, c.inner_w());
-        let h = form::add_row(&mut c.cells, x, top, w, "Add a core", "Ectomatter checks each core’s GitHub releases for updates once a day.", id(Ctl::PackageAdd), 0);
-        c.next(top, h);
-    });
+        });
+    }
+    // Add a device core, and how updates come, on the page's ground under the boxes
+    f.add_row("Add a device core", "Ectomatter checks each core’s GitHub releases for updates once a day.", id(Ctl::PackageAdd), 0);
 }
 
 /// Settings' Plugins: a row for each package, its glyph on its tile,
@@ -758,10 +794,14 @@ fn devices_section(f: &mut Form, devices: &[DeviceRow]) {
 /// core, `add` 0, or a plugin, 1), and how updates come.
 fn packages_section(f: &mut Form, title: &str, add: i32, rows: &[PackageRow], add_words: &str, note: &str) {
     f.heading(title, "");
-    f.card(|c| {
-        let (bx, bw) = (c.inner_x(), c.inner_w());
-        let soft = ink::SOFT;
-        for r in rows {
+    for (k, r) in rows.iter().enumerate() {
+        // (each plugin's box Space.row under the one before)
+        if k > 0 {
+            f.gap(space::ROW);
+        }
+        f.card(|c| {
+            let (bx, bw) = (c.inner_x(), c.inner_w());
+            let soft = ink::SOFT;
             c.row();
             let ry = c.y;
             // the switch, then the version, from the right
@@ -803,13 +843,10 @@ fn packages_section(f: &mut Form, title: &str, add: i32, rows: &[PackageRow], ad
                 ty = form::warning(&mut c.cells, tx, ty + space::TIGHT, tw, w);
             }
             c.next(ry, (ty - ry).max(size::ROW).max(right_h));
-        }
-        // Add a plugin, and how updates come
-        c.row();
-        let top = c.y;
-        let h = form::add_row(&mut c.cells, bx, top, bw, add_words, note, id(Ctl::PackageAdd), add);
-        c.next(top, h);
-    });
+        });
+    }
+    // Add a plugin, and how updates come, on the page's ground under the boxes
+    f.add_row(add_words, note, id(Ctl::PackageAdd), add);
 }
 
 /// A package's head in Settings (a device's core, a plugin): its glyph on its tile, a row's
@@ -854,7 +891,7 @@ mod tests {
     /// The words on the page, each piece once.
     fn texts(devices: Vec<DeviceRow>) -> Vec<String> {
         let s = State { sensors: None, devices, plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
-        page(&s, 1440.0).0.into_iter().map(|c| c.text.to_string()).filter(|t| !t.is_empty()).collect()
+        page(&s, Tab::Devices, 1440.0).0.into_iter().map(|c| c.text.to_string()).filter(|t| !t.is_empty()).collect()
     }
 
     /// A package whose newer version waits for the person offers Review, on
@@ -868,7 +905,7 @@ mod tests {
         };
         let core = DeviceRow { core: waiting(row("Logitech G502", 4, true, true, "")), kind: "mouse".into(), present: true, reachable: Some(true), allow: false, holders: Vec::new(), holders_note: String::new() };
         let s = State { sensors: None, devices: vec![core], plugins: vec![waiting(row("Weather Feed", 2, true, false, "")), row("Monitor Switcher", 3, true, true, "Up to date")], sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
-        let cells = page(&s, 1440.0).0;
+        let cells: Vec<Cell> = [Tab::Devices, Tab::Plugins].into_iter().flat_map(|t| page(&s, t, 1440.0).0).collect();
         let t: Vec<String> = cells.iter().map(|c| c.text.to_string()).collect();
         assert_eq!(t.iter().filter(|x| *x == "Review").count(), 2, "on the core and the plugin waiting, not the one up to date");
         assert!(t.iter().any(|x| x == "1.0.0 · 1.2.0 asks to do more: waiting for your OK"), "the core's version and where it stands");
@@ -883,7 +920,7 @@ mod tests {
         // (GPLv3 section 0: a copyright notice; that there's no warranty; that it may be
         // shared under the license; how to read the license)
         let s = State { sensors: None, devices: Vec::new(), plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
-        let cells = page(&s, 1440.0).0;
+        let cells = page(&s, Tab::About, 1440.0).0;
         let words: Vec<String> = cells.iter().map(|c| c.text.to_string()).collect();
         let has = |w: &str| words.iter().any(|t| t.contains(w));
         assert!(has(&format!("© {}", crate::about::copyright())) && has("no warranty") && has("share and change Ectomatter") && has(crate::about::license().0), "{words:?}");
@@ -892,7 +929,7 @@ mod tests {
         assert!(has(&format!("Version {}", crate::about::VERSION)) && crate::about::authors().iter().all(|n| words.iter().any(|t| t == n)));
         // (a Read that went wrong says so under its own row)
         let s = State { about: Some((1, "This copy of Ectomatter came without its notices.".into())), ..s };
-        let cells = page(&s, 1440.0).0;
+        let cells = page(&s, Tab::About, 1440.0).0;
         let said = cells.iter().find(|c| c.text.contains("came without its notices")).map(|c| c.y);
         let credits = cells.iter().find(|c| c.text == "Credits").map(|c| c.y);
         assert!(said.zip(credits).is_some_and(|(a, b)| a > b), "not said under Credits");
@@ -905,7 +942,7 @@ mod tests {
     fn peak_nits_reaches_the_brightest_screens_peak_on_a_dim_screen() {
         let settings = json!({ "hdr": { "lighting": "auto", "glow_limit": 1000.0 } });
         let s = State { sensors: None, devices: Vec::new(), plugins: Vec::new(), sections: Vec::new(), settings, top_peak: 1000.0, reference: 73.0, about: None, starts: crate::autostart::Starts::No };
-        let cells = page(&s, 1440.0).0;
+        let cells = page(&s, Tab::General, 1440.0).0;
         let slider = cells.iter().find(|c| c.id == id(Ctl::PeakNits)).expect("the Peak nits slider");
         assert_eq!(slider.value, 1.0, "the saved 1000 at the right end");
         assert!(cells.iter().any(|c| c.text.as_str() == "1000 nits"));
@@ -932,6 +969,30 @@ mod tests {
         assert!(has("1.0.0") && has("1.0.0 · Added from a file") && !t.iter().any(|x| x.contains("Comes with")), "each core's version, and where it came from only when added");
         assert_eq!(t.iter().filter(|x| *x == "Remove").count(), 1, "only an added core can be taken out");
         assert!(has("When off, Ectomatter leaves the keyboard to other programs.") && has("When off, Ectomatter leaves the mouse to other programs."));
-        assert!(has("Add a core") && !has("Cores"), "Add a core under Devices, and no Cores section of its own");
+        assert!(has("Add a device core") && !has("Cores"), "Add a device core under Devices, and no Cores section of its own");
+    }
+
+    /// Each tab holds its own: the devices on Devices, the plugins on Plugins, and on
+    /// General Ectomatter's settings, each section a plugin describes, under its own title,
+    /// and the sensors; nothing on two tabs. The bar names the tabs as Tab does.
+    #[test]
+    fn each_tab_holds_its_own() {
+        let dev = DeviceRow { core: row("Made-up Mouse", 4, true, true, ""), kind: "mouse".into(), present: true, reachable: Some(true), allow: false, holders: Vec::new(), holders_note: String::new() };
+        let section = PluginSection { plugin: "made-up-feed".into(), section: json!({ "label": "Made-up readings", "layout": [] }), values: Value::Null, typed: None };
+        let s = State { sensors: None, devices: vec![dev], plugins: vec![row("Made-up Feed", 3, true, true, "")], sections: vec![section], settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
+        let on = |t: Tab| page(&s, t, 1440.0).0.into_iter().map(|c| c.text.to_string()).collect::<Vec<_>>();
+        let found = |w: &str| Tab::ALL.into_iter().filter(|t| on(*t).iter().any(|x| x == w)).collect::<Vec<_>>();
+        assert_eq!(found("Made-up Mouse"), [Tab::Devices]);
+        assert_eq!(found("Made-up Feed"), [Tab::Plugins]);
+        assert_eq!(found("Made-up readings"), [Tab::General], "a plugin's section on General, titled as the plugin says");
+        assert_eq!(found("Start at login"), [Tab::General]);
+        assert_eq!(found("Peak nits"), [Tab::General]);
+        assert_eq!(found("Add a device core"), [Tab::Devices]);
+        assert_eq!(found("Add a plugin"), [Tab::Plugins]);
+        // (the bar's words, ui/pages/settings.slint, are Tab's)
+        let bar = include_str!("../ui/pages/settings.slint");
+        let names: Vec<String> = Tab::ALL.iter().map(|t| format!("\"{}\"", t.name())).collect();
+        assert!(bar.contains(&format!("tabs: [{}];", names.join(", "))), "the bar's tabs aren't Tab's");
+        assert!(Tab::ALL.iter().all(|t| Tab::named(t.name()) == Some(*t) && Tab::named(&t.name().to_lowercase()) == Some(*t)));
     }
 }

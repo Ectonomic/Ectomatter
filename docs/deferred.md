@@ -297,7 +297,7 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 - The list of packages Ectonomic reviewed (`registry/`, Grant's go
   2026-10-28) isn't published: its repository, Ectonomic/ectomatter-packages,
-  doesn't exist, so Add a core and Add a plugin say Ectomatter can't read the
+  doesn't exist, so Add a device core and Add a plugin say Ectomatter can't read the
   list (`front/package_browser.rs`) until it does, and the daily check finds
   no listed versions (`updates.rs`, `check_all`). The list pins packages
   built on this computer (`tools/list-packages.py`); none of Ectonomic's
@@ -308,7 +308,7 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   source makes. Nothing is signed either: the checksums pinned in the list
   catch a release changed after review, as long as the list's own
   repository isn't changed.
-- Add a core and Add a plugin show every listed package of the kind in one
+- Add a device core and Add a plugin show every listed package of the kind in one
   well, with no search and no scrolling; a long list would run off the
   dialog (`ui/app.slint`, `gl-modal == 6`).
 - Adding a package from the list runs untested past choosing it: the renders

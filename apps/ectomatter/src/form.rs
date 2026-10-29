@@ -58,6 +58,19 @@ impl Form {
         top
     }
 
+    /// Room down the column before what comes next (between boxes of one section, Space.row).
+    pub fn gap(&mut self, h: f32) {
+        self.y += h;
+    }
+
+    /// A row that adds something (Add a device core, Add a plugin), on the page's ground
+    /// Space.pad under the boxes it adds to: the button not on a box, and its note.
+    pub fn add_row(&mut self, words: &str, note: &str, id: i32, index: i32) {
+        self.y += space::PAD;
+        let h = add_row_on(&mut self.cells, self.x, self.y, self.w, words, note, id, index, false);
+        self.y += h;
+    }
+
     /// The form's pieces, and how tall it is with the page's margin under it.
     pub fn end(self) -> (Vec<Cell>, f32) {
         let h = self.y + space::MARGIN;
@@ -332,8 +345,14 @@ pub fn warning(cells: &mut Vec<Cell>, x: f32, y: f32, w: f32, s: &str) -> f32 {
 /// A button that adds (its + and its words) with a note after it, on a row from `x`, `y`,
 /// `w` across: Add a core, Add a plugin, Add a script. Its id, index and how tall the row is.
 pub fn add_row(cells: &mut Vec<Cell>, x: f32, y: f32, w: f32, words: &str, note: &str, id: i32, index: i32) -> f32 {
+    add_row_on(cells, x, y, w, words, note, id, index, true)
+}
+
+/// An add row on a box (`on_box`), or on the page's ground, whose button stands off the
+/// ground in its own gray (WordButton not on a box: cells' style 46).
+pub fn add_row_on(cells: &mut Vec<Cell>, x: f32, y: f32, w: f32, words: &str, note: &str, id: i32, index: i32, on_box: bool) -> f32 {
     let aw = button_width(words, true);
-    cells.push(Cell { text: words.into(), lines: ADD.into(), style: 35, id, index, ..cell(kind::GHOST, x, y, aw, size::BUTTON) });
+    cells.push(Cell { text: words.into(), lines: ADD.into(), style: if on_box { 35 } else { 46 }, id, index, ..cell(kind::GHOST, x, y, aw, size::BUTTON) });
     let nx = x + aw + space::ROW;
     let lines = crate::text::wrap(font::REGULAR, font::NOTE, note, w - aw - space::ROW);
     // (a line beside the button at its middle; more lines from its top)

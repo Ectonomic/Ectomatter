@@ -42,7 +42,7 @@ cp my-mouse/module/target/wasm32-wasip2/release/my_mouse_core.wasm my-mouse/core
 `tools/build-cores.sh` and `tools/build-plugins.sh` do this for every package
 in this repository. Put the folder in Ectomatter's own (`cores/` or
 `plugins/`) and run Ectomatter from the source folder to try it, or add its
-file in Settings (Add a core, then From an address or a file).
+file in Settings (Devices, Add a device core, then From an address or a file).
 
 For now a package builds only inside this repository: its module depends on
 the crate `ectomatter-protocol` by path (`docs/deferred.md`).

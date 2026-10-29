@@ -342,7 +342,8 @@ impl Front {
                 about: self.about_said.clone(),
                 starts: self.starts.0.clone(),
             };
-            let (cells, h, map, pmap) = crate::ecto_settings::page(&st, self.ui.get_content_width());
+            self.ui.set_settings_tab(crate::ecto_settings::Tab::ALL.iter().position(|t| *t == self.settings_tab).unwrap_or(0) as i32);
+            let (cells, h, map, pmap) = crate::ecto_settings::page(&st, self.settings_tab, self.ui.get_content_width());
             self.sensor_map = map;
             self.plugin_map = pmap;
             self.ui.set_settings_h(h);

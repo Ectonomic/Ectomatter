@@ -48,7 +48,7 @@ impl Front {
     pub(super) fn show_browser(&mut self) {
         let Some(b) = &self.browser else { return };
         self.ui.set_gl_modal(6);
-        let word = b.kind.word();
+        let word = b.kind.name();
         self.ui.set_gl_plugin_title(format!("Add a {word}").into());
         self.ui.set_gl_plugin_sub(format!("Each {word} here was reviewed by Ectonomic. Choose one to see what the {word} can reach on this computer.").into());
         let rows: Vec<crate::PackageItem> = b

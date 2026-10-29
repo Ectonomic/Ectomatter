@@ -19,6 +19,9 @@ export component SettingsPage inherits Rectangle {
     // what was just done here, or what went wrong (`said-bad`), in the bar
     in property <string> said;
     in property <bool> said-bad;
+    // the tab open, by its place in the bar (src/ecto_settings.rs, Tab), and a tab chosen
+    in property <int> tab;
+    callback tab-chosen(int);
     in-out property <string> place;
     in property <length> settings-h;
     in-out property set-flick-content-height <=> set-flick.content-height;
@@ -45,6 +48,9 @@ export component SettingsPage inherits Rectangle {
     PageBar {
         y: 0;
         title: "Settings";
+        tabs: ["General", "Devices", "Plugins", "About"];
+        tab: root.tab;
+        tab-chosen(i) => { root.tab-chosen(i); }
         status: root.said;
         status-bad: root.said-bad;
     }

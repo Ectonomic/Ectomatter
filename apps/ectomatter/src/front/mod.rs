@@ -161,6 +161,8 @@ pub enum Ask {
     /// (where, and whether over it) and a click there, the pointer on a
     /// button's words, and the next frame of the lights' effects
     MouseTab(i32),
+    /// a tab chosen in Settings' bar, by its place
+    SettingsTab(i32),
     MouseRow(i32),
     /// a box the page's row of boxes laid out came out a new width: its pieces
     /// laid out anew to it (the Lighting tab's, the mouse's), and the effects'
@@ -757,6 +759,8 @@ pub struct Front {
     /// went wrong with the last
     about_read: Option<(i32, mpsc::Receiver<Result<(), String>>)>,
     about_said: Option<(i32, String)>,
+    /// Settings' tab open, kept as the rail's open state is (uistate "settings_tab")
+    pub settings_tab: crate::ecto_settings::Tab,
     /// what starts at login, as the system keeps it (autostart.rs), and when it was looked at
     starts: (crate::autostart::Starts, Instant),
     /// what Settings' bar says, whether it's a problem, and since when
@@ -1049,6 +1053,7 @@ impl Front {
         on!(on_menu_back_to, Ask::MenuBack);
         on!(on_go, |p| Ask::Go(p.to_string()));
         on!(on_mouse_tab_chosen, |i| Ask::MouseTab(i));
+        on!(on_settings_tab_chosen, |i| Ask::SettingsTab(i));
         on!(on_boxes_resized, Ask::BoxesResized);
         // (a box's width kept as the window draws it, and its pieces laid out anew to it)
         let (light_boxes, mouse_boxes) = (crate::boxes::Row::default(), crate::boxes::Row::default());
@@ -1251,6 +1256,8 @@ impl Front {
             run_pick: None,
             about_read: None,
             about_said: None,
+            // (the tab last left; a snapshot's from ECTOMATTER_SETTINGS_TAB)
+            settings_tab: std::env::var("ECTOMATTER_SETTINGS_TAB").ok().or_else(|| crate::uistate::get("settings_tab").and_then(|v| v.as_str().map(String::from))).and_then(|n| crate::ecto_settings::Tab::named(&n)).unwrap_or_default(),
             starts: (crate::autostart::now(), Instant::now()),
             settings_said: None,
             removing: None,
@@ -1818,6 +1825,11 @@ impl Front {
                     self.close_menu();
                     self.close_picker();
                     self.mouse.tab = i.clamp(0, 3) as usize;
+                }
+                Ask::SettingsTab(i) => {
+                    self.close_menu();
+                    self.close_picker();
+                    self.open_settings_tab(crate::ecto_settings::Tab::at(i));
                 }
                 // (the refresh lays them out to their new widths)
                 Ask::BoxesResized => {}

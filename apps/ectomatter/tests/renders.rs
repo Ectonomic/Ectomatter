@@ -69,8 +69,10 @@ const SET_UP: &[Case] = &[
     Case { name: "m-settings", size: WIDE, set: &[("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_MOUSE_TAB", "3")] },
     Case { name: "settings", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings")] },
     Case { name: "settings-tall", size: (1440, 3600), set: &[("ECTOMATTER_PLACE", "settings")] },
+    Case { name: "settings-devices", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "devices")] },
+    Case { name: "settings-plugins", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "plugins")] },
     // (Add a core: the list of reviewed packages, desk/packages.json, a made-up one chosen)
-    Case { name: "add-core", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_REGISTRY", "/opt/ectomatter-source/apps/ectomatter/tests/renders/desk/packages.json"), ("ECTOMATTER_CLICKS", "160,887;520,524")] },
+    Case { name: "add-core", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "devices"), ("ECTOMATTER_REGISTRY", "/opt/ectomatter-source/apps/ectomatter/tests/renders/desk/packages.json"), ("ECTOMATTER_CLICKS", "160,767;520,524")] },
     Case { name: "library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library")] },
     Case { name: "library-games", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "296,63")] },
     Case { name: "library-apps", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "368,63")] },

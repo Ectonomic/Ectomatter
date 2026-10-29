@@ -598,14 +598,14 @@ export component CellView inherits Rectangle {
     }
     // a button with words (and its glyph's lines before them, style 35): the WordButton,
     // on a box; style 33 the small one inside a card (Make main), 37 one that can't be
-    // used now
-    if root.c.kind == 7 && (root.c.style == 0 || root.c.style == 33 || root.c.style == 35 || root.c.style == 37): WordButton {
+    // used now; 46 an add row's on the page's ground, in its gray for the ground
+    if root.c.kind == 7 && (root.c.style == 0 || root.c.style == 33 || root.c.style == 35 || root.c.style == 37 || root.c.style == 46): WordButton {
         width: parent.width;
         height: parent.height;
         wide: parent.width;
-        on-box: true;
+        on-box: root.c.style != 46;
         small: root.c.style == 33;
-        lines: root.c.style == 35 ? root.c.lines : "";
+        lines: root.c.style == 35 || root.c.style == 46 ? root.c.lines : "";
         text: root.c.text;
         enabled: root.c.style != 37;
         clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height, root.width); }
@@ -614,7 +614,7 @@ export component CellView inherits Rectangle {
     // key on its map, a menu's rows, a button on a shade; and a card that opens (36)
     // (style 25: a key on the lab's map, its words small; 26: not to be chosen here, its
     // words faint; 29: the page round a list, which shuts it, with no shade or hand)
-    if (root.c.kind >= 5 && root.c.kind <= 8) && !(root.c.kind == 7 && (root.c.style == 0 || root.c.style == 33 || root.c.style == 35 || root.c.style == 37)): Rectangle {
+    if (root.c.kind >= 5 && root.c.kind <= 8) && !(root.c.kind == 7 && (root.c.style == 0 || root.c.style == 33 || root.c.style == 35 || root.c.style == 37 || root.c.style == 46)): Rectangle {
         // (style 36: a card that opens, in the well's shade on a box: a script's; 37: a
         // button that can't be used now, faded)
         opacity: root.c.style == 37 ? 0.4 : 1;
