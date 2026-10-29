@@ -53,6 +53,10 @@ mod item {
         pub icon: Vec<(i32, i32, Vec<u8>)>,
         /// the menu's revision, one more each time what it shows changes
         pub revision: u32,
+        /// each entry's id, by what it is ("open", "device:kb", "scene:wave"), kept for as
+        /// long as Ectomatter runs: a tray holds an entry by its id, and keeps what kind of
+        /// entry it is (a separator, a submenu, a choice) from when it first saw that id
+        ids: HashMap<String, i32>,
         /// the activation token the tray handed for the press coming, and when a press
         /// came before its token did
         token: Option<String>,
@@ -65,7 +69,7 @@ mod item {
 
     impl State {
         pub fn new(tell: Sender<TrayAsk>, icon: Vec<(i32, i32, Vec<u8>)>) -> State {
-            State { tell, devices: Vec::new(), scenes: Vec::new(), scene: None, icon, revision: 1, token: None, pressed: None, away: None }
+            State { tell, devices: Vec::new(), scenes: Vec::new(), scene: None, icon, revision: 1, ids: HashMap::new(), token: None, pressed: None, away: None }
         }
 
         /// The window asked to come forward, with the press's token if it has come.
@@ -101,41 +105,42 @@ mod item {
     }
 
     /// The menu as `s` has it: Open Ectomatter, each device, the Scene menu, Quit.
-    pub fn menu(s: &State) -> Entry {
-        let mut id = 0;
-        let mut next = |label: &str, act: Act| {
-            id += 1;
-            Entry { id, label: label.into(), separator: label.is_empty() && act == Act::None, enabled: true, radio: None, act, children: Vec::new() }
+    pub fn menu(s: &mut State) -> Entry {
+        let (devices, scenes, on) = (s.devices.clone(), s.scenes.clone(), s.scene.clone());
+        let ids = &mut s.ids;
+        let mut next = |key: &str, label: &str, act: Act| {
+            let fresh = ids.len() as i32 + 1;
+            let id = *ids.entry(key.to_string()).or_insert(fresh);
+            Entry { id, label: label.into(), separator: key.starts_with("separator"), enabled: true, radio: None, act, children: Vec::new() }
         };
-        let mut items = vec![next("Open Ectomatter", Act::Open)];
-        for (place, name, on) in &s.devices {
-            let mut e = next(&if *on { name.clone() } else { format!("{name} (not connected)") }, Act::Device(place.clone()));
-            e.enabled = *on;
+        let mut items = vec![next("open", "Open Ectomatter", Act::Open)];
+        for (place, name, plugged) in &devices {
+            let mut e = next(&format!("device:{place}"), &if *plugged { name.clone() } else { format!("{name} (not connected)") }, Act::Device(place.clone()));
+            e.enabled = *plugged;
             items.push(e);
         }
         // the Scene menu: a group of choices for No scene, the built-in scenes and the person's own
-        if !s.scenes.is_empty() {
-            items.push(next("", Act::None));
-            let mut scene = next("Scene", Act::None);
-            let mut none = next("No scene", Act::Scene(None));
-            none.radio = Some(s.scene.is_none());
+        if !scenes.is_empty() {
+            items.push(next("separator:scenes", "", Act::None));
+            let mut scene = next("scenes", "Scene", Act::None);
+            let mut none = next("scene", "No scene", Act::Scene(None));
+            none.radio = Some(on.is_none());
             scene.children.push(none);
-            let (built, own): (Vec<_>, Vec<_>) = s.scenes.iter().cloned().partition(|(id, _)| id == "wave" || id == "shift");
-            for g in [built, own] {
+            let (built, own): (Vec<_>, Vec<_>) = scenes.into_iter().partition(|(id, _)| id == "wave" || id == "shift");
+            for (which, g) in [("built", built), ("own", own)] {
                 if !g.is_empty() {
-                    scene.children.push(next("", Act::None));
+                    scene.children.push(next(&format!("separator:{which}"), "", Act::None));
                     for (sid, name) in g {
-                        let on = s.scene.as_deref() == Some(sid.as_str());
-                        let mut e = next(&name, Act::Scene(Some(sid)));
-                        e.radio = Some(on);
+                        let mut e = next(&format!("scene:{sid}"), &name, Act::Scene(Some(sid.clone())));
+                        e.radio = Some(on.as_deref() == Some(sid.as_str()));
                         scene.children.push(e);
                     }
                 }
             }
             items.push(scene);
-            items.push(next("", Act::None));
+            items.push(next("separator:quit", "", Act::None));
         }
-        items.push(next("Quit Ectomatter", Act::Quit));
+        items.push(next("quit", "Quit Ectomatter", Act::Quit));
         Entry { id: 0, label: String::new(), separator: false, enabled: true, radio: None, act: Act::None, children: items }
     }
 
@@ -147,6 +152,8 @@ mod item {
     }
 
     /// An entry's properties as dbusmenu names them, those asked for (all, where none are).
+    /// Each is given whatever its value, the spec's default too: a tray keeps an entry's
+    /// property as it last had it where a layout leaves the property out.
     fn props(e: &Entry, names: &[String]) -> HashMap<String, OwnedVariant> {
         let mut p: Vec<(&str, Variant)> = Vec::new();
         if e.separator {
@@ -154,9 +161,8 @@ mod item {
         } else if e.id != 0 {
             p.push(("label", Variant::from(e.label.clone())));
         }
-        if !e.enabled {
-            p.push(("enabled", Variant::from(false)));
-        }
+        p.push(("enabled", Variant::from(e.enabled)));
+        p.push(("visible", Variant::from(true)));
         if let Some(on) = e.radio {
             p.push(("toggle-type", Variant::from("radio")));
             p.push(("toggle-state", Variant::from(i32::from(on))));
@@ -297,21 +303,21 @@ mod item {
         }
 
         fn get_layout(&self, parent_id: i32, recursion_depth: i32, property_names: Vec<String>) -> zbus::fdo::Result<(u32, Layout)> {
-            let s = self.0.lock().map_err(|_| zbus::fdo::Error::Failed("the tray's state".into()))?;
-            let m = menu(&s);
+            let mut s = self.0.lock().map_err(|_| zbus::fdo::Error::Failed("the tray's state".into()))?;
+            let m = menu(&mut s);
             let e = find(&m, parent_id).ok_or_else(|| zbus::fdo::Error::InvalidArgs(format!("no menu entry {parent_id}")))?;
             Ok((s.revision, layout(e, recursion_depth, &property_names)))
         }
 
         fn get_group_properties(&self, ids: Vec<i32>, property_names: Vec<String>) -> Vec<(i32, HashMap<String, OwnedVariant>)> {
-            let Ok(s) = self.0.lock() else { return Vec::new() };
-            let m = menu(&s);
+            let Ok(mut s) = self.0.lock() else { return Vec::new() };
+            let m = menu(&mut s);
             ids.iter().filter_map(|&id| find(&m, id).map(|e| (id, props(e, &property_names)))).collect()
         }
 
         fn get_property(&self, id: i32, name: String) -> zbus::fdo::Result<OwnedVariant> {
-            let s = self.0.lock().map_err(|_| zbus::fdo::Error::Failed("the tray's state".into()))?;
-            let m = menu(&s);
+            let mut s = self.0.lock().map_err(|_| zbus::fdo::Error::Failed("the tray's state".into()))?;
+            let m = menu(&mut s);
             find(&m, id).and_then(|e| props(e, &[name.clone()]).remove(&name)).ok_or_else(|| zbus::fdo::Error::InvalidArgs(format!("no {name} on menu entry {id}")))
         }
 
@@ -331,12 +337,14 @@ mod item {
             Vec::new()
         }
 
+        // (each menu fetched again as it opens: a tray fetches a submenu only then, so one
+        // left as it was would keep the scene chosen before, and the one a press just checked)
         fn about_to_show(&self, _id: i32) -> bool {
-            false
+            true
         }
 
-        fn about_to_show_group(&self, _ids: Vec<i32>) -> (Vec<i32>, Vec<i32>) {
-            (Vec::new(), Vec::new())
+        fn about_to_show_group(&self, ids: Vec<i32>) -> (Vec<i32>, Vec<i32>) {
+            (ids, Vec::new())
         }
 
         #[zbus(signal)]
@@ -344,9 +352,17 @@ mod item {
     }
 
     impl Menu {
+        /// A menu's entries one deep, as GetLayout(parent, 1) gives them.
+        #[cfg(test)]
+        fn children_of(&self, parent: i32) -> Vec<(i32, HashMap<String, OwnedVariant>)> {
+            let mut s = self.0.lock().unwrap();
+            let m = menu(&mut s);
+            find(&m, parent).map(|e| e.children.iter().map(|c| (c.id, props(c, &[]))).collect()).unwrap_or_default()
+        }
+
         fn clicked(&self, id: i32) {
             let Ok(mut s) = self.0.lock() else { return };
-            let act = find(&menu(&s), id).map(|e| e.act.clone()).unwrap_or(Act::None);
+            let act = find(&menu(&mut s), id).map(|e| e.act.clone()).unwrap_or(Act::None);
             match act {
                 Act::Open => s.open(),
                 Act::Device(place) => {
@@ -360,6 +376,153 @@ mod item {
                 }
                 Act::None => {}
             }
+        }
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// An entry as Plasma's menu reader holds it (plasma-workspace's
+        /// libdbusmenuqt, dbusmenuimporter.cpp): what it is (a separator, a
+        /// submenu, a choice) set when its id is first seen, and only the
+        /// properties a later layout gives changed after.
+        #[derive(Clone, Debug, Default)]
+        struct Shown {
+            separator: bool,
+            submenu: bool,
+            radio: bool,
+            label: String,
+            enabled: bool,
+            checked: bool,
+        }
+
+        /// Plasma's reader, as far as a menu's entries: each id's entry, and
+        /// each menu's ids in order.
+        #[derive(Default)]
+        struct Plasma {
+            shown: HashMap<i32, Shown>,
+            menus: HashMap<i32, Vec<i32>>,
+        }
+
+        fn text(p: &HashMap<String, OwnedVariant>, k: &str) -> Option<String> {
+            p.get(k).and_then(|v| String::try_from(v.try_clone().ok()?).ok())
+        }
+
+        impl Plasma {
+            /// A menu fetched one deep (GetLayout(parent, 1)), as the reader's refresh does.
+            fn refresh(&mut self, m: &Menu, parent: i32) {
+                let children = m.children_of(parent);
+                let ids: Vec<i32> = children.iter().map(|(id, _)| *id).collect();
+                for old in self.menus.get(&parent).cloned().unwrap_or_default() {
+                    if !ids.contains(&old) {
+                        self.shown.remove(&old);
+                    }
+                }
+                for (id, p) in children {
+                    let fresh = !self.shown.contains_key(&id);
+                    let e = self.shown.entry(id).or_insert_with(|| Shown { enabled: true, ..Default::default() });
+                    if fresh {
+                        e.separator = text(&p, "type").as_deref() == Some("separator");
+                        e.submenu = text(&p, "children-display").as_deref() == Some("submenu");
+                        e.radio = text(&p, "toggle-type").as_deref() == Some("radio");
+                    }
+                    if let Some(l) = text(&p, "label") {
+                        e.label = l;
+                    }
+                    if let Some(v) = p.get("enabled") {
+                        e.enabled = bool::try_from(v.try_clone().unwrap()).unwrap();
+                    }
+                    if let Some(v) = p.get("toggle-state").filter(|_| e.radio) {
+                        e.checked = i32::try_from(v.try_clone().unwrap()).unwrap() == 1;
+                    }
+                }
+                self.menus.insert(parent, ids);
+            }
+
+            /// A menu about to show: fetched again where the app says it changed, or it's empty.
+            fn open(&mut self, m: &Menu, id: i32) {
+                if m.about_to_show(id) || self.menus.get(&id).is_none_or(|c| c.is_empty()) {
+                    self.refresh(m, id);
+                }
+            }
+
+            /// The entry labelled so in a menu.
+            fn id(&self, menu: i32, label: &str) -> i32 {
+                self.menus[&menu].iter().copied().find(|i| self.shown[i].label == label).unwrap_or_else(|| panic!("no {label} in menu {menu}"))
+            }
+        }
+
+        /// What the app does with a menu's ask, as the window would: a scene chosen is the one on.
+        fn heard(shared: &Shared, asks: &std::sync::mpsc::Receiver<TrayAsk>, plasma: &mut Plasma, m: &Menu) {
+            while let Ok(a) = asks.try_recv() {
+                if let TrayAsk::Scene(id) = a {
+                    let mut s = shared.lock().unwrap();
+                    s.scene = id;
+                    s.revision += 1;
+                }
+                // (the menu laid out again: LayoutUpdated, for the top)
+                plasma.refresh(m, 0);
+            }
+        }
+
+        /// The tray's menu, read as Plasma reads it, through devices plugged in and scenes
+        /// chosen from it: each entry is what Ectomatter says it is, and one scene is on.
+        #[test]
+        fn the_trays_menu_reads_in_plasma_as_it_is() {
+            let (tell, asks) = crate::shell::quiet_channel();
+            let shared: Shared = Arc::new(Mutex::new(State::new(tell, Vec::new())));
+            let m = Menu(shared.clone());
+            let mut plasma = Plasma::default();
+            let changed = |plasma: &mut Plasma, f: &dyn Fn(&mut State)| {
+                {
+                    let mut s = shared.lock().unwrap();
+                    f(&mut s);
+                    s.revision += 1;
+                }
+                plasma.refresh(&m, 0);
+            };
+            // the tray comes as Ectomatter starts, with nothing yet; then the devices, not yet
+            // connected; then connected; then the scenes
+            plasma.refresh(&m, 0);
+            changed(&mut plasma, &|s| s.devices = vec![("kb".into(), "Made-up Keyboard".into(), false), ("mouse".into(), "Made-up Mouse".into(), false)]);
+            changed(&mut plasma, &|s| s.devices.iter_mut().for_each(|d| d.2 = true));
+            changed(&mut plasma, &|s| s.scenes = vec![("wave".into(), "Wave".into()), ("shift".into(), "Shift".into()), ("mine".into(), "Mine".into())]);
+            // the person opens the Scene menu and picks one, then another
+            for pick in ["Wave", "Mine", "No scene"] {
+                plasma.open(&m, 0);
+                let scene = plasma.id(0, "Scene");
+                plasma.open(&m, scene);
+                let id = plasma.id(scene, pick);
+                // (Qt checks a choice as it's pressed, before the app hears it)
+                plasma.shown.get_mut(&id).unwrap().checked = true;
+                m.event(id, "clicked".into(), OwnedVariant::try_from(Variant::from(0i32)).unwrap(), 0);
+                heard(&shared, &asks, &mut plasma, &m);
+            }
+            plasma.open(&m, 0);
+            let scene = plasma.id(0, "Scene");
+            plasma.open(&m, scene);
+            // what Plasma shows is what the menu is
+            let mut s = shared.lock().unwrap();
+            let ours = menu(&mut s);
+            drop(s);
+            let check = |menu: i32, entries: &[Entry]| {
+                assert_eq!(plasma.menus[&menu], entries.iter().map(|e| e.id).collect::<Vec<_>>(), "menu {menu}'s entries");
+                for e in entries {
+                    let p = &plasma.shown[&e.id];
+                    assert_eq!(p.separator, e.separator, "{:?} as a separator", e.label);
+                    assert_eq!(p.submenu, !e.children.is_empty(), "{:?} as a submenu", e.label);
+                    assert_eq!(p.radio, e.radio.is_some(), "{:?} as a choice", e.label);
+                    if !e.separator {
+                        assert_eq!(p.label, e.label);
+                    }
+                    assert_eq!(p.enabled, e.enabled, "{:?} enabled", e.label);
+                    assert_eq!(p.checked, e.radio == Some(true), "{:?} checked", e.label);
+                }
+            };
+            check(0, &ours.children);
+            let sub = ours.children.iter().find(|e| e.label == "Scene").unwrap();
+            check(sub.id, &sub.children);
+            assert_eq!(sub.children.iter().filter(|e| e.radio == Some(true)).count(), 1, "one scene on");
         }
     }
 }
