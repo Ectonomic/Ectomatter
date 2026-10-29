@@ -51,8 +51,9 @@ fn grouped(n: u64) -> String {
 }
 
 /// The facts at About's foot: its authors (the first few by commits, and how many more),
-/// the models that wrote with them, what it's built on, and whose it is. Before the
-/// credits come, or where there are none, the authors are its manifest's.
+/// the models that wrote with them, what it's built on (about::BUILT_ON, two to a line),
+/// and whose it is. Before the credits come, or where there are none, the authors are its
+/// manifest's.
 pub(crate) fn facts(credits: Option<&Credits>) -> Vec<FactKey> {
     let more = |n: usize| if n > FIRST { format!("and {} more", n - FIRST) } else { String::new() };
     let mut out = Vec::new();
@@ -62,13 +63,13 @@ pub(crate) fn facts(credits: Option<&Credits>) -> Vec<FactKey> {
             if !c.models.is_empty() {
                 out.push(("Models".into(), c.models.iter().take(FIRST).map(|m| (m.0.clone(), commits(m.1))).collect(), more(c.models.len()), 1));
             }
-            out.push(("Built on".into(), vec![(format!("{} open-source libraries", grouped(c.libraries)), String::new()), (format!("{} typefaces", c.typefaces), String::new())], "View authors and licenses".into(), 2));
         }
         None => {
             out.push(("Authors".into(), about::authors().into_iter().take(FIRST).map(|a| (a.to_string(), String::new())).collect(), String::new(), 0));
-            out.push(("Built on".into(), Vec::new(), "View authors and licenses".into(), 2));
         }
     }
+    let built = about::BUILT_ON.chunks(2).map(|two| (two.join(" and "), String::new())).collect();
+    out.push(("Built on".into(), built, "View authors and licenses".into(), 2));
     out.push(("Copyright".into(), vec![(format!("© {}", about::copyright()), String::new())], String::new(), 0));
     out
 }
@@ -239,13 +240,11 @@ mod tests {
             authors: (0..people).map(|i| (format!("Person {i}"), 100 - i as u64, 1000, 10)).collect(),
             models: (0..models).map(|i| (format!("Model {i}"), 50 - i as u64)).collect(),
             commits: 120,
-            libraries: 1234,
-            typefaces: 7,
         }
     }
 
     /// About's foot names the first three authors and models by commits and says how many
-    /// more there are; what it's built on comes from the credits' counts, never typed in.
+    /// more there are; what it's built on is what about::BUILT_ON names.
     #[test]
     fn the_foot_names_the_first_three_and_counts_the_rest() {
         let f = facts(Some(&made_up(50, 2)));
@@ -255,8 +254,7 @@ mod tests {
         assert_eq!(f[0].1[0], ("Person 0".to_string(), "100 commits".to_string()));
         assert_eq!((f[0].2.as_str(), f[0].3), ("and 47 more", 1));
         assert_eq!(f[1].2, "", "two models need no more");
-        assert_eq!(f[2].1[0].0, "1,234 open-source libraries");
-        assert_eq!(f[2].1[1].0, "7 typefaces");
+        assert_eq!(f[2].1.iter().map(|l| l.0.as_str()).collect::<Vec<_>>(), ["Rust and Slint", "Wasmtime and resvg"]);
         // (no models, no column for them)
         assert!(facts(Some(&made_up(2, 0))).iter().all(|x| x.0 != "Models"));
         // (before the credits come, the manifest's authors)

@@ -10,7 +10,5 @@
   {"name": "Model Alpha", "commits": 380},
   {"name": "Model Beta", "commits": 8}
  ],
- "commits": 470,
- "libraries": 512,
- "typefaces": 9
+ "commits": 470
 }

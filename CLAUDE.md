@@ -90,9 +90,10 @@ This is where they live in this repository.
   GPLv3's legal notices and opens the license and the notices (run from
   the source folder, it writes them with `tools/notices.py` first);
   `tests/install.rs` holds an installed copy to read them where the
-  install puts them. Its credits (authors, the models commits name, what
-  it's built on) are made from the history by `tools/credits.py`, never
-  typed: run from the source folder at first sight of About, else the
+  install puts them. Its credits (authors, and the models commits name)
+  are made from the history by `tools/credits.py`, never typed (what it's
+  built on is `about::BUILT_ON`, held to its dependencies by
+  `what_about_says_its_built_on_it_is`): run from the source folder at first sight of About, else the
   install's `credits.json`; the render desk's are made up
   (`tests/renders/desk/credits.json`, `ECTOMATTER_CREDITS`). About's page is
   `ui/pages/about.slint` and `src/front/about_page.rs`; its Blob,

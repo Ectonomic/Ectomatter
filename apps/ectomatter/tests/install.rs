@@ -98,9 +98,9 @@ fn an_install_lays_ectomatter_out_and_it_starts_from_there() {
     }
     // the guide Build with us opens, as it is in the source
     assert!(std::fs::read(usr.join("share/doc/ectomatter/making-a-package.md")).ok() == std::fs::read(repo().join("docs/making-a-package.md")).ok(), "the guide to making a package isn't installed as it is");
-    // the credits About shows: the history's authors, and the libraries counted as the notices count them
+    // the credits About shows: the history's authors
     let credits: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(usr.join("share/licenses/ectomatter/credits.json")).unwrap_or_default()).unwrap_or_default();
-    assert!(credits["authors"].as_array().is_some_and(|a| !a.is_empty()) && credits["libraries"].as_u64() == Some(libraries.len() as u64), "the credits aren't installed, or don't count what ships: {credits}");
+    assert!(credits["authors"].as_array().is_some_and(|a| !a.is_empty()), "the credits aren't installed: {credits}");
     for f in carried(&folders) {
         assert!(notices.lines().any(|n| n == f), "{f} isn't in the notices");
     }

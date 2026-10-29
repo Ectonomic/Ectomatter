@@ -15,8 +15,8 @@
 #     license texts in LICENSES/, and NOTICES: each library the app is built
 #     from and each file it carries from others, with its license text
 #     (tools/notices.py); each package's own NOTICES beside its manifest;
-#     and credits.json, its authors and models from its history and what
-#     it's built on, as About shows them (tools/credits.py)
+#     and credits.json, its authors and models from its history, as About
+#     shows them (tools/credits.py)
 #   PREFIX/share/doc/ectomatter/making-a-package.md: the guide to making a
 #     core or a plugin, which About's Build with us opens
 #
@@ -76,5 +76,5 @@ for f in LICENSES/*.txt; do
   install -Dm644 "$f" "$licenses/$(basename "$f")"
 done
 python3 -I tools/notices.py Cargo.toml > "$licenses/NOTICES"
-python3 -I tools/credits.py Cargo.toml > "$licenses/credits.json"
+python3 -I tools/credits.py > "$licenses/credits.json"
 echo "installed under $root"

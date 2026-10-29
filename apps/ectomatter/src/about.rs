@@ -29,8 +29,7 @@ pub fn legal() -> String {
 }
 
 /// Ectomatter's credits, as tools/credits.py makes them from the project's history: each
-/// person who made it, each AI model that wrote with them, by commits; and what it's
-/// built on.
+/// person who made it, and each AI model that wrote with them, by commits.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Credits {
     /// (name, commits, lines added, lines taken out), most commits first
@@ -38,8 +37,6 @@ pub struct Credits {
     /// (name, commits), most first
     pub models: Vec<(String, u64)>,
     pub commits: u64,
-    pub libraries: u64,
-    pub typefaces: u64,
 }
 
 impl Credits {
@@ -50,8 +47,6 @@ impl Credits {
             authors: list("authors")?.iter().map(|a| (a["name"].as_str().unwrap_or("").to_string(), n(a, "commits"), n(a, "added"), n(a, "removed"))).filter(|a| !a.0.is_empty()).collect(),
             models: list("models")?.iter().map(|m| (m["name"].as_str().unwrap_or("").to_string(), n(m, "commits"))).filter(|m| !m.0.is_empty()).collect(),
             commits: n(v, "commits"),
-            libraries: n(v, "libraries"),
-            typefaces: n(v, "typefaces"),
         })
     }
 }
@@ -85,9 +80,8 @@ fn read_credits(f: &Path) -> Result<Credits, String> {
 /// The credits tools/credits.py makes from the source folder `src`'s history.
 fn made(src: &Path) -> Result<Credits, String> {
     let run = std::process::Command::new("python3")
-        .args(["-I", "tools/credits.py", "Cargo.toml"])
+        .args(["-I", "tools/credits.py"])
         .current_dir(src)
-        .env("CARGO", cargo())
         .output()
         .map_err(|e| format!("The credits weren\u{2019}t made: python3 didn\u{2019}t start ({e})."))?;
     if !run.status.success() {
@@ -98,6 +92,12 @@ fn made(src: &Path) -> Result<Credits, String> {
 }
 
 /// Who made Ectomatter, as its manifest names them, in its order.
+/// What About says Ectomatter is built on: the language it's written in and the three
+/// libraries a person meets in it, the interface (Slint), the sandbox every core and plugin
+/// runs in (Wasmtime) and the devices' art (resvg). Every library it ships is credited in
+/// its notices; these are named because they're the ones a person can see.
+pub const BUILT_ON: [&str; 4] = ["Rust", "Slint", "Wasmtime", "resvg"];
+
 pub fn authors() -> Vec<&'static str> {
     env!("CARGO_PKG_AUTHORS").split(':').filter(|n| !n.is_empty()).collect()
 }
@@ -243,17 +243,26 @@ mod tests {
         assert_eq!(folder_of(root, true), root);
     }
 
-    /// The credits come from the project's own history and files: its authors and the
-    /// models its commits name, and the libraries counted as the notices count them; and a
-    /// made-up credits file reads as it says.
+    /// Each library About names as what Ectomatter is built on is one it's built with:
+    /// a dependency of its own (Rust, the language, aside).
+    #[test]
+    fn what_about_says_its_built_on_it_is() {
+        let manifest: toml::Table = include_str!("../Cargo.toml").parse().unwrap();
+        let deps: Vec<String> = manifest.iter().filter(|(k, _)| k.ends_with("dependencies")).chain(manifest.get("target").and_then(|t| t.as_table()).into_iter().flat_map(|t| t.values().filter_map(|v| v.as_table()).flat_map(|t| t.iter().filter(|(k, _)| k.as_str() == "dependencies")))).filter(|(k, _)| k.as_str() != "dev-dependencies").flat_map(|(_, v)| v.as_table().into_iter().flat_map(|t| t.keys().cloned())).collect();
+        for name in BUILT_ON.iter().filter(|n| **n != "Rust") {
+            assert!(deps.iter().any(|d| d.eq_ignore_ascii_case(name)), "About says Ectomatter is built on {name}, which isn't one of its dependencies: {deps:?}");
+        }
+    }
+
+    /// The credits come from the project's own history: its authors and the models its
+    /// commits name; and a made-up credits file reads as it says.
     #[test]
     fn the_credits_come_from_the_history() {
         let source = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
         let c = made(source).unwrap();
         assert!(!c.authors.is_empty() && c.commits > 0 && c.authors.iter().all(|a| a.1 <= c.commits), "{c:?}");
-        assert!(c.libraries > 100 && c.typefaces > 0, "{c:?}");
         let f = read_credits(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/renders/desk/credits.json")).unwrap();
-        assert_eq!((f.authors.len(), f.models.len(), f.commits, f.libraries), (5, 2, 470, 512));
+        assert_eq!((f.authors.len(), f.models.len(), f.commits), (5, 2, 470));
         assert_eq!(f.authors[0], ("Robin Example".to_string(), 412, 98120, 30544));
         assert!(read_credits(Path::new("/nonexistent/credits.json")).is_err());
     }
