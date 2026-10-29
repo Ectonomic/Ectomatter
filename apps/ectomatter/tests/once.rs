@@ -4,11 +4,15 @@
 //! to the second, and Ectomatter opened again. The new one stops, and the one
 //! running is now on the second desktop. Opened again where it can be seen,
 //! it stays where it is; started as at login (`--hide`), the new one stops
-//! without bringing it forward. Each program runs in a sandbox of its own
+//! without bringing it forward. The desktop's tray comes after it, as at
+//! login: its icon goes in, its menu has Open and Quit, a press on it with
+//! the window on the other desktop brings the window, and Quit quits.
+//! Each program runs in a sandbox of its own
 //! with no devices (as in compositor.rs), Ectomatter with no cores or plugins
 //! and fresh folders. Needs `bwrap`, `kwin_wayland` and `dbus-daemon`.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -59,17 +63,21 @@ fn windows(log: &str) -> Vec<String> {
     log.lines().filter(|l| l.contains("KWin: opened com.ectonomic.ectomatter ")).filter_map(|l| l.split_whitespace().last().map(str::to_string)).collect()
 }
 
+/// A method of KWin's called on the test's bus, and its answer.
+fn kwin<R: serde::de::DeserializeOwned + zbus::wire::Type, B: serde::Serialize + zbus::wire::DynamicType>(bus: &zbus::Connection, path: &str, iface: &str, method: &str, body: &B) -> R {
+    zbus::block_on(async { bus.call_method(Some("org.kde.KWin"), path, Some(iface), method, body).await.unwrap().body().deserialize::<R>().unwrap() })
+}
+
 /// The virtual desktops a window is on, as KWin says.
-fn desktops(bus: &zbus::blocking::Connection, window: &str) -> Vec<String> {
-    let kwin = zbus::blocking::Proxy::new(bus, "org.kde.KWin", "/KWin", "org.kde.KWin").unwrap();
-    let info: HashMap<String, zbus::zvariant::OwnedValue> = kwin.call("getWindowInfo", &(window,)).unwrap();
+fn desktops(bus: &zbus::Connection, window: &str) -> Vec<String> {
+    let info: HashMap<String, zbus::wire::OwnedVariant> = kwin(bus, "/KWin", "org.kde.KWin", "getWindowInfo", &(window,));
     info.get("desktops").and_then(|d| Vec::<String>::try_from(d.try_clone().unwrap()).ok()).unwrap_or_default()
 }
 
 /// The virtual desktop the person is on.
-fn current(bus: &zbus::blocking::Connection) -> String {
-    let vd = zbus::blocking::Proxy::new(bus, "org.kde.KWin", "/VirtualDesktopManager", "org.kde.KWin.VirtualDesktopManager").unwrap();
-    vd.get_property("current").unwrap()
+fn current(bus: &zbus::Connection) -> String {
+    let v: zbus::wire::OwnedVariant = kwin(bus, "/VirtualDesktopManager", "org.freedesktop.DBus.Properties", "Get", &("org.kde.KWin.VirtualDesktopManager", "current"));
+    String::try_from(v).unwrap()
 }
 
 #[test]
@@ -109,11 +117,11 @@ fn ectomatter_runs_once_and_comes_to_the_desktop_its_opened_on() {
         ("LIBGL_ALWAYS_SOFTWARE", "1".to_string()),
     ]);
     let kwin_program = ["kwin_wayland", "--virtual", "--no-lockscreen", "--no-global-shortcuts", "--no-kactivities", "--socket", "wayland-once", "--width", "1280", "--height", "800"];
-    let kwin = sandboxed(&dir, &kwin_env, &kwin_program).spawn().expect("bwrap starts KWin");
-    s.running.push(kwin);
-    let bus = zbus::blocking::connection::Builder::address(address.as_str()).unwrap().build().expect("the test on the session bus");
-    let names = zbus::blocking::fdo::DBusProxy::new(&bus).unwrap();
-    assert!(until(30, || names.name_has_owner("org.kde.KWin".try_into().unwrap()).unwrap_or(false)), "KWin didn't come on the bus");
+    let compositor = sandboxed(&dir, &kwin_env, &kwin_program).spawn().expect("bwrap starts KWin");
+    s.running.push(compositor);
+    let bus = zbus::block_on(zbus::connection::Builder::address(address.as_str()).build()).expect("the test on the session bus");
+    let owned = |name: &str| zbus::block_on(async { bus.call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus", Some("org.freedesktop.DBus"), "NameHasOwner", &(name,)).await.ok()?.body().deserialize::<bool>().ok() }).unwrap_or(false);
+    assert!(until(30, || owned("org.kde.KWin")), "KWin didn't come on the bus");
 
     // Ectomatter on the first desktop
     let exe = Path::new(env!("CARGO_BIN_EXE_ectomatter"));
@@ -142,8 +150,7 @@ fn ectomatter_runs_once_and_comes_to_the_desktop_its_opened_on() {
     assert_eq!(desktops(&bus, &first), vec![here.clone()], "Ectomatter didn't open on the desktop the person was on");
 
     // the person goes to the second desktop, and opens Ectomatter again
-    let kwin = zbus::blocking::Proxy::new(&bus, "org.kde.KWin", "/KWin", "org.kde.KWin").unwrap();
-    let went: bool = kwin.call("setCurrentDesktop", &(2i32,)).unwrap();
+    let went: bool = kwin(&bus, "/KWin", "org.kde.KWin", "setCurrentDesktop", &(2i32,));
     let there = current(&bus);
     assert!(went && there != here, "KWin didn't go to the second desktop");
     std::thread::sleep(Duration::from_secs(1));
@@ -185,5 +192,81 @@ fn ectomatter_runs_once_and_comes_to_the_desktop_its_opened_on() {
     assert!(stopped && told.contains("runs already, so this one stops"), "the Ectomatter started at login didn't stop:\n{told}");
     std::thread::sleep(Duration::from_secs(1));
     assert_eq!(said().matches("opened again, so this one comes forward").count(), 2, "starting at login brought the one running forward:\n{}", said());
+
+    // the desktop's tray comes after Ectomatter, as at login: the icon goes in it
+    let registered = Arc::new(Mutex::new(Vec::<String>::new()));
+    let _tray = zbus::block_on(zbus::connection::Builder::address(address.as_str()).name("org.kde.StatusNotifierWatcher").serve_at("/StatusNotifierWatcher", Watcher(registered.clone())).build()).expect("a tray on the test's bus");
+    assert!(until(10, || !registered.lock().unwrap().is_empty()), "Ectomatter's icon didn't go in the tray that came:\n{}", said());
+    let item = registered.lock().unwrap()[0].clone();
+    let title: String = property(&bus, &item, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "Title");
+    assert_eq!(title, "Ectomatter");
+    let icons: Vec<(i32, i32, Vec<u8>)> = property(&bus, &item, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "IconPixmap");
+    assert!(!icons.is_empty() && icons.iter().all(|(w, h, d)| *w > 0 && d.len() == (w * h * 4) as usize), "the icon isn't one a tray can draw");
+    let menu: zbus::wire::OwnedObjectPath = property(&bus, &item, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "Menu");
+    let (_, layout): (u32, Entry) = call(&bus, &item, menu.as_str(), "com.canonical.dbusmenu", "GetLayout", &(0i32, -1i32, Vec::<String>::new()));
+    let entries = layout.flat();
+    let id_of = |label: &str| entries.iter().find(|(_, l)| l == label).map(|(id, _)| *id);
+    assert!(id_of("Open Ectomatter").is_some() && id_of("Quit Ectomatter").is_some(), "the tray's menu: {entries:?}");
+
+    // the person on the first desktop, the window on the second: a press on the icon brings it
+    let went: bool = kwin(&bus, "/KWin", "org.kde.KWin", "setCurrentDesktop", &(1i32,));
+    assert!(went && current(&bus) == here, "KWin didn't go back to the first desktop");
+    std::thread::sleep(Duration::from_secs(1));
+    let () = call(&bus, &item, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "ProvideXdgActivationToken", &("a-token-of-the-tests",));
+    let () = call(&bus, &item, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "Activate", &(0i32, 0i32));
+    assert!(until(20, || windows(&said()).len() >= 3), "a press on the tray's icon didn't bring the window:\n{}", said());
+    let brought = windows(&said())[2].clone();
+    assert_eq!(desktops(&bus, &brought), vec![here.clone()], "the tray's icon didn't bring the window to the desktop the person is on:\n{}", said());
+
+    // Quit, from the tray's menu: Ectomatter quits whole
+    let () = call(&bus, &item, menu.as_str(), "com.canonical.dbusmenu", "Event", &(id_of("Quit Ectomatter").unwrap(), "clicked", zbus::wire::Variant::from(""), 0u32));
+    assert!(until(15, || s.running[2].try_wait().unwrap().is_some()), "Quit in the tray's menu didn't quit Ectomatter:\n{}", said());
+    assert!(s.running[2].try_wait().unwrap().is_some_and(|e| e.success()), "Ectomatter didn't quit cleanly:\n{}", said());
     assert!(!said().contains("panicked"), "{}", said());
+}
+
+/// The desktop's tray, as far as an icon's registering with it: each item's name.
+struct Watcher(Arc<Mutex<Vec<String>>>);
+
+#[zbus::interface(name = "org.kde.StatusNotifierWatcher")]
+impl Watcher {
+    fn register_status_notifier_item(&self, service: String) {
+        self.0.lock().unwrap().push(service);
+    }
+}
+
+/// A method called on the test's bus, and its answer.
+fn call<R: serde::de::DeserializeOwned + zbus::wire::Type, B: serde::Serialize + zbus::wire::DynamicType>(bus: &zbus::Connection, dest: &str, path: &str, iface: &str, method: &str, body: &B) -> R {
+    zbus::block_on(async { bus.call_method(Some(dest), path, Some(iface), method, body).await.unwrap().body().deserialize::<R>().unwrap() })
+}
+
+/// A property, on the test's bus.
+fn property<R: TryFrom<zbus::wire::OwnedVariant>>(bus: &zbus::Connection, dest: &str, path: &str, iface: &str, name: &str) -> R
+where
+    R::Error: std::fmt::Debug,
+{
+    let v: zbus::wire::OwnedVariant = call(bus, dest, path, "org.freedesktop.DBus.Properties", "Get", &(iface, name));
+    R::try_from(v).unwrap()
+}
+
+/// A menu entry as dbusmenu's GetLayout gives it.
+#[derive(serde::Deserialize, zbus::wire::Type, zbus::wire::OwnedVariant)]
+struct Entry {
+    id: i32,
+    props: HashMap<String, zbus::wire::OwnedVariant>,
+    children: Vec<zbus::wire::OwnedVariant>,
+}
+
+impl Entry {
+    /// Every entry under this one, with its label.
+    fn flat(self) -> Vec<(i32, String)> {
+        let label = self.props.get("label").and_then(|l| String::try_from(l.try_clone().ok()?).ok()).unwrap_or_default();
+        let mut out = vec![(self.id, label)];
+        for c in self.children {
+            if let Ok(e) = Entry::try_from(c) {
+                out.extend(e.flat());
+            }
+        }
+        out
+    }
 }

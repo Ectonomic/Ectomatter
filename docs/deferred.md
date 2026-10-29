@@ -288,9 +288,7 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   add-core's first click missed Add a core once Startup moved to the top of Settings, and
   the miss was approved in ac2a059 (the dialog never opened) until it was seen and aimed
   again. Nothing checks that a click landed on what it means to press.
-- The tray's icon waits for a desktop's tray that comes after Ectomatter, as
-  at login (`tray.rs`, `assume_sni_available`); no test has a desktop's tray
-  come late. A window of its own (the Macro Editor's, the lab's, the screen
+- A window of its own (the Macro Editor's, the lab's, the screen
   layout editor's) is made again after the compositor goes and comes back
   (`shell/wayland.rs`, `open`); `tests/compositor.rs` tries the main window
   only.
@@ -398,13 +396,10 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Coming to the person (2026-10-29)
 
-- A press on the tray's icon brings the window without the activation token
-  Plasma's tray hands the program it presses: the tray's library here
-  (ksni 0.3.6) doesn't take it (`tray.rs`, `TrayAsk::Open(None)`). A window
-  out of sight is opened again where the person is, which needs no token, but
-  one they can see behind others isn't raised. ksni 0.3.7 takes the token
-  (`current_xdg_activation_token`); it brings two crates Ectomatter doesn't
-  have yet (arc-swap, crossbeam-queue), which wait for Grant's word.
+- A press on the tray's icon hands the window the activation token Plasma's
+  tray gives with it (`tray.rs`, `provide_xdg_activation_token`), so one the
+  person can see behind others comes to the front. That it does is untried:
+  the test's tray hands a made-up token, which KWin turns down.
 - A window brought from another virtual desktop is opened again there
   (`shell/wayland.rs`, `come_forward`): the compositor places it as a new
   window, so where it was on its screen and whether it was maximized aren't
@@ -421,14 +416,16 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Libraries (2026-10-29)
 
-- zbus waits at 5 (`apps/ectomatter/Cargo.toml`): the tray's library, ksni
-  0.3.7 (the newest), is on zbus 5, and zbus 6 (2026-10-16) drops the
-  blocking API every D-Bus call here uses (`front_app.rs`, `once.rs`,
-  `motion.rs`, `picker.rs`, `monitors.rs`, `tray.rs`). zbus 5's parts are no
-  longer looked after now that 6 is out (RustSec). Ectomatter's own tray on
-  zbus 6, in ksni's place, and the calls moved to it, are under way.
-  `tools/fresh.py` known failures: `zbus`.
-  `tools/security.sh` known failures: `RUSTSEC-2026-0370` `RUSTSEC-2026-0371` `RUSTSEC-2026-0372`.
+- zbus 6 is two weeks old (2026-10-16; 6.2 on 2026-10-29). Ectomatter
+  moved to it from 5, whose parts RustSec marks no longer looked after, and
+  wrote its own tray for it (`tray.rs`, in ksni's place: ksni is still on
+  zbus 5). Every D-Bus call waits through zbus's own `block_on` (`bus.rs`);
+  `tests/once.rs` tries the tray, the app in front's script and Ectomatter
+  opened again on it. The portal's file picker (`picker.rs`), less motion
+  (`motion.rs`) and the screens' brightness through PowerDevil
+  (`monitors.rs`) moved to it untried: nothing here tries them on a bus.
+  `tools/fresh.py` known failures: none.
+  `tools/security.sh` known failures: none.
 - winit is built without its Wayland side (`apps/ectomatter/Cargo.toml`), so
   it doesn't bring smithay-client-toolkit 0.19 (and through it an unsound
   memmap2, RUSTSEC-2026-0186) beside the Wayland shell's 0.21. On Linux the

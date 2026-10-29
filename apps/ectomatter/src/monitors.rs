@@ -433,15 +433,14 @@ mod kde {
 
 /// A display PowerDevil knows: its D-Bus name, its label and its brightness (0 to 10000).
 #[cfg(target_os = "linux")]
-fn powerdevil() -> Result<(zbus::blocking::Connection, Vec<(String, String, i32)>), String> {
-    let conn = zbus::blocking::Connection::session().map_err(|e| e.to_string())?;
-    let root = zbus::blocking::Proxy::new(&conn, "org.kde.ScreenBrightness", "/org/kde/ScreenBrightness", "org.kde.ScreenBrightness").map_err(|e| e.to_string())?;
-    let names: Vec<String> = root.get_property("DisplaysDBusNames").map_err(|e| e.to_string())?;
+fn powerdevil() -> Result<(crate::bus::Connection, Vec<(String, String, i32)>), String> {
+    let conn = crate::bus::session().map_err(|e| e.to_string())?;
+    let names: Vec<String> = crate::bus::property(&conn, "org.kde.ScreenBrightness", "/org/kde/ScreenBrightness", "org.kde.ScreenBrightness", "DisplaysDBusNames").map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for n in names {
-        let d = zbus::blocking::Proxy::new(&conn, "org.kde.ScreenBrightness", format!("/org/kde/ScreenBrightness/{n}"), "org.kde.ScreenBrightness.Display").map_err(|e| e.to_string())?;
-        let label: String = d.get_property("Label").unwrap_or_default();
-        let b: i32 = d.get_property("Brightness").unwrap_or(-1);
+        let path = format!("/org/kde/ScreenBrightness/{n}");
+        let label: String = crate::bus::property(&conn, "org.kde.ScreenBrightness", &path, "org.kde.ScreenBrightness.Display", "Label").unwrap_or_default();
+        let b: i32 = crate::bus::property(&conn, "org.kde.ScreenBrightness", &path, "org.kde.ScreenBrightness.Display", "Brightness").unwrap_or(-1);
         out.push((n, label, b));
     }
     Ok((conn, out))
@@ -521,8 +520,8 @@ fn set_one(monitor: &str, set: &str, to: &Value) -> Result<(), String> {
             let k = all.iter().position(|(x, _)| x.id == m.id).unwrap_or(0);
             let before = all[..k].iter().filter(|(x, _)| x.label() == m.label()).count();
             if let Some(d) = display_of(&displays, &m, before) {
-                let p = zbus::blocking::Proxy::new(&conn, "org.kde.ScreenBrightness", format!("/org/kde/ScreenBrightness/{}", displays[d].0), "org.kde.ScreenBrightness.Display").map_err(|e| e.to_string())?;
-                let r: zbus::Result<()> = p.call("SetBrightnessWithContext", &(level, 1u32, "ectomatter"));
+                let path = format!("/org/kde/ScreenBrightness/{}", displays[d].0);
+                let r: zbus::Result<()> = crate::bus::call(&conn, "org.kde.ScreenBrightness", &path, "org.kde.ScreenBrightness.Display", "SetBrightnessWithContext", &(level, 1u32, "ectomatter"));
                 return r.map_err(|e| e.to_string());
             }
         }

@@ -39,7 +39,7 @@ impl Window {
 /// The one running answers on `bus`, telling the window through `tell`.
 #[cfg(target_os = "linux")]
 pub fn answer(bus: &crate::front_app::Bus, tell: Sender<TrayAsk>) {
-    if let Err(e) = bus.object_server().at(crate::front_app::PATH, Window { tell }) {
+    if let Err(e) = zbus::block_on(bus.object_server().at(crate::front_app::PATH, Window { tell })) {
         eprintln!("ectomatter: opening Ectomatter again won't bring this one forward: {e}");
     }
 }
@@ -55,10 +55,8 @@ pub fn running_already(quiet: bool, after: Option<u32>) -> bool {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
-    let Ok(conn) = zbus::blocking::Connection::session() else { return false };
-    let Ok(bus) = zbus::blocking::fdo::DBusProxy::new(&conn) else { return false };
-    let Ok(name) = zbus::names::BusName::try_from(crate::front_app::SERVICE) else { return false };
-    if !bus.name_has_owner(name).unwrap_or(false) {
+    let Ok(conn) = crate::bus::session() else { return false };
+    if !crate::bus::has_owner(&conn, crate::front_app::SERVICE) {
         return false;
     }
     if quiet {
@@ -67,7 +65,7 @@ pub fn running_already(quiet: bool, after: Option<u32>) -> bool {
     }
     // (the token a launcher gives the program it starts: Wayland's, or X11's startup id)
     let token = std::env::var("XDG_ACTIVATION_TOKEN").or_else(|_| std::env::var("DESKTOP_STARTUP_ID")).unwrap_or_default();
-    match conn.call_method(Some(crate::front_app::SERVICE), crate::front_app::PATH, Some(IFACE), "ComeForward", &(token,)) {
+    match crate::bus::call::<(), _>(&conn, crate::front_app::SERVICE, crate::front_app::PATH, IFACE, "ComeForward", &(token,)) {
         Ok(_) => eprintln!("ectomatter: Ectomatter runs already; it was asked to come forward, and this one stops"),
         Err(e) => eprintln!("ectomatter: Ectomatter runs already, so this one stops (it couldn't be asked to come forward: {e})"),
     }

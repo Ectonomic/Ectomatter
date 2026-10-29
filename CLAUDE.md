@@ -111,7 +111,9 @@ This is where they live in this repository.
   on an off-screen KWin with two virtual desktops and a bus of its own,
   Ectomatter opened again stops and brings the one running to the desktop
   the person is on (`src/once.rs`; the window's side is `come_forward` in
-  `shell/wayland.rs`, which the tray's icon uses too).
+  `shell/wayland.rs`); then a tray comes, as at login, and Ectomatter's own
+  (`src/tray.rs`) goes in it, brings the window with a press and quits from
+  its menu.
 - **Packages from others.** `registry/` is the list of cores and plugins
   Ectonomic reviewed (to be its own repository, Ectonomic/ectomatter-packages):
   `packages.json`, each version's manifest and the checksum its package must

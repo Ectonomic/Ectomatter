@@ -169,11 +169,9 @@ tell(workspace.activeWindow);
 /// Start hearing which app is in front: Ectomatter on the session bus, told
 /// through `tell`, and its script loaded into KWin. The connection, kept for
 /// as long as Ectomatter runs; none where the bus or KWin isn't there.
-pub fn start(tell: Sender<Front>) -> Option<zbus::blocking::Connection> {
-    let conn = zbus::blocking::connection::Builder::session()
-        .and_then(|b| b.name(SERVICE))
-        .and_then(|b| b.serve_at(PATH, Listener { tell }))
-        .and_then(|b| b.build())
+pub fn start(tell: Sender<Front>) -> Option<Bus> {
+    // (served after this returns on a thread zbus keeps for the connection: bus.rs)
+    let conn = zbus::block_on(zbus::connection::Builder::session().name(SERVICE).serve_at(PATH, Listener { tell }).build())
         .map_err(|e| eprintln!("ectomatter: the app in front won't be heard: {e}"))
         .ok()?;
     match load(&conn) {
@@ -184,8 +182,19 @@ pub fn start(tell: Sender<Front>) -> Option<zbus::blocking::Connection> {
 }
 
 #[cfg(target_os = "linux")]
-fn kwin(conn: &zbus::blocking::Connection) -> zbus::Result<zbus::blocking::Proxy<'static>> {
-    zbus::blocking::Proxy::new(conn, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting")
+fn kwin(conn: &Bus) -> zbus::Result<Scripting<'_>> {
+    Ok(Scripting(conn))
+}
+
+/// KWin's scripting, called as its own tools call it.
+#[cfg(target_os = "linux")]
+struct Scripting<'a>(&'a Bus);
+
+#[cfg(target_os = "linux")]
+impl Scripting<'_> {
+    fn call<R: serde::de::DeserializeOwned + zbus::wire::Type, B: serde::Serialize + zbus::wire::DynamicType>(&self, method: &str, body: &B) -> zbus::Result<R> {
+        crate::bus::call(self.0, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", method, body)
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -193,7 +202,7 @@ fn kwin(conn: &zbus::blocking::Connection) -> zbus::Result<zbus::blocking::Proxy
 /// this Ectomatter's own name: in place of one an Ectomatter before left there
 /// (by the name alone, or one whose Ectomatter has gone); one whose Ectomatter is
 /// still quitting is left for it to take out.
-fn load(conn: &zbus::blocking::Connection) -> Result<(), String> {
+fn load(conn: &Bus) -> Result<(), String> {
     let path = crate::data_dir().join("kwin").join(format!("{SCRIPT}.js"));
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -222,8 +231,7 @@ fn load(conn: &zbus::blocking::Connection) -> Result<(), String> {
     // (run by its own object, as KWin's own tools run a script: a script started by
     // Scripting.start, which looks through every installed script first, didn't stay
     // loaded on Plasma 6.7)
-    let run = zbus::blocking::Proxy::new(conn, "org.kde.KWin", format!("/Scripting/Script{id}"), "org.kde.kwin.Script").map_err(|e| e.to_string())?;
-    let () = run.call("run", &()).map_err(|e| e.to_string())?;
+    let () = crate::bus::call(conn, "org.kde.KWin", &format!("/Scripting/Script{id}"), "org.kde.kwin.Script", "run", &()).map_err(|e| e.to_string())?;
     LOADED.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
     let _ = std::fs::write(loaded_file(), &name);
     Ok(())
@@ -235,7 +243,7 @@ fn load(conn: &zbus::blocking::Connection) -> Result<(), String> {
 /// (KWin's own word on whether a script is loaded can't be taken: on Plasma 6.7 a
 /// script that runs on is often no longer found by its name. What says it runs is
 /// what it tells: as it starts, it says which window is in front.)
-pub fn keep(conn: &zbus::blocking::Connection) {
+pub fn keep(conn: &Bus) {
     use std::sync::atomic::Ordering;
     static TRIES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let (heard, loaded) = (HEARD.load(Ordering::Relaxed), LOADED.load(Ordering::Relaxed));
@@ -261,7 +269,7 @@ pub fn keep(conn: &zbus::blocking::Connection) {
 
 #[cfg(target_os = "linux")]
 /// This Ectomatter's script taken out of KWin, as Ectomatter quits.
-pub fn stop(conn: &zbus::blocking::Connection) {
+pub fn stop(conn: &Bus) {
     let name = script_name();
     if let Ok(k) = kwin(conn) {
         let _: zbus::Result<bool> = k.call("unloadScript", &(name.as_str(),));
@@ -417,7 +425,7 @@ mod tests {
 
 /// The bus KWin tells Ectomatter on: its session D-Bus.
 #[cfg(target_os = "linux")]
-pub type Bus = zbus::blocking::Connection;
+pub type Bus = crate::bus::Connection;
 
 // Elsewhere: no app in front told yet (docs/deferred.md, stage 5), so no
 // profile follows one.

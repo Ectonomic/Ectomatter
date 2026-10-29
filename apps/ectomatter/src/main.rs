@@ -34,6 +34,8 @@ mod motion;
 mod autostart;
 mod adapter;
 mod boxes;
+#[cfg(target_os = "linux")]
+mod bus;
 mod boundaries;
 mod clipboard;
 mod clock;

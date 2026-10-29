@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 #[cfg(target_os = "linux")]
-use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
+use zbus::wire::{OwnedObjectPath, OwnedVariant, Variant};
 
 #[cfg(target_os = "linux")]
 /// Ask the desktop for one file, titled `title`, of the types named `kind`
@@ -44,24 +44,29 @@ pub fn show_folder(folder: &std::path::Path) {
 
 #[cfg(target_os = "linux")]
 fn ask(title: &str, kind: &str, patterns: &[String]) -> zbus::Result<Option<PathBuf>> {
-    let conn = zbus::blocking::Connection::session()?;
+    zbus::block_on(asked(title, kind, patterns))
+}
+
+#[cfg(target_os = "linux")]
+async fn asked(title: &str, kind: &str, patterns: &[String]) -> zbus::Result<Option<PathBuf>> {
+    let conn = zbus::Connection::session().await?;
     // the request's path is known before asking, so its answer cannot be missed
     let token = format!("ectomatter{}", std::process::id());
     let sender = conn.unique_name().map(|n| n.trim_start_matches(':').replace('.', "_")).unwrap_or_default();
     let path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
-    let request = zbus::blocking::Proxy::new(&conn, "org.freedesktop.portal.Desktop", path.as_str(), "org.freedesktop.portal.Request")?;
-    let mut answers = request.receive_signal("Response")?;
+    let request = zbus::Proxy::new(&conn, "org.freedesktop.portal.Desktop", path.as_str(), "org.freedesktop.portal.Request").await?;
+    let mut answers = request.receive_signal("Response").await?;
 
     let filter: Vec<(u32, String)> = patterns.iter().map(|p| (0u32, p.clone())).collect();
-    let mut options: HashMap<&str, Value> = HashMap::new();
-    options.insert("handle_token", Value::from(token.as_str()));
-    options.insert("modal", Value::from(true));
-    options.insert("filters", Value::from(vec![(kind.to_string(), filter)]));
-    let chooser = zbus::blocking::Proxy::new(&conn, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.FileChooser")?;
-    let _: OwnedObjectPath = chooser.call("OpenFile", &("", title, options))?;
+    let mut options: HashMap<&str, Variant> = HashMap::new();
+    options.insert("handle_token", Variant::from(token.as_str()));
+    options.insert("modal", Variant::from(true));
+    options.insert("filters", Variant::from(vec![(kind.to_string(), filter)]));
+    let chooser = zbus::Proxy::new(&conn, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.FileChooser").await?;
+    let _: OwnedObjectPath = chooser.call("OpenFile", &("", title, options)).await?;
 
-    let Some(answer) = answers.next() else { return Ok(None) };
-    let (response, results): (u32, HashMap<String, OwnedValue>) = answer.body().deserialize()?;
+    let Some(answer) = crate::bus::next(&mut answers).await else { return Ok(None) };
+    let (response, results): (u32, HashMap<String, OwnedVariant>) = answer.body().deserialize()?;
     if response != 0 {
         return Ok(None);
     }

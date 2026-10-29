@@ -24,18 +24,17 @@ pub fn look() {
 
 #[cfg(target_os = "linux")]
 fn ask() -> Option<bool> {
-    let conn = zbus::blocking::Connection::session().ok()?;
-    let settings = zbus::blocking::Proxy::new(&conn, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Settings").ok()?;
-    let v: zbus::zvariant::OwnedValue = settings.call("ReadOne", &("org.freedesktop.appearance", "reduced-motion")).ok()?;
-    Some(said(&v)?)
+    let conn = crate::bus::session().ok()?;
+    let v: zbus::wire::OwnedVariant = crate::bus::call(&conn, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Settings", "ReadOne", &("org.freedesktop.appearance", "reduced-motion")).ok()?;
+    said(&v)
 }
 
 /// What the portal's answer says: 1 asks for less motion, 0 has no preference.
 #[cfg(target_os = "linux")]
-fn said(v: &zbus::zvariant::OwnedValue) -> Option<bool> {
+fn said(v: &zbus::wire::OwnedVariant) -> Option<bool> {
     let n = u32::try_from(v).ok().or_else(|| {
         // (an older portal wraps the value in one more variant)
-        let inner: zbus::zvariant::Value = v.downcast_ref().ok()?;
+        let inner: zbus::wire::Variant = v.downcast_ref().ok()?;
         u32::try_from(&inner).ok()
     })?;
     Some(n == 1)
