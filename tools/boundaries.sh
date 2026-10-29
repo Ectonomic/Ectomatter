@@ -16,7 +16,9 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # (tests/rpm.rs); and started with no compositor, as at login before KWin is
 # ready, and with KWin gone and back (tests/compositor.rs); and opened again
 # while it runs, on another virtual desktop (tests/once.rs); and where it keeps
-# starting at login, as each system has it (autostart.rs)
+# starting at login, as each system has it (autostart.rs); and every library
+# at its newest release (tools/fresh.py) with no security advisory
+# (tools/security.sh)
 runs=(
   a_package_past_its_time_is_stopped_and_started_again
   a_package_out_of_memory_or_crashed_is_stopped_and_started_again
@@ -56,6 +58,22 @@ licenses=$(tools/licenses.sh); case $? in
   0) echo "  holds      every_shipped_dependencys_license_is_approved"; held=$((held + 1)) ;;
   3) echo "  not yet    every_shipped_dependencys_license_is_approved (known failures, docs/deferred.md)"; not=$((not + 1)) ;;
   *) printf '%s\n' "$licenses"; echo "  FAILS      every_shipped_dependencys_license_is_approved: a crate or carried file not approved and not in docs/deferred.md, or a carried file not in REUSE.toml"; exit 1 ;;
+esac
+# (every library Ectomatter and its packages name themselves at its newest
+# release, and every one under them at the newest their own needs allow:
+# tools/fresh.py; a library docs/deferred.md names is a known failure)
+fresh=$(python3 -I tools/fresh.py); case $? in
+  0) echo "  holds      every_library_is_at_its_newest_release"; held=$((held + 1)) ;;
+  3) printf '%s\n' "$fresh" | grep -v ' holds '; echo "  not yet    every_library_is_at_its_newest_release (known failures, docs/deferred.md)"; not=$((not + 1)) ;;
+  *) printf '%s\n' "$fresh"; echo "  FAILS      every_library_is_at_its_newest_release: a library behind and not in docs/deferred.md, or crates.io not reached"; exit 1 ;;
+esac
+# (no library that ships with a known security hole, unsound or no longer
+# looked after, and every one from crates.io, as RustSec's advisories have
+# it: tools/security.sh; an advisory docs/deferred.md names is a known failure)
+security=$(tools/security.sh); case $? in
+  0) echo "  holds      no_library_has_an_advisory"; held=$((held + 1)) ;;
+  3) printf '%s\n' "$security" | grep -v ' holds$'; echo "  not yet    no_library_has_an_advisory (known failures, docs/deferred.md)"; not=$((not + 1)) ;;
+  *) printf '%s\n' "$security"; echo "  FAILS      no_library_has_an_advisory: an advisory not in docs/deferred.md, a library from elsewhere, or the database not reached"; exit 1 ;;
 esac
 # (the list of packages, registry/packages.json: every package that comes
 # with Ectomatter, its release as tools/release-package.py makes it, held to

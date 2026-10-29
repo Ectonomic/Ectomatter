@@ -46,3 +46,20 @@ allow = [
   "CC0-1.0",
 ]
 
+
+# A library with a known security hole, one that's unsound or no longer
+# looked after, or a version taken back from crates.io, as RustSec's advisory
+# database (https://github.com/RustSec/advisory-db) has it: none in anything
+# that ships (tools/security.sh). One whose fix waits is ignored here by its
+# advisory's id, with why, and named in docs/deferred.md.
+[advisories]
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+ignore = []
+
+# Every library from crates.io, and none from anywhere else: no other
+# registry, and no git repository.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

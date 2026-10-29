@@ -120,6 +120,13 @@ This is where they live in this repository.
   send a package in. `tools/release-package.py` makes a package's release
   files; `tools/list-packages.py` writes Ectomatter's own into the list after
   a package changes. `docs/making-a-package.md` is for someone making one.
+- **Libraries.** `tools/fresh.py` (run by `tools/boundaries.sh`; needs the
+  network) holds every library Ectomatter and its packages name to its
+  newest release, and everything under them to what `cargo update` can
+  reach; `tools/security.sh` (the same; needs cargo-deny) holds them to
+  RustSec's advisories and to crates.io alone (`deny.toml`, `[advisories]`
+  and `[sources]`). A library or advisory whose fix waits is a known
+  failure named in `docs/deferred.md`.
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 

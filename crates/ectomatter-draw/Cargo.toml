@@ -6,6 +6,7 @@ license.workspace = true
 description = "Draws a core's device art in HDR: the keyboard as one picture, lit, for Ectomatter's native window"
 
 [dependencies]
-resvg = "0.45"
-rustybuzz = "0.20.1"
+resvg = "0.49"
+harfrust = "0.15"
+skrifa = "0.49"
 serde_json.workspace = true

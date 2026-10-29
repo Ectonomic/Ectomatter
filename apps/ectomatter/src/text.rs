@@ -19,9 +19,9 @@ fn faces() -> &'static [(u16, Vec<u8>)] {
 }
 
 /// The face nearest a weight, read once.
-fn face(weight: u16) -> Option<&'static rustybuzz::Face<'static>> {
-    static READ: OnceLock<Vec<(u16, Option<rustybuzz::Face<'static>>)>> = OnceLock::new();
-    let read = READ.get_or_init(|| faces().iter().map(|(w, data)| (*w, rustybuzz::Face::from_slice(data, 0))).collect());
+fn face(weight: u16) -> Option<&'static harfrust::Font> {
+    static READ: OnceLock<Vec<(u16, Option<harfrust::Font>)>> = OnceLock::new();
+    let read = READ.get_or_init(|| faces().iter().map(|(w, data)| (*w, harfrust::Font::new(data.as_slice(), 0))).collect());
     read.iter().min_by_key(|(w, _)| w.abs_diff(weight)).and_then(|(_, f)| f.as_ref())
 }
 
@@ -35,12 +35,16 @@ thread_local! {
 const KEPT: usize = 4096;
 
 fn shaped(weight: u16, size: f32, s: &str) -> f32 {
-    let Some(face) = face(weight) else { return 0.0 };
-    let mut buf = rustybuzz::UnicodeBuffer::new();
+    let Some(font) = face(weight) else { return 0.0 };
+    let shaper = harfrust::ShaperFont::new(font);
+    let mut buf = harfrust::Buffer::new();
     buf.push_str(s);
-    let glyphs = rustybuzz::shape(face, &[], buf);
-    let adv: i32 = glyphs.glyph_positions().iter().map(|p| p.x_advance).sum();
-    adv as f32 * size / face.units_per_em() as f32
+    buf.guess_segment_properties();
+    if harfrust::shape(&shaper, &mut buf, harfrust::ShapeOptions::new()).is_err() {
+        return 0.0;
+    }
+    let adv: i32 = buf.glyph_positions().iter().map(|p| p.x_advance).sum();
+    adv as f32 * size / font.units_per_em() as f32
 }
 
 /// Words cut to `most` wide, set at `weight` and `size`, an ellipsis where they were cut.

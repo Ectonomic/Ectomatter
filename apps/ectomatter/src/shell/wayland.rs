@@ -13,7 +13,8 @@ use smithay_client_toolkit::reexports::calloop::{self, EventLoop};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
 use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
-use smithay_client_toolkit::reexports::client::{delegate_noop, Connection, Dispatch, QueueHandle};
+use smithay_client_toolkit::dispatch2::Dispatch2;
+use smithay_client_toolkit::reexports::client::{Connection, QueueHandle};
 use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
 use smithay_client_toolkit::data_device_manager::{
     data_device::{DataDevice, DataDeviceHandler},
@@ -25,13 +26,12 @@ use smithay_client_toolkit::reexports::client::protocol::{wl_data_device::WlData
 use smithay_client_toolkit::{
     activation::{ActivationHandler, ActivationState, RequestData},
     compositor::{CompositorHandler, CompositorState},
-    delegate_activation, delegate_compositor, delegate_data_device, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
-    delegate_xdg_shell, delegate_xdg_window,
+    delegate_registry,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::{
-        keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers},
+        keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
         pointer::{CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer},
         Capability, SeatHandler, SeatState,
     },
@@ -291,7 +291,7 @@ pub(crate) struct PictureTag(f64, f64);
 /// dims every light well below the nits it was drawn at.
 pub(crate) fn describe<U: Send + Sync + 'static>(cm: &WpColorManagerV1, qh: &QueueHandle<App>, reference: f64, peak: f64, mastering: bool, tag: U) -> WpImageDescriptionV1
 where
-    App: Dispatch<WpImageDescriptionV1, U>,
+    App: smithay_client_toolkit::reexports::client::Dispatch<WpImageDescriptionV1, U>,
 {
     let params = cm.create_parametric_creator(qh, ());
     params.set_tf_named(wp_color_manager_v1::TransferFunction::St2084Pq);
@@ -796,7 +796,7 @@ impl App {
         }
         surface.damage_buffer(dx + ml as i32, dy + mt as i32, dw, dh);
         surface.set_buffer_scale(mw.scale as i32);
-        surface.frame(&self.qh, surface.clone());
+        surface.frame(&self.qh, smithay_client_toolkit::compositor::FrameCallbackData(surface.clone()));
         mw.buffers[i].0.attach_to(surface).unwrap();
         mw.window.commit();
         mw.frame_pending = true;
@@ -909,7 +909,7 @@ impl App {
         self.show();
         self.s.full = true;
         if let (Some(a), Some(seat), Some(surface)) = (&self.activation, &self.seat, from) {
-            a.request_token(&self.qh, RequestData { app_id: Some("com.ectonomic.ectomatter".into()), seat_and_serial: Some((seat.clone(), self.press)), surface: Some(surface) });
+            a.request_token(&self.qh, RequestData { app_id: Some("com.ectonomic.ectomatter".into()), seat_and_serial: Some((seat.clone(), self.press)), surface: Some(surface), udata: () });
         }
     }
 
@@ -1027,7 +1027,7 @@ impl App {
             surface.damage_buffer((x + ml) as i32, (y + mt) as i32, dw as i32, dh as i32);
         }
         surface.set_buffer_scale(self.scale as i32);
-        surface.frame(&self.qh, surface.clone());
+        surface.frame(&self.qh, smithay_client_toolkit::compositor::FrameCallbackData(surface.clone()));
         self.buffers[i].0.attach_to(surface).unwrap();
         self.window.commit();
         self.frame_pending = true;
@@ -1226,7 +1226,7 @@ impl SeatHandler for App {
     fn new_capability(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat, capability: Capability) {
         if capability == Capability::Pointer && self.pointer.is_none() {
             let surface = self.compositor.create_surface(qh);
-            self.pointer = self.seats.get_pointer_with_theme(qh, &seat, self.shm.wl_shm(), surface, ThemeSpec::default()).ok();
+            self.pointer = self.seats.get_pointer_with_theme::<_, ()>(qh, &seat, self.shm.wl_shm(), surface, ThemeSpec::default()).ok();
         }
         if capability == Capability::Keyboard && self.keyboard.is_none() {
             self.keyboard = self.seats.get_keyboard(qh, &seat, None).ok();
@@ -1278,7 +1278,10 @@ impl KeyboardHandler for App {
     fn release_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
         self.key(&event, false);
     }
-    fn update_modifiers(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, mods: Modifiers, _: u32) {
+    // (a key held repeats on the compositor's word only where it says so, wl_keyboard 10; the
+    // window has never repeated a held key, so it takes the first press alone, as before)
+    fn repeat_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, _: KeyEvent) {}
+    fn update_modifiers(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, mods: Modifiers, _: RawModifiers, _: u32) {
         self.mods = mods;
     }
 }
@@ -1372,8 +1375,17 @@ impl ProvidesRegistryState for App {
     registry_handlers![OutputState, SeatState];
 }
 
-impl Dispatch<WpImageDescriptionV1, ()> for App {
-    fn event(app: &mut Self, _: &WpImageDescriptionV1, e: wp_image_description_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+/// A protocol whose events Ectomatter has no use for, the objects made with no data.
+macro_rules! ignore {
+    ($proto:ty) => {
+        impl Dispatch2<$proto, App> for () {
+            fn event(&self, _: &mut App, _: &$proto, _: <$proto as smithay_client_toolkit::reexports::client::Proxy>::Event, _: &Connection, _: &QueueHandle<App>) {}
+        }
+    };
+}
+
+impl Dispatch2<WpImageDescriptionV1, App> for () {
+    fn event(&self, app: &mut App, _: &WpImageDescriptionV1, e: wp_image_description_v1::Event, _: &Connection, _: &QueueHandle<App>) {
         match e {
             wp_image_description_v1::Event::Ready { .. } | wp_image_description_v1::Event::Ready2 { .. } => app.ready = true,
             wp_image_description_v1::Event::Failed { msg, .. } => app.failed = Some(msg),
@@ -1382,11 +1394,11 @@ impl Dispatch<WpImageDescriptionV1, ()> for App {
     }
 }
 
-impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
-    fn event(app: &mut Self, desc: &WpImageDescriptionV1, e: wp_image_description_v1::Event, tag: &PictureTag, _: &Connection, _: &QueueHandle<Self>) {
+impl Dispatch2<WpImageDescriptionV1, App> for PictureTag {
+    fn event(&self, app: &mut App, desc: &WpImageDescriptionV1, e: wp_image_description_v1::Event, _: &Connection, _: &QueueHandle<App>) {
         if let wp_image_description_v1::Event::Ready { .. } | wp_image_description_v1::Event::Ready2 { .. } = e {
             // the description and the pixels drawn for it go to KWin together, on the next frame
-            let PictureTag(reference, peak) = *tag;
+            let PictureTag(reference, peak) = *self;
             app.cm_surface.set_image_description(desc, app.intent);
             app.levels = (reference, peak);
             app.s.pic.set_reference(reference);
@@ -1404,11 +1416,11 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
 /// A screen's description, asked for its levels once KWin has it ready: a
 /// screen turned off has none, and asking a failed description for its
 /// levels is a protocol error, which ends the window's connection.
-impl Dispatch<WpImageDescriptionV1, ScreenTag> for App {
-    fn event(_: &mut Self, desc: &WpImageDescriptionV1, e: wp_image_description_v1::Event, tag: &ScreenTag, _: &Connection, qh: &QueueHandle<Self>) {
+impl Dispatch2<WpImageDescriptionV1, App> for ScreenTag {
+    fn event(&self, _: &mut App, desc: &WpImageDescriptionV1, e: wp_image_description_v1::Event, _: &Connection, qh: &QueueHandle<App>) {
         match e {
             wp_image_description_v1::Event::Ready { .. } | wp_image_description_v1::Event::Ready2 { .. } => {
-                desc.get_information(qh, *tag);
+                desc.get_information(qh, *self);
                 desc.destroy();
             }
             wp_image_description_v1::Event::Failed { .. } => desc.destroy(),
@@ -1417,23 +1429,23 @@ impl Dispatch<WpImageDescriptionV1, ScreenTag> for App {
     }
 }
 
-impl Dispatch<WpColorManagementOutputV1, ScreenTag> for App {
-    fn event(_: &mut Self, cmo: &WpColorManagementOutputV1, e: wp_color_management_output_v1::Event, tag: &ScreenTag, _: &Connection, qh: &QueueHandle<Self>) {
+impl Dispatch2<WpColorManagementOutputV1, App> for ScreenTag {
+    fn event(&self, _: &mut App, cmo: &WpColorManagementOutputV1, e: wp_color_management_output_v1::Event, _: &Connection, qh: &QueueHandle<App>) {
         if let wp_color_management_output_v1::Event::ImageDescriptionChanged = e {
-            cmo.get_image_description(qh, *tag);
+            cmo.get_image_description(qh, *self);
         }
     }
 }
 
-impl Dispatch<WpImageDescriptionInfoV1, ScreenTag> for App {
-    fn event(app: &mut Self, _: &WpImageDescriptionInfoV1, e: wp_image_description_info_v1::Event, tag: &ScreenTag, _: &Connection, qh: &QueueHandle<Self>) {
-        let Some(s) = app.screens.iter_mut().find(|s| s.id == tag.0) else { return };
+impl Dispatch2<WpImageDescriptionInfoV1, App> for ScreenTag {
+    fn event(&self, app: &mut App, _: &WpImageDescriptionInfoV1, e: wp_image_description_info_v1::Event, _: &Connection, qh: &QueueHandle<App>) {
+        let Some(s) = app.screens.iter_mut().find(|s| s.id == self.0) else { return };
         match e {
             wp_image_description_info_v1::Event::Luminances { max_lum, reference_lum, .. } => s.reading = (reference_lum as f64, max_lum as f64),
             wp_image_description_info_v1::Event::Done => {
                 (s.reference, s.peak) = s.reading;
                 // its white undimmed, for while it is dimmed
-                let id = tag.0;
+                let id = self.0;
                 let dimmed = app.kde_of(id).is_some_and(|d| d.dimmed());
                 if let Some(s) = app.screens.iter_mut().find(|s| s.id == id && !dimmed && s.reference > 0.0) {
                     s.undimmed = Some(s.reference);
@@ -1447,16 +1459,16 @@ impl Dispatch<WpImageDescriptionInfoV1, ScreenTag> for App {
     }
 }
 
-impl Dispatch<shadow::client::org_kde_kwin_shadow_manager::OrgKdeKwinShadowManager, ()> for App {
-    fn event(_: &mut Self, _: &shadow::client::org_kde_kwin_shadow_manager::OrgKdeKwinShadowManager, _: shadow::client::org_kde_kwin_shadow_manager::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+impl Dispatch2<shadow::client::org_kde_kwin_shadow_manager::OrgKdeKwinShadowManager, App> for () {
+    fn event(&self, _: &mut App, _: &shadow::client::org_kde_kwin_shadow_manager::OrgKdeKwinShadowManager, _: shadow::client::org_kde_kwin_shadow_manager::Event, _: &Connection, _: &QueueHandle<App>) {}
 }
 
-impl Dispatch<shadow::client::org_kde_kwin_shadow::OrgKdeKwinShadow, ()> for App {
-    fn event(_: &mut Self, _: &shadow::client::org_kde_kwin_shadow::OrgKdeKwinShadow, _: shadow::client::org_kde_kwin_shadow::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+impl Dispatch2<shadow::client::org_kde_kwin_shadow::OrgKdeKwinShadow, App> for () {
+    fn event(&self, _: &mut App, _: &shadow::client::org_kde_kwin_shadow::OrgKdeKwinShadow, _: shadow::client::org_kde_kwin_shadow::Event, _: &Connection, _: &QueueHandle<App>) {}
 }
 
-impl Dispatch<KdeOutputDeviceRegistryV2, ()> for App {
-    fn event(app: &mut Self, _: &KdeOutputDeviceRegistryV2, e: kde_output_device_registry_v2::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+impl Dispatch2<KdeOutputDeviceRegistryV2, App> for () {
+    fn event(&self, app: &mut App, _: &KdeOutputDeviceRegistryV2, e: kde_output_device_registry_v2::Event, _: &Connection, _: &QueueHandle<App>) {
         if let kde_output_device_registry_v2::Event::Output { output } = e {
             app.kde.push((output, kde_output::Device::default(), kde_output::Device::default()));
         }
@@ -1466,8 +1478,8 @@ impl Dispatch<KdeOutputDeviceRegistryV2, ()> for App {
     ]);
 }
 
-impl Dispatch<KdeOutputDeviceV2, ()> for App {
-    fn event(app: &mut Self, dev: &KdeOutputDeviceV2, e: kde_output_device_v2::Event, _: &(), _: &Connection, qh: &QueueHandle<Self>) {
+impl Dispatch2<KdeOutputDeviceV2, App> for () {
+    fn event(&self, app: &mut App, dev: &KdeOutputDeviceV2, e: kde_output_device_v2::Event, _: &Connection, qh: &QueueHandle<App>) {
         let Some(k) = app.kde.iter_mut().find(|k| &k.0 == dev) else { return };
         // A screen's word is whole at its done. KWin does not say when an
         // idle dim changes its white, but KDE says the dim: ask KWin for the
@@ -1487,10 +1499,10 @@ impl Dispatch<KdeOutputDeviceV2, ()> for App {
     ]);
 }
 
-delegate_noop!(App: ignore KdeOutputDeviceModeV2);
+ignore!(KdeOutputDeviceModeV2);
 
-impl Dispatch<WpColorManagerV1, ()> for App {
-    fn event(app: &mut Self, _: &WpColorManagerV1, e: wp_color_manager_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+impl Dispatch2<WpColorManagerV1, App> for () {
+    fn event(&self, app: &mut App, _: &WpColorManagerV1, e: wp_color_manager_v1::Event, _: &Connection, _: &QueueHandle<App>) {
         use smithay_client_toolkit::reexports::client::WEnum;
         match e {
             wp_color_manager_v1::Event::SupportedFeature { feature: WEnum::Value(wp_color_manager_v1::Feature::SetMasteringDisplayPrimaries) } => app.mastering = true,
@@ -1499,15 +1511,8 @@ impl Dispatch<WpColorManagerV1, ()> for App {
         }
     }
 }
-delegate_noop!(App: ignore WpColorManagementSurfaceV1);
-delegate_noop!(App: ignore WpImageDescriptionCreatorParamsV1);
-delegate_compositor!(App);
-delegate_output!(App);
-delegate_shm!(App);
-delegate_seat!(App);
-delegate_pointer!(App);
-delegate_keyboard!(App);
-delegate_data_device!(App);
+ignore!(WpColorManagementSurfaceV1);
+ignore!(WpImageDescriptionCreatorParamsV1);
 
 impl DataDeviceHandler for App {
     fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64, _: &wl_surface::WlSurface) {}
@@ -1562,15 +1567,13 @@ impl DataSourceHandler for App {
     fn dnd_finished(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
     fn action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: DndAction) {}
 }
-delegate_xdg_shell!(App);
-delegate_xdg_window!(App);
 delegate_registry!(App);
-delegate_activation!(App);
+smithay_client_toolkit::delegate_dispatch2!(App);
 
 impl ActivationHandler for App {
-    type RequestData = RequestData;
+    type RequestUdata = ();
     /// The token a press in another window was given: the main window comes forward with it.
-    fn new_token(&mut self, token: String, _: &RequestData) {
+    fn new_token(&mut self, token: String, _: &RequestData<()>) {
         if let Some(a) = &self.activation {
             a.activate::<App>(self.window.wl_surface(), token);
         }

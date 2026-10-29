@@ -3867,9 +3867,10 @@ mod tests {
     /// in the list and on the key on a computer that has no fonts for it.
     #[test]
     fn every_glyph_offered_shows_on_any_computer() {
-        let fonts: Vec<rustybuzz::Face> = ectomatter_draw::print::GLYPH_FONTS.iter().map(|data| rustybuzz::Face::from_slice(data, 0).unwrap()).collect();
+        use skrifa::MetadataProvider;
+        let fonts: Vec<skrifa::FontRef> = ectomatter_draw::print::GLYPH_FONTS.iter().map(|data| skrifa::FontRef::from_index(data, 0).unwrap()).collect();
         for (glyph, name) in GLYPHS {
-            assert!(glyph.chars().all(|c| fonts.iter().any(|f| f.glyph_index(c).is_some())), "{name} ({glyph})");
+            assert!(glyph.chars().all(|c| fonts.iter().any(|f| f.charmap().map(c).is_some())), "{name} ({glyph})");
         }
     }
 

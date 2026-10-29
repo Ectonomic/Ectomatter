@@ -418,3 +418,31 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   the session bus, both run (`once.rs`, `running_already`). On Windows and
   macOS, and with no session bus, nothing stops a second one
   (`#[cfg(not(target_os = "linux"))]` in `once.rs`).
+
+## Libraries (2026-10-29)
+
+- zbus waits at 5 (`apps/ectomatter/Cargo.toml`): the tray's library, ksni
+  0.3.7 (the newest), is on zbus 5, and zbus 6 (2026-10-16) drops the
+  blocking API every D-Bus call here uses (`front_app.rs`, `once.rs`,
+  `motion.rs`, `picker.rs`, `monitors.rs`, `tray.rs`). zbus 5's parts are no
+  longer looked after now that 6 is out (RustSec). Ectomatter's own tray on
+  zbus 6, in ksni's place, and the calls moved to it, are under way.
+  `tools/fresh.py` known failures: `zbus`.
+  `tools/security.sh` known failures: `RUSTSEC-2026-0370` `RUSTSEC-2026-0371` `RUSTSEC-2026-0372`.
+- winit is built without its Wayland side (`apps/ectomatter/Cargo.toml`), so
+  it doesn't bring smithay-client-toolkit 0.19 (and through it an unsound
+  memmap2, RUSTSEC-2026-0186) beside the Wayland shell's 0.21. On Linux the
+  winit shell (`ECTOMATTER_SHELL=winit`, the one Windows and macOS use, tried
+  here) now opens through XWayland.
+- Each library Ectomatter names is at its newest release
+  (`tools/fresh.py`), which can put a second version of a library beside the
+  one another library holds back: harfrust 0.15 and skrifa 0.49 for the
+  legends (`crates/ectomatter-draw`) beside Slint's 0.12 and 0.44; resvg 0.49
+  beside the 0.48 Slint builds with. A library held back by another isn't
+  failed, only counted.
+- The window's keys don't repeat while held (`shell/wayland.rs`,
+  `repeat_key`), as before; smithay-client-toolkit 0.21 hands a compositor's
+  repeats to the window, which takes the first press alone.
+- `tools/security.sh` was proven on the advisories it found; its sources
+  rule (crates.io alone, `deny.toml` `[sources]`) hasn't been tried on a
+  planted library from elsewhere.

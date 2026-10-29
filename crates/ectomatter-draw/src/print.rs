@@ -13,7 +13,12 @@ use std::sync::{Arc, Mutex};
 
 use resvg::tiny_skia::{Path, PathBuilder, Transform};
 use resvg::usvg::{self, fontdb};
-use rustybuzz::ttf_parser;
+// (shaping by HarfRust, HarfBuzz's own port, and outlines, axes and metrics by
+// skrifa: Google Fonts' fontations, which RustSec names in rustybuzz's and
+// ttf-parser's place now that both are no longer looked after)
+use skrifa::MetadataProvider;
+use skrifa::instance::{LocationRef, Size};
+use skrifa::outline::DrawSettings;
 use serde_json::Value;
 
 /// How far apart a key's own legend and its shifted sign stand, in its
@@ -604,9 +609,13 @@ pub fn faces() -> Arc<fontdb::Database> {
         for data in LIBRARY {
             db.load_font_source(fontdb::Source::Binary(Arc::new(data)));
         }
+        // (each file read once, and held, as the shaper takes a typeface's bytes)
         for f in FILES.lock().map(|f| f.clone()).unwrap_or_default() {
-            if let Err(e) = db.load_font_file(&f) {
-                eprintln!("ectomatter-draw: the typeface {}: {e}", f.display());
+            match std::fs::read(&f) {
+                Ok(data) => {
+                    db.load_font_source(fontdb::Source::Binary(Arc::new(data)));
+                }
+                Err(e) => eprintln!("ectomatter-draw: the typeface {}: {e}", f.display()),
             }
         }
         add_glyph_fonts(&mut db);
@@ -674,9 +683,9 @@ pub fn families(db: &fontdb::Database) -> Vec<(String, Vec<u16>)> {
 /// a face of one weight.
 fn weights_of(db: &fontdb::Database, id: fontdb::ID) -> Option<Vec<u16>> {
     db.with_face_data(id, |data, index| {
-        let f = ttf_parser::Face::parse(data, index).ok()?;
-        let axis = f.variation_axes().into_iter().find(|a| a.tag == ttf_parser::Tag::from_bytes(b"wght"))?;
-        let w: Vec<u16> = (1..=9).map(|n| n * 100).filter(|&n| (axis.min_value..=axis.max_value).contains(&(n as f32))).collect();
+        let f = skrifa::FontRef::from_index(data, index).ok()?;
+        let axis = f.axes().iter().find(|a| a.tag() == skrifa::Tag::new(b"wght"))?;
+        let w: Vec<u16> = (1..=9).map(|n| n * 100).filter(|&n| (axis.min_value()..=axis.max_value()).contains(&(n as f32))).collect();
         (!w.is_empty()).then_some(w)
     })
     .flatten()
@@ -755,7 +764,7 @@ impl Set {
 /// Outlines of a face's glyphs, as tiny-skia paths.
 struct Outline(PathBuilder);
 
-impl ttf_parser::OutlineBuilder for Outline {
+impl skrifa::outline::OutlinePen for Outline {
     fn move_to(&mut self, x: f32, y: f32) {
         self.0.move_to(x, y);
     }
@@ -776,8 +785,8 @@ impl ttf_parser::OutlineBuilder for Outline {
 /// The capitals' share of a face's em.
 fn cap_share(db: &fontdb::Database, id: fontdb::ID) -> f32 {
     db.with_face_data(id, |data, index| {
-        let f = ttf_parser::Face::parse(data, index).ok()?;
-        f.capital_height().filter(|h| *h > 0).map(|h| h as f32 / f.units_per_em() as f32)
+        let m = skrifa::FontRef::from_index(data, index).ok()?.metrics(Size::unscaled(), LocationRef::default());
+        m.cap_height.filter(|h| *h > 0.0).map(|h| h / m.units_per_em as f32)
     })
     .flatten()
     .unwrap_or(CAP)
@@ -787,28 +796,38 @@ fn cap_share(db: &fontdb::Database, id: fontdb::ID) -> f32 {
 /// the face's units; and which of its characters it lacks. A variable
 /// typeface is set at the weight asked, where one is.
 fn shape(db: &fontdb::Database, id: fontdb::ID, weight: Option<u16>, text: &str) -> Option<Shaped> {
-    db.with_face_data(id, |data, index| {
-        let mut face = rustybuzz::Face::from_slice(data, index)?;
-        if let Some(w) = weight.filter(|_| face.is_variable()) {
-            face.set_variations(&[rustybuzz::Variation { tag: ttf_parser::Tag::from_bytes(b"wght"), value: w as f32 }]);
-        }
-        let mut buf = rustybuzz::UnicodeBuffer::new();
-        buf.push_str(text);
-        let out = rustybuzz::shape(&face, &[], buf);
-        let mut pen = 0.0;
-        let mut glyphs = Vec::new();
-        for (info, pos) in out.glyph_infos().iter().zip(out.glyph_positions()) {
-            let mut b = Outline(PathBuilder::new());
-            if face.outline_glyph(ttf_parser::GlyphId(info.glyph_id as u16), &mut b).is_some() {
-                if let Some(p) = b.0.finish() {
-                    glyphs.push((p, pen + pos.x_offset as f32));
-                }
+    let (source, index) = db.face_source(id)?;
+    let bytes: Arc<dyn AsRef<[u8]> + Send + Sync> = match source {
+        fontdb::Source::Binary(b) | fontdb::Source::SharedFile(_, b) => b,
+        fontdb::Source::File(path) => Arc::new(std::fs::read(path).ok()?),
+    };
+    let face = skrifa::FontRef::from_index((*bytes).as_ref(), index).ok()?;
+    let weight = weight.filter(|_| !face.axes().is_empty()).map(|w| w as f32);
+    let font = harfrust::Font::new(bytes.clone(), index)?;
+    let font = match weight {
+        Some(w) => font.instance_builder().variations([harfrust::font::Variation { tag: harfrust::Tag::new(b"wght"), value: w }]).build(),
+        None => font,
+    };
+    let shaper = harfrust::ShaperFont::new(&font);
+    let mut buf = harfrust::Buffer::new();
+    buf.push_str(text);
+    // (its script and direction from the text, as HarfBuzz's own shape guesses them)
+    buf.guess_segment_properties();
+    harfrust::shape(&shaper, &mut buf, harfrust::ShapeOptions::new()).ok()?;
+    let at = weight.map(|w| face.axes().location([("wght", w)])).unwrap_or_default();
+    let outlines = face.outline_glyphs();
+    let mut pen = 0.0;
+    let mut glyphs = Vec::new();
+    for (info, pos) in buf.glyph_infos().iter().zip(buf.glyph_positions()) {
+        let mut b = Outline(PathBuilder::new());
+        if outlines.get(skrifa::GlyphId::new(info.glyph_id)).is_some_and(|g| g.draw(DrawSettings::unhinted(Size::unscaled(), &at), &mut b).is_ok()) {
+            if let Some(p) = b.0.finish() {
+                glyphs.push((p, pen + pos.x_offset as f32));
             }
-            pen += pos.x_advance as f32;
         }
-        Some(Shaped { glyphs, advance: pen, per_em: face.units_per_em() as f32 })
-    })
-    .flatten()
+        pen += pos.x_advance as f32;
+    }
+    Some(Shaped { glyphs, advance: pen, per_em: font.units_per_em() as f32 })
 }
 
 /// How wide a line of text is in a typeface at a size (px), or none where
@@ -820,7 +839,7 @@ pub fn text_width(db: &fontdb::Database, family: &str, weight: u16, text: &str, 
 
 /// Whether a face has a character.
 fn has(db: &fontdb::Database, id: fontdb::ID, c: char) -> bool {
-    db.with_face_data(id, |data, index| ttf_parser::Face::parse(data, index).ok().and_then(|f| f.glyph_index(c)).is_some()).unwrap_or(false)
+    db.with_face_data(id, |data, index| skrifa::FontRef::from_index(data, index).ok().and_then(|f| f.charmap().map(c)).is_some()).unwrap_or(false)
 }
 
 /// A run laid out: its glyphs or icon, each as drawn in its own units and

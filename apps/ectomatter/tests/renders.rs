@@ -274,10 +274,10 @@ struct Picture {
 
 impl Picture {
     fn read_png(path: &Path) -> Option<Picture> {
-        let mut d = png::Decoder::new(std::fs::File::open(path).ok()?);
+        let mut d = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
         d.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16 | png::Transformations::ALPHA);
         let mut r = d.read_info().ok()?;
-        let mut buf = vec![0; r.output_buffer_size()];
+        let mut buf = vec![0; r.output_buffer_size()?];
         let info = r.next_frame(&mut buf).ok()?;
         buf.truncate(info.buffer_size());
         let rgba = match info.color_type {
@@ -318,8 +318,8 @@ impl Picture {
         let rgb: Vec<u8> = self.rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
         e.set_color(png::ColorType::Rgb);
         e.set_depth(png::BitDepth::Eight);
-        e.set_compression(png::Compression::Best);
-        e.set_adaptive_filter(png::AdaptiveFilterType::Adaptive);
+        e.set_compression(png::Compression::High);
+        e.set_filter(png::Filter::Adaptive);
         e.write_header().unwrap().write_image_data(&rgb).unwrap();
     }
 
