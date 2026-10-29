@@ -71,6 +71,9 @@ const SET_UP: &[Case] = &[
     Case { name: "settings-tall", size: (1440, 3600), set: &[("ECTOMATTER_PLACE", "settings")] },
     Case { name: "settings-devices", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "devices")] },
     Case { name: "settings-plugins", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "plugins")] },
+    Case { name: "settings-about", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "about")] },
+    Case { name: "settings-credits", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "about"), ("ECTOMATTER_CLICKS", "204,958")] },
+    Case { name: "n-about", size: NARROW, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "about")] },
     // (Add a core: the list of reviewed packages, desk/packages.json, a made-up one chosen)
     Case { name: "add-core", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "devices"), ("ECTOMATTER_REGISTRY", "/opt/ectomatter-source/apps/ectomatter/tests/renders/desk/packages.json"), ("ECTOMATTER_CLICKS", "160,767;520,524")] },
     Case { name: "library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library")] },
@@ -105,6 +108,8 @@ const FIRST_RUN: &[Case] = &[
     Case { name: "first-keyboard", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard")] },
     Case { name: "first-mouse", size: WIDE, set: &[("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_MOUSE_TAB", "0")] },
     Case { name: "first-settings", size: (1440, 3600), set: &[("ECTOMATTER_PLACE", "settings")] },
+    // (About with no device plugged in: nothing on it comes from one)
+    Case { name: "first-about", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "about")] },
     Case { name: "first-library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library")] },
 ];
 
@@ -408,7 +413,9 @@ impl Desk {
             .env("ECTOMATTER_WAIT", "1500")
             // (the lights' effects and the screen's playlist at a moment of their own)
             .env("ECTOMATTER_LIGHT_AT", "2000")
-            .env("ECTOMATTER_LCD_AT", "3");
+            .env("ECTOMATTER_LCD_AT", "3")
+            // (About's credits made up, as a history the desk has)
+            .env("ECTOMATTER_CREDITS", fixture("credits.json"));
         // (the devices as their cores last read them, where they're plugged in)
         if self.plugged {
             c.env("ECTOMATTER_STATE", fixture("keyboard.json")).env("ECTOMATTER_MOUSE", fixture("mouse.json"));

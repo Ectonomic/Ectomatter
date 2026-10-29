@@ -3,9 +3,8 @@
 //! open it, what else has it open; the plugins, each with what it can do,
 //! its version and whether it's on, then the sections the plugins describe
 //! of themselves (the weather's place and units), drawn here; the sensors the
-//! Sensor Feed reads, and which the screens show; the HDR interface; and
-//! About: Ectomatter's version, who made it and whose it is, its license and the notices of
-//! what it's built from (src/about.rs).
+//! Sensor Feed reads, and which the screens show; the HDR interface. About is
+//! a page of its own (ui/pages/about.slint, front/about_page.rs).
 
 use serde_json::{json, Value};
 
@@ -117,9 +116,6 @@ pub struct State {
     /// white of the screen the window is on
     pub top_peak: f64,
     pub reference: f64,
-    /// what went wrong the last time About's Read was pressed: which (0 the
-    /// license, 1 the notices), and what
-    pub about: Option<(i32, String)>,
     /// what starts at login (autostart.rs)
     pub starts: crate::autostart::Starts,
 }
@@ -479,8 +475,8 @@ pub fn page(s: &State, tab: Tab, room: f32) -> (Vec<Cell>, f32, SensorMap, Plugi
         Tab::Devices => devices_section(&mut f, &s.devices),
         // each plugin, a box each, then Add a plugin
         Tab::Plugins => packages_section(&mut f, "Plugins", 1, &s.plugins, "Add a plugin", "Ectomatter checks each plugin’s GitHub releases for updates once a day."),
-        // (the window draws About itself: ui/pages/about.slint)
-        Tab::About => about_section(&mut f, s.about.as_ref()),
+        // (About is a page of its own, drawn by the window: ui/pages/about.slint, front/about_page.rs)
+        Tab::About => {}
     }
     let (cells, h) = f.end();
     (cells, h, map, pmap)
@@ -529,53 +525,6 @@ fn ectomatter_section(f: &mut Form, s: &State) {
         c.cells.push(text_cell(style::VALUE, cx + cw - vw, top, vw, form::LINE, &format!("{} nits", nits.round())));
         c.next(top, form::LINE);
     });
-}
-
-/// the style of a package's tile that holds Ectomatter's own mark (ui/system/cells.slint)
-const MARK: i32 = -2;
-
-/// Settings' About: Ectomatter's mark on its tile, its name and version; whose it is; who
-/// made it; its license, what that lets a person do, and Read; the notices of what it's
-/// built from and carries, and Read (Ctl::AboutRead, 0 and 1); what went wrong with a
-/// Read, in amber under its row.
-fn about_section(f: &mut Form, said: Option<&(i32, String)>) {
-    section(f, "About", |c| {
-        c.row();
-        let (x, top, w) = (c.inner_x(), c.y, c.inner_w());
-        let end = package_head(&mut c.cells, x, top, w, MARK, "Ectomatter");
-        c.cells.push(text_cell(style::SMALL, x + size::ROW + space::PAD, end, w - size::ROW - space::PAD, line::NOTE, &format!("Version {}", crate::about::VERSION)));
-        c.next(top, size::ROW);
-        c.fact("Copyright", &format!("© {}", crate::about::copyright()), "");
-        // (each author on a line of their own)
-        c.row();
-        c.label_text("Authors");
-        let top = c.y;
-        let mut end = top;
-        for name in crate::about::authors() {
-            end = c.value_lines(end, name);
-        }
-        c.next(top, end - top);
-        let trouble = |which: i32| said.filter(|(w, _)| *w == which).map(|(_, e)| e.as_str());
-        read_row(c, "License", crate::about::license().0, 0, "You can share and change Ectomatter under this license. It comes with no warranty.", trouble(0));
-        read_row(c, "Credits", "Libraries, typefaces and files made by others", 1, "Each is under its own license, which the notices give in full.", trouble(1));
-    });
-}
-
-/// About's row of words with Read after them, Space.row on (as the Core row's Review and
-/// Remove), and its note under them; what went wrong with its Read under that.
-fn read_row(c: &mut Card, label: &str, words: &str, which: i32, note: &str, trouble: Option<&str>) {
-    c.row();
-    c.label_text(label);
-    let top = c.y;
-    let (cx, cw) = (c.control_x(), c.control_w());
-    c.cells.push(text_cell(style::VALUE_BRIGHT, cx, top, cw, line::TEXT, words));
-    let rx = cx + text::width(font::REGULAR, font::TEXT, words).ceil() + space::ROW - part::QUIET_PAD;
-    form::link(&mut c.cells, rx, top, line::TEXT, "Read", id(Ctl::AboutRead), which);
-    let mut end = c.note(top + line::TEXT, note);
-    if let Some(t) = trouble {
-        end = form::warning(&mut c.cells, cx, end + space::TIGHT, cw, t);
-    }
-    c.next(top, end - top);
 }
 
 /// A plugin's own section, drawn from what it says of itself: under its
@@ -890,7 +839,7 @@ mod tests {
 
     /// The words on the page, each piece once.
     fn texts(devices: Vec<DeviceRow>) -> Vec<String> {
-        let s = State { sensors: None, devices, plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
+        let s = State { sensors: None, devices, plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, starts: crate::autostart::Starts::No };
         page(&s, Tab::Devices, 1440.0).0.into_iter().map(|c| c.text.to_string()).filter(|t| !t.is_empty()).collect()
     }
 
@@ -904,7 +853,7 @@ mod tests {
             r
         };
         let core = DeviceRow { core: waiting(row("Logitech G502", 4, true, true, "")), kind: "mouse".into(), present: true, reachable: Some(true), allow: false, holders: Vec::new(), holders_note: String::new() };
-        let s = State { sensors: None, devices: vec![core], plugins: vec![waiting(row("Weather Feed", 2, true, false, "")), row("Monitor Switcher", 3, true, true, "Up to date")], sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
+        let s = State { sensors: None, devices: vec![core], plugins: vec![waiting(row("Weather Feed", 2, true, false, "")), row("Monitor Switcher", 3, true, true, "Up to date")], sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, starts: crate::autostart::Starts::No };
         let cells: Vec<Cell> = [Tab::Devices, Tab::Plugins].into_iter().flat_map(|t| page(&s, t, 1440.0).0).collect();
         let t: Vec<String> = cells.iter().map(|c| c.text.to_string()).collect();
         assert_eq!(t.iter().filter(|x| *x == "Review").count(), 2, "on the core and the plugin waiting, not the one up to date");
@@ -914,34 +863,13 @@ mod tests {
         assert!(review.iter().all(|i| crate::lighting::ctl(*i) == Ctl::PackageReview), "a press opens its review");
     }
 
-    /// Settings' About gives what the GPLv3 asks an interactive program to show.
-    #[test]
-    fn about_gives_the_gplv3s_legal_notices() {
-        // (GPLv3 section 0: a copyright notice; that there's no warranty; that it may be
-        // shared under the license; how to read the license)
-        let s = State { sensors: None, devices: Vec::new(), plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
-        let cells = page(&s, Tab::About, 1440.0).0;
-        let words: Vec<String> = cells.iter().map(|c| c.text.to_string()).collect();
-        let has = |w: &str| words.iter().any(|t| t.contains(w));
-        assert!(has(&format!("© {}", crate::about::copyright())) && has("no warranty") && has("share and change Ectomatter") && has(crate::about::license().0), "{words:?}");
-        let reads: Vec<i32> = cells.iter().filter(|c| c.id == id(Ctl::AboutRead)).map(|c| c.index).collect();
-        assert_eq!(reads, [0, 1], "a Read for the license, then the notices");
-        assert!(has(&format!("Version {}", crate::about::VERSION)) && crate::about::authors().iter().all(|n| words.iter().any(|t| t == n)));
-        // (a Read that went wrong says so under its own row)
-        let s = State { about: Some((1, "This copy of Ectomatter came without its notices.".into())), ..s };
-        let cells = page(&s, Tab::About, 1440.0).0;
-        let said = cells.iter().find(|c| c.text.contains("came without its notices")).map(|c| c.y);
-        let credits = cells.iter().find(|c| c.text == "Credits").map(|c| c.y);
-        assert!(said.zip(credits).is_some_and(|(a, b)| a > b), "not said under Credits");
-    }
-
     /// Peak nits reaches the brightest screen's peak wherever the window is:
     /// on a dim screen (white 73, peak 200) a saved 1000 shows as 1000 at the
     /// slider's right end, and a press there keeps it at 1000.
     #[test]
     fn peak_nits_reaches_the_brightest_screens_peak_on_a_dim_screen() {
         let settings = json!({ "hdr": { "lighting": "auto", "glow_limit": 1000.0 } });
-        let s = State { sensors: None, devices: Vec::new(), plugins: Vec::new(), sections: Vec::new(), settings, top_peak: 1000.0, reference: 73.0, about: None, starts: crate::autostart::Starts::No };
+        let s = State { sensors: None, devices: Vec::new(), plugins: Vec::new(), sections: Vec::new(), settings, top_peak: 1000.0, reference: 73.0, starts: crate::autostart::Starts::No };
         let cells = page(&s, Tab::General, 1440.0).0;
         let slider = cells.iter().find(|c| c.id == id(Ctl::PeakNits)).expect("the Peak nits slider");
         assert_eq!(slider.value, 1.0, "the saved 1000 at the right end");
@@ -979,7 +907,7 @@ mod tests {
     fn each_tab_holds_its_own() {
         let dev = DeviceRow { core: row("Made-up Mouse", 4, true, true, ""), kind: "mouse".into(), present: true, reachable: Some(true), allow: false, holders: Vec::new(), holders_note: String::new() };
         let section = PluginSection { plugin: "made-up-feed".into(), section: json!({ "label": "Made-up readings", "layout": [] }), values: Value::Null, typed: None };
-        let s = State { sensors: None, devices: vec![dev], plugins: vec![row("Made-up Feed", 3, true, true, "")], sections: vec![section], settings: Value::Null, top_peak: 1000.0, reference: 254.0, about: None, starts: crate::autostart::Starts::No };
+        let s = State { sensors: None, devices: vec![dev], plugins: vec![row("Made-up Feed", 3, true, true, "")], sections: vec![section], settings: Value::Null, top_peak: 1000.0, reference: 254.0, starts: crate::autostart::Starts::No };
         let on = |t: Tab| page(&s, t, 1440.0).0.into_iter().map(|c| c.text.to_string()).collect::<Vec<_>>();
         let found = |w: &str| Tab::ALL.into_iter().filter(|t| on(*t).iter().any(|x| x == w)).collect::<Vec<_>>();
         assert_eq!(found("Made-up Mouse"), [Tab::Devices]);

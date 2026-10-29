@@ -5,6 +5,8 @@
 
 import { Size } from "tokens.slint";
 import { PageBar, Cell, CellView } from "../system/system.slint";
+import { AboutPage, AboutFact } from "about.slint";
+export { AboutFact, AboutLine, AboutCredit } from "about.slint";
 
 export component SettingsPage inherits Rectangle {
     callback cell-left(int, int, bool);
@@ -27,11 +29,23 @@ export component SettingsPage inherits Rectangle {
     in-out property set-flick-content-height <=> set-flick.content-height;
     in-out property set-flick-content-y <=> set-flick.content-y;
     in-out property set-flick-height <=> set-flick.height;
+    // About (the last tab), drawn by its own page: ui/pages/about.slint
+    in property <image> about-blob;
+    in property <image> about-mark;
+    in property <string> about-eyebrow;
+    in property <[string]> about-lead;
+    in property <[string]> about-legal;
+    in property <[AboutFact]> about-facts;
+    in property <string> about-trouble;
+    callback about-build();
+    callback about-license();
+    callback about-fact-link(int);
+    callback about-poke(length, length, length, length);
 
     set-flick := Flickable {
         y: Size.bar;
         height: parent.height - Size.bar;
-        content-height: root.settings-h;
+        content-height: root.tab == 3 ? max(self.height, about.need) : root.settings-h;
         mouse-drag-pan-enabled: false;
         for c in root.cells: CellView {
             c: c;
@@ -43,6 +57,23 @@ export component SettingsPage inherits Rectangle {
             field-left(id, index, kept) => { root.cell-left(id, index, kept); }
             slide(id, v) => { root.cell-slide(id, v); }
             typed(id, index, t) => { root.cell-typed(id, index, t); }
+        }
+        about := AboutPage {
+            visible: root.tab == 3;
+            width: parent.width;
+            height: max(set-flick.height, self.need);
+            view-h: set-flick.height;
+            blob: root.about-blob;
+            mark: root.about-mark;
+            eyebrow: root.about-eyebrow;
+            lead: root.about-lead;
+            legal: root.about-legal;
+            facts: root.about-facts;
+            trouble: root.about-trouble;
+            build => { root.about-build(); }
+            license => { root.about-license(); }
+            fact-link(i) => { root.about-fact-link(i); }
+            poke(x, y, w, h) => { root.about-poke(x, y, w, h); }
         }
     }
     PageBar {

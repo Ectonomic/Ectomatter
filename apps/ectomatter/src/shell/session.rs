@@ -467,7 +467,9 @@ impl Session {
         let effect = self.front.animated();
         let due = !effect || Instant::now() >= self.effect_due;
         let lights = if due { self.front.lights() } else { None };
-        if effect && lights.is_some() {
+        // (and About's Blob, its next frame then too, or once held still)
+        let blob = due && self.front.draw_blob(scale);
+        if effect && (lights.is_some() || blob) {
             self.effect_due = Instant::now() + self.effect_frame();
         }
         // the last frame's picture, kept until the picture shows the new one

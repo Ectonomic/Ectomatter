@@ -339,7 +339,6 @@ impl Front {
                 settings: self.settings.all(),
                 top_peak: self.levels.1,
                 reference: self.levels.0,
-                about: self.about_said.clone(),
                 starts: self.starts.0.clone(),
             };
             self.ui.set_settings_tab(crate::ecto_settings::Tab::ALL.iter().position(|t| *t == self.settings_tab).unwrap_or(0) as i32);
@@ -348,6 +347,9 @@ impl Front {
             self.plugin_map = pmap;
             self.ui.set_settings_h(h);
             self.show_cells(cells);
+            if self.settings_tab == crate::ecto_settings::Tab::About {
+                self.show_about();
+            }
         } else if loaded && self.page.view == View::Screen {
             // the default backlight at the right end of the tabs' row, with, while the layout
             // the screen shows has a color of its own, a line saying so: the playing layout on

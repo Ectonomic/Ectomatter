@@ -351,8 +351,8 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   2026-10-27), which asks that
   directions to the source sit beside the program wherever it's offered
   (GPLv3 section 6). Nothing is offered yet; a release needs them. Settings'
-  About (`src/ecto_settings.rs`, `about_section`) has no row for the source
-  either; it gets one when the repository has it.
+  About (`ui/pages/about.slint`) has no way to the source either; it gets
+  one when the repository has it.
 - About's Read opens `LICENSE` and `NOTICES` as the desktop opens a file
   (`src/about.rs`, `crate::games::open`); neither name has an extension,
   which Linux's `xdg-open` reads past but Windows' `start` asks about. No
@@ -361,3 +361,38 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   (Ectonomic/Ectomatter and one per package, `ectomatter-<package id>`,
   public and empty since 2026-10-26); nothing is in them, and no package's
   manifest names its repository yet.
+
+## Settings' About (2026-10-29)
+
+- "Up to date" waits for Ectomatter to check its own releases, as it checks
+  its packages' once a day; nothing does yet, so the eyebrow says the
+  version alone (`front/about_page.rs`, `show_about`). A newer version
+  would say its number there.
+- Build with us opens the guide to making a package from this copy
+  (`src/about.rs`, `open_in`, Read 2: `docs/making-a-package.md`, or the
+  install's `share/doc/ectomatter`). Once the repository is public it should
+  lead to the repository, where the guide and the way to send a package in
+  live together.
+- Less motion is read from the desktop portal on Linux only
+  (`src/motion.rs`), once when About first shows, not followed as it
+  changes (the portal's SettingChanged signal isn't listened to). Windows'
+  Animation effects switch and macOS's Reduce motion aren't read: there,
+  the Blob always moves.
+- The Blob is drawn a pixel to each of the page's units
+  (`front/about_page.rs`, `BLOB_PER_UNIT`) and Slint's software renderer
+  stretches an image without smoothing, so on a denser screen (1.5 or 2
+  pixels a unit) its outline steps in bigger pixels than the words beside
+  it. Drawn at the screen's own pixels it would cost two to four times the
+  processor's time (37 ms a frame for a 1380 by 936 page now,
+  `blob::tests::blob_frame_time`; 30 frames a second, about a core).
+- The mock's grain over the page (3.5%, overlaid) is left out: on the
+  page's gray it changes a pixel by under one level.
+- The models' makers are known by the address their co-author lines carry,
+  in a table typed into `tools/credits.py` (`MAKERS`: Anthropic's alone); a
+  commit co-written with another maker's model counts its model as a
+  person.
+- Run from the source folder, the credits are made from the history each
+  time Ectomatter starts and About first shows (`src/about.rs`, `made`:
+  python3, git and Cargo); a source folder without its history (a release's
+  archive) shows the manifest's authors and no models.
+

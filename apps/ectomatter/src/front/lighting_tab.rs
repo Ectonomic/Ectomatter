@@ -217,13 +217,6 @@ impl Front {
                 self.refresh();
                 return;
             }
-            Ctl::AboutRead => {
-                self.close_menu();
-                self.about_said = None;
-                self.about_read = Some((index as i32, crate::about::read(index as i32)));
-                self.refresh();
-                return;
-            }
             Ctl::PackageAdd => {
                 self.close_menu();
                 self.open_browser(if index == 0 { crate::packages::Kind::Core } else { crate::packages::Kind::Plugin }, None);

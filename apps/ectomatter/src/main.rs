@@ -29,6 +29,8 @@
 #![deny(unconditional_recursion)]
 
 mod about;
+mod blob;
+mod motion;
 mod autostart;
 mod adapter;
 mod boxes;
@@ -544,6 +546,8 @@ fn main() {
     ui.set_mark(glyph(include_str!("../ui/glyphs/mark.svg"), 16, false));
     // (and on its tile in Settings' About, at its own colors)
     ui.set_mark_tile(glyph(include_str!("../ui/glyphs/mark.svg"), 88, false));
+    // (About's mark, whole at its own colors, drawn at twice its size to stay sharp on a dense screen)
+    ui.set_about_mark(glyph(include_str!("../ui/icons/ectomatter.svg"), 2 * crate::tokens::size::MARK as u32, false));
     ui.set_home_glyph(glyph(include_str!("../ui/glyphs/home.svg"), 22, true));
     ui.set_keyboard_glyph(glyph(include_str!("../ui/glyphs/keyboard.svg"), 22, true));
     ui.set_settings_glyph(glyph(include_str!("../ui/glyphs/settings.svg"), 22, true));
@@ -1011,6 +1015,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         front.light_caps(&device_in_use(core, &front.settings)["light"]);
     }
     front.refresh();
+    // (About's Blob, its frame at the moment the animations' clock has reached)
+    front.draw_blob(1.0);
     window.request_redraw();
     window.draw_if_needed(|r| {
         r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);

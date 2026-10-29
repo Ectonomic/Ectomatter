@@ -1,0 +1,208 @@
+// Settings' About, as ectonomic.com's hero has it: the Blob behind everything
+// (src/blob.rs, drawn a frame at a time into `blob`), fading into the page's
+// gray below; one column at its middle (the mark, the eyebrow, the name in
+// display type, the lead, the actions, the license's notice); the facts side
+// by side at the foot. What it says comes from Rust (src/about.rs): the
+// version, the credits from the project's history, the license.
+// A click anywhere but a button pokes the Blob where it lands. In a window too
+// short for the column and the facts, the page is as tall as they need and
+// scrolls (Settings' Flickable), the Blob staying the window's height at its top.
+
+import { Space, Size, Font, Line, Ink, Part } from "tokens.slint";
+import { WordButton, LinkButton, FormWarning } from "../system/system.slint";
+
+// a line of a fact: a name, and what it made after it, quieter (a person's commits)
+export struct AboutLine {
+    text: string,
+    aside: string,
+}
+
+// a fact at the foot: its name in capitals, its lines, and a quiet link under
+// them (`link-to`: 1 the credits, 2 the notices)
+export struct AboutFact {
+    head: string,
+    lines: [AboutLine],
+    link: string,
+    link-to: int,
+}
+
+// a row of the Credits dialog: a name, its commits, and what else it made (a
+// person's lines, a model's share of the commits)
+export struct AboutCredit {
+    name: string,
+    commits: string,
+    more: string,
+}
+
+export component AboutPage inherits Rectangle {
+    in property <image> blob;
+    in property <image> mark;
+    in property <string> eyebrow;
+    in property <[string]> lead;
+    in property <[string]> legal;
+    in property <[AboutFact]> facts;
+    // what went wrong with a Read, in amber under the license's notice
+    in property <string> trouble;
+    callback build();
+    callback license();
+    callback fact-link(int);
+    // a click on the page, where (from its top left), and its size then
+    callback poke(length, length, length, length);
+    // the height of the page in view, which the Blob is drawn to; and the height the
+    // column and the facts need, apart as the page has them
+    in property <length> view-h;
+    out property <length> need: Space.margin + hero.preferred-height + Space.section + foot.preferred-height + Space.foot;
+    background: Ink.base;
+    clip: true;
+
+    blob-at := Image {
+        width: parent.width;
+        height: root.view-h;
+        source: root.blob;
+        image-fit: fill;
+        image-rendering: smooth;
+    }
+    TouchArea {
+        clicked => { root.poke(self.mouse-x, self.mouse-y, blob-at.width, blob-at.height); }
+    }
+
+    hero := VerticalLayout {
+        width: Size.hero-column;
+        x: (parent.width - self.width) / 2;
+        // (40% down the page, as the site's hero; higher when the facts need the room)
+        y: max(Space.margin, min(parent.height * 0.4 - self.preferred-height / 2, foot.y - Space.section - self.preferred-height));
+        height: self.preferred-height;
+        spacing: 0;
+        HorizontalLayout {
+            alignment: center;
+            Image {
+                width: Size.mark;
+                height: Size.mark;
+                source: root.mark;
+            }
+        }
+        Rectangle { height: Space.margin; }
+        Text {
+            height: Line.small;
+            text: root.eyebrow;
+            font-family: Font.ui;
+            font-size: Font.caption;
+            font-weight: Font.strong;
+            letter-spacing: Font.eyebrow-tracking;
+            color: Ink.soft;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Rectangle { height: Space.pad; }
+        Text {
+            height: Line.hero;
+            text: "Ectomatter";
+            font-family: Font.ui;
+            font-size: Font.hero;
+            font-weight: Font.strong;
+            letter-spacing: Font.hero-tracking;
+            color: Ink.bright;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Rectangle { height: Space.pad; }
+        // (each line as written: the lead is broken by hand so no line is left alone)
+        for line in root.lead: Text {
+            height: Line.lead;
+            text: line;
+            font-family: Font.ui;
+            font-size: Font.lead;
+            color: Ink.dim;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Rectangle { height: Space.section; }
+        HorizontalLayout {
+            alignment: center;
+            spacing: Space.inline;
+            WordButton {
+                primary: true;
+                text: "Build with us";
+                clicked => { root.build(); }
+            }
+            VerticalLayout {
+                alignment: center;
+                WordButton {
+                    text: "Read the license";
+                    clicked => { root.license(); }
+                }
+            }
+        }
+        Rectangle { height: Space.pad; }
+        for line in root.legal: Text {
+            height: Line.note;
+            text: line;
+            font-family: Font.ui;
+            font-size: Font.note;
+            color: Ink.soft;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        if root.trouble != "": Rectangle { height: Space.tight; }
+        if root.trouble != "": FormWarning {
+            text: root.trouble;
+            horizontal-alignment: center;
+        }
+    }
+
+    // the facts side by side, each as wide as a fact at most, narrower in a narrow window
+    property <length> fact-w: min(Size.fact, (root.width - 2 * Space.margin - (root.facts.length - 1) * Space.facts) / max(1, root.facts.length));
+    foot := HorizontalLayout {
+        width: root.facts.length * root.fact-w + (root.facts.length - 1) * Space.facts;
+        x: (parent.width - self.width) / 2;
+        height: self.preferred-height;
+        y: parent.height - Space.foot - self.height;
+        spacing: Space.facts;
+        for f in root.facts: VerticalLayout {
+            width: root.fact-w;
+            alignment: start;
+            spacing: 0;
+            Text {
+                height: Line.small;
+                text: f.head;
+                font-family: Font.ui;
+                font-size: Font.small;
+                font-weight: Font.strong;
+                letter-spacing: Font.caps-tracking;
+                color: Ink.quiet;
+                vertical-alignment: center;
+            }
+            Rectangle { height: Space.label; }
+            for l in f.lines: HorizontalLayout {
+                height: Line.text;
+                spacing: Space.inline;
+                alignment: start;
+                Text {
+                    text: l.text;
+                    font-family: Font.ui;
+                    font-size: Font.text;
+                    color: Ink.bright;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                if l.aside != "": Text {
+                    text: l.aside;
+                    font-family: Font.ui;
+                    font-size: Font.text;
+                    color: Ink.quiet;
+                    vertical-alignment: center;
+                }
+            }
+            if f.link != "": Rectangle { height: Space.tight; }
+            // (set back by its pad, so its words line up with the lines over it)
+            if f.link != "": HorizontalLayout {
+                alignment: start;
+                padding-left: -Part.quiet-pad;
+                LinkButton {
+                    text: f.link;
+                    clicked => { root.fact-link(f.link-to); }
+                }
+            }
+        }
+    }
+}

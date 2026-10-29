@@ -20,6 +20,7 @@ use crate::keyboard::{self, Entry, Page, View};
 use ectomatter_protocol::Action;
 use crate::{AppWindow, Cell, CheckItem, DeskItem, DeskPad, EffectItem, KeyItem, LayerItem, LayerTab, LibGroup, LibRow, MenuRow, MousePatch, ProfileItem};
 
+mod about_page;
 mod action_menu;
 mod color_picker;
 mod game_starts;
@@ -163,6 +164,13 @@ pub enum Ask {
     MouseTab(i32),
     /// a tab chosen in Settings' bar, by its place
     SettingsTab(i32),
+    /// About: Build with us, Read the license, a fact's link (1 the credits, 2 the
+    /// notices), a click on the page (where, and its size), Credits closed
+    AboutBuild,
+    AboutLicense,
+    AboutLink(i32),
+    AboutPoke(f32, f32, f32, f32),
+    AboutCreditsClose,
     MouseRow(i32),
     /// a box the page's row of boxes laid out came out a new width: its pieces
     /// laid out anew to it (the Lighting tab's, the mouse's), and the effects'
@@ -759,6 +767,8 @@ pub struct Front {
     /// went wrong with the last
     about_read: Option<(i32, mpsc::Receiver<Result<(), String>>)>,
     about_said: Option<(i32, String)>,
+    /// About's own: its credits, its Blob, its Credits dialog (about_page.rs)
+    about: about_page::AboutState,
     /// Settings' tab open, kept as the rail's open state is (uistate "settings_tab")
     pub settings_tab: crate::ecto_settings::Tab,
     /// what starts at login, as the system keeps it (autostart.rs), and when it was looked at
@@ -1054,6 +1064,11 @@ impl Front {
         on!(on_go, |p| Ask::Go(p.to_string()));
         on!(on_mouse_tab_chosen, |i| Ask::MouseTab(i));
         on!(on_settings_tab_chosen, |i| Ask::SettingsTab(i));
+        on!(on_about_build, Ask::AboutBuild);
+        on!(on_about_license, Ask::AboutLicense);
+        on!(on_about_fact_link, |i| Ask::AboutLink(i));
+        on!(on_about_poke, |x, y, w, h| Ask::AboutPoke(x, y, w, h));
+        on!(on_about_credits_close, Ask::AboutCreditsClose);
         on!(on_boxes_resized, Ask::BoxesResized);
         // (a box's width kept as the window draws it, and its pieces laid out anew to it)
         let (light_boxes, mouse_boxes) = (crate::boxes::Row::default(), crate::boxes::Row::default());
@@ -1256,6 +1271,7 @@ impl Front {
             run_pick: None,
             about_read: None,
             about_said: None,
+            about: Default::default(),
             // (the tab last left; a snapshot's from ECTOMATTER_SETTINGS_TAB)
             settings_tab: std::env::var("ECTOMATTER_SETTINGS_TAB").ok().or_else(|| crate::uistate::get("settings_tab").and_then(|v| v.as_str().map(String::from))).and_then(|n| crate::ecto_settings::Tab::named(&n)).unwrap_or_default(),
             starts: (crate::autostart::now(), Instant::now()),
@@ -1831,6 +1847,15 @@ impl Front {
                     self.close_picker();
                     self.open_settings_tab(crate::ecto_settings::Tab::at(i));
                 }
+                // (a Read opened away from the window's thread: about_tick says what went wrong)
+                Ask::AboutBuild | Ask::AboutLicense | Ask::AboutLink(2) => {
+                    let which = match ask { Ask::AboutBuild => 2, Ask::AboutLicense => 0, _ => 1 };
+                    self.about_said = None;
+                    self.about_read = Some((which, crate::about::read(which)));
+                }
+                Ask::AboutLink(_) => self.open_credits(),
+                Ask::AboutPoke(x, y, w, h) => self.poke_blob(x, y, w, h),
+                Ask::AboutCreditsClose => self.close_credits(),
                 // (the refresh lays them out to their new widths)
                 Ask::BoxesResized => {}
                 Ask::MouseRow(i) => {
@@ -2374,6 +2399,9 @@ impl Front {
                     news |= self.worker_told();
                     news |= self.launch_tick();
                     news |= self.about_tick();
+                    if self.credits_came() && self.about_shows() {
+                        self.refresh();
+                    }
                     news |= self.games.typed_settled();
                     if self.package_form.is_some() {
                         self.package_form_tick();

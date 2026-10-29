@@ -36,9 +36,10 @@ export { Typing, MenuRow, Cell, LaidBox, ProfileItem }
 import { KeyItem, Overlay, LayerItem, EffectItem, LibRow, LibGroup, LayerTab, CheckItem, PlPage, PlBlock, MouseRow, MouseCall, MousePatch, RailDevice, DeskItem, DeskPad, LibCover, LibApp, GlRow, LibToc, LibFact, KeyBox, EffectGrid, LayerSwitch, KeyLibrary, GameBox, LibCoverView, PlCard, WayGlyph, KeyDetail, SliderDetail, MouseLayers, PadGrip } from "pages/shared.slint";
 import { KeyboardPage } from "pages/keyboard.slint";
 import { HomePage } from "pages/home.slint";
-import { SettingsPage } from "pages/settings.slint";
+import { SettingsPage, AboutFact, AboutLine, AboutCredit } from "pages/settings.slint";
 import { LibraryPage } from "pages/library.slint";
 import { MousePage } from "pages/mouse.slint";
+export { AboutFact, AboutLine, AboutCredit }
 export { KeyItem, Overlay, LayerItem, EffectItem, LibRow, LibGroup, LayerTab, CheckItem, PlPage, PlBlock, MouseRow, MouseCall, MousePatch, RailDevice, DeskItem, DeskPad, LibCover, LibApp, GlRow, LibToc, LibFact }
 
 
@@ -264,6 +265,27 @@ export component AppWindow inherits Window {
     // Settings' tab open (src/ecto_settings.rs, Tab), and a tab chosen in its bar
     in-out property <int> settings-tab;
     callback settings-tab-chosen(int);
+    // Settings' About (src/about.rs, front/about_page.rs): the Blob's frame, its words and facts
+    in property <image> about-blob;
+    in property <image> about-mark;
+    in property <string> about-eyebrow;
+    in property <[string]> about-lead;
+    in property <[string]> about-legal;
+    in property <[AboutFact]> about-facts;
+    in property <string> about-trouble;
+    callback about-build();
+    callback about-license();
+    callback about-fact-link(int);
+    callback about-poke(length, length, length, length);
+    // About's Credits: open, the line under its title, every author and model, and how
+    // wide its columns of numbers are (each its widest, as Rust measures them)
+    in property <bool> about-credits-open;
+    in property <string> about-credits-sub;
+    in property <[AboutCredit]> about-authors;
+    in property <[AboutCredit]> about-models;
+    in property <length> about-commits-w;
+    in property <length> about-more-w;
+    callback about-credits-close();
     out property <length> settings-scroll: settings-page.set-flick-content-y;
     // Settings scrolled to a place on its page (its Sensor Feed box), as far as it scrolls
     in property <length> settings-goto: -1px;
@@ -767,6 +789,8 @@ export component AppWindow inherits Window {
     property <length> content-w: root.width - rail-w;
     // (the room a page has across, for the pages laid out in Rust)
     out property <length> content-width: content-w;
+    // (and About's, down, under the page's bar: its Blob is drawn to it)
+    out property <length> about-height: root.height - bar - Size.bar;
     // where the pages' scrollbars run
     property <length> page-scroll-y: bar + Size.bar + Space.inline;
     property <length> page-scroll-h: root.height - root.page-scroll-y - Space.inline;
@@ -1121,6 +1145,17 @@ export component AppWindow inherits Window {
             said-bad: root.settings-said-bad;
             tab: root.settings-tab;
             tab-chosen(i) => { root.settings-tab-chosen(i); }
+            about-blob: root.about-blob;
+            about-mark: root.about-mark;
+            about-eyebrow: root.about-eyebrow;
+            about-lead: root.about-lead;
+            about-legal: root.about-legal;
+            about-facts: root.about-facts;
+            about-trouble: root.about-trouble;
+            about-build => { root.about-build(); }
+            about-license => { root.about-license(); }
+            about-fact-link(i) => { root.about-fact-link(i); }
+            about-poke(x, y, w, h) => { root.about-poke(x, y, w, h); }
             place <=> root.place;
             settings-h: root.settings-h;
         }
@@ -1470,6 +1505,70 @@ export component AppWindow inherits Window {
         content: settings-page.set-flick-content-height;
         offset: -settings-page.set-flick-content-y;
         scroll-to(o) => { settings-page.set-flick-content-y = -o; }
+    }
+
+    // About's Credits, over the window: every author and every model, from the
+    // project's history, each in a well (the authors' scrolling past ten); Done,
+    // Escape or a press on the dim closes it
+    if root.about-credits-open: FormDialog {
+        corner: root.radius;
+        cancel => { root.about-credits-close(); }
+        title: "Credits";
+        text: root.about-credits-sub;
+        go: "Done";
+        only-go: true;
+        go-pressed => { root.about-credits-close(); }
+        VerticalLayout {
+            spacing: 0;
+            for list[k] in [root.about-authors, root.about-models]: VerticalLayout {
+                spacing: 0;
+                if k > 0: Rectangle { height: Space.pad; }
+                FormLabel {
+                    text: k == 0 ? "Authors" : "Models";
+                }
+                Rectangle { height: Space.label; }
+                ScrollBox {
+                    height: min(list.length, 10) * Size.control + 2 * Space.tight;
+                    need: list.length * Size.control + 2 * Space.tight;
+                    fill: Ink.well;
+                    corner: Radius.control;
+                    for c[i] in list: HorizontalLayout {
+                        y: Space.tight + i * Size.control;
+                        height: Size.control;
+                        padding-left: Space.row;
+                        padding-right: Space.row;
+                        spacing: Space.margin;
+                        Text {
+                            horizontal-stretch: 1;
+                            text: c.name;
+                            font-family: Font.ui;
+                            font-size: Font.text;
+                            color: Ink.bright;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Text {
+                            width: root.about-commits-w;
+                            text: c.commits;
+                            font-family: Font.ui;
+                            font-size: Font.note;
+                            color: Ink.quiet;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            width: root.about-more-w;
+                            text: c.more;
+                            font-family: Font.ui;
+                            font-size: Font.note;
+                            color: Ink.quiet;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // a form over the Library: Add a game (its program and its name) or Add an

@@ -1,5 +1,7 @@
-//! Ectomatter's About, Settings' last section: its version, who made it and whose it is, its
-//! license, and the notices of what it's built from and carries, each to read.
+//! Ectomatter's About, Settings' last tab: its version, who made it and whose it is, its
+//! license, and the notices of what it's built from and carries, each to read; its
+//! credits, from the project's history (tools/credits.py); and the lead inviting a
+//! person to build it with us, with the guide to making a package.
 //! These are the GPLv3's Appropriate Legal Notices (its section 0): a copyright
 //! notice, that it comes with no warranty, that it may be shared under the
 //! license, and how to read the license.
@@ -9,6 +11,91 @@ use std::sync::{mpsc, OnceLock};
 
 /// Its version, as its manifest has it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// About's lead, over Build with us, a line each as it's set (broken by hand, so no line
+/// is left alone and the last stands on its own).
+pub const LEAD: [&str; 5] = [
+    "Ectomatter is free and open source, and we\u{2019}d love to build it",
+    "with the people who use it. If there\u{2019}s a device you\u{2019}d like to add,",
+    "something you\u{2019}d like to improve, or an idea you want to try,",
+    "you\u{2019}re invited to be part of what comes next.",
+    "We\u{2019}d be glad to have you.",
+];
+
+/// What the license lets a person do, and that it comes with no warranty: the GPLv3's
+/// notice, under About's buttons.
+pub fn legal() -> String {
+    format!("You can share and change Ectomatter under the {}. It comes with no warranty.", license().0)
+}
+
+/// Ectomatter's credits, as tools/credits.py makes them from the project's history: each
+/// person who made it, each AI model that wrote with them, by commits; and what it's
+/// built on.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Credits {
+    /// (name, commits, lines added, lines taken out), most commits first
+    pub authors: Vec<(String, u64, u64, u64)>,
+    /// (name, commits), most first
+    pub models: Vec<(String, u64)>,
+    pub commits: u64,
+    pub libraries: u64,
+    pub typefaces: u64,
+}
+
+impl Credits {
+    fn from_json(v: &serde_json::Value) -> Result<Credits, String> {
+        let n = |v: &serde_json::Value, k: &str| v[k].as_u64().unwrap_or(0);
+        let list = |k: &str| v[k].as_array().cloned().ok_or_else(|| format!("the credits have no {k}"));
+        Ok(Credits {
+            authors: list("authors")?.iter().map(|a| (a["name"].as_str().unwrap_or("").to_string(), n(a, "commits"), n(a, "added"), n(a, "removed"))).filter(|a| !a.0.is_empty()).collect(),
+            models: list("models")?.iter().map(|m| (m["name"].as_str().unwrap_or("").to_string(), n(m, "commits"))).filter(|m| !m.0.is_empty()).collect(),
+            commits: n(v, "commits"),
+            libraries: n(v, "libraries"),
+            typefaces: n(v, "typefaces"),
+        })
+    }
+}
+
+/// The credits, read away from the window's thread: the file ECTOMATTER_CREDITS names (a
+/// snapshot's, or a test's); run from the source folder, tools/credits.py's from the
+/// history; else the install's credits.json beside its license.
+pub fn credits() -> mpsc::Receiver<Result<Credits, String>> {
+    let (tx, rx) = mpsc::channel();
+    let named = std::env::var_os("ECTOMATTER_CREDITS").map(PathBuf::from);
+    // (a named file is read at once, so a snapshot draws About with its credits)
+    if let Some(f) = named {
+        let _ = tx.send(read_credits(&f));
+        return rx;
+    }
+    std::thread::spawn(move || {
+        let got = if crate::cores::from_source() { made(folder()) } else { read_credits(&folder().join("credits.json")) };
+        if let Err(e) = &got {
+            eprintln!("ectomatter: About's credits: {e}");
+        }
+        let _ = tx.send(got);
+    });
+    rx
+}
+
+fn read_credits(f: &Path) -> Result<Credits, String> {
+    let text = std::fs::read_to_string(f).map_err(|e| format!("This copy of Ectomatter came without its credits ({}: {e}).", f.display()))?;
+    Credits::from_json(&serde_json::from_str(&text).map_err(|e| format!("Its credits can\u{2019}t be read ({}: {e}).", f.display()))?)
+}
+
+/// The credits tools/credits.py makes from the source folder `src`'s history.
+fn made(src: &Path) -> Result<Credits, String> {
+    let run = std::process::Command::new("python3")
+        .args(["-I", "tools/credits.py", "Cargo.toml"])
+        .current_dir(src)
+        .env("CARGO", cargo())
+        .output()
+        .map_err(|e| format!("The credits weren\u{2019}t made: python3 didn\u{2019}t start ({e})."))?;
+    if !run.status.success() {
+        let said = String::from_utf8_lossy(&run.stderr);
+        return Err(format!("The credits weren\u{2019}t made: {}", said.trim().lines().last().unwrap_or("tools/credits.py failed")));
+    }
+    Credits::from_json(&serde_json::from_slice(&run.stdout).map_err(|e| format!("tools/credits.py said what isn\u{2019}t JSON: {e}"))?)
+}
 
 /// Who made Ectomatter, as its manifest names them, in its order.
 pub fn authors() -> Vec<&'static str> {
@@ -53,9 +140,9 @@ fn folder_of(home: &Path, source: bool) -> PathBuf {
     }
 }
 
-/// Read: its license (0) or its notices (1), opened as the desktop opens a
-/// file of its kind, away from the window's thread; the channel gets what
-/// went wrong, if anything.
+/// Read: its license (0), its notices (1) or the guide to making a package (2, Build with
+/// us), opened as the desktop opens a file of its kind, away from the window's thread; the
+/// channel gets what went wrong, if anything.
 pub fn read(which: i32) -> mpsc::Receiver<Result<(), String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -76,6 +163,14 @@ fn open_in(which: i32, dir: &Path, source: bool, cache: &Path, opener: &dyn Fn(&
     if which == 0 {
         let f = dir.join("LICENSE");
         return opener(if f.is_file() { f.to_str().unwrap_or_default() } else { license().1 });
+    }
+    if which == 2 {
+        // (the source folder's docs/, or the install's share/doc/ectomatter beside its licenses)
+        let f = if source { dir.join("docs/making-a-package.md") } else { dir.join("../../doc/ectomatter/making-a-package.md") };
+        if !f.is_file() {
+            return Err("This copy of Ectomatter came without its guide to making a package.".into());
+        }
+        return opener(&f.to_string_lossy());
     }
     let f = if source { written(dir, cache)? } else { dir.join("NOTICES") };
     if !f.is_file() {
@@ -148,6 +243,21 @@ mod tests {
         assert_eq!(folder_of(root, true), root);
     }
 
+    /// The credits come from the project's own history and files: its authors and the
+    /// models its commits name, and the libraries counted as the notices count them; and a
+    /// made-up credits file reads as it says.
+    #[test]
+    fn the_credits_come_from_the_history() {
+        let source = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+        let c = made(source).unwrap();
+        assert!(!c.authors.is_empty() && c.commits > 0 && c.authors.iter().all(|a| a.1 <= c.commits), "{c:?}");
+        assert!(c.libraries > 100 && c.typefaces > 0, "{c:?}");
+        let f = read_credits(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/renders/desk/credits.json")).unwrap();
+        assert_eq!((f.authors.len(), f.models.len(), f.commits, f.libraries), (5, 2, 470, 512));
+        assert_eq!(f.authors[0], ("Robin Example".to_string(), 412, 98120, 30544));
+        assert!(read_credits(Path::new("/nonexistent/credits.json")).is_err());
+    }
+
     /// Read opens the file it names, from an install's folder or the source
     /// folder, or says what's missing; nothing is opened, only told to the
     /// test's opener.
@@ -174,10 +284,19 @@ mod tests {
         assert_eq!(last(), installed.join("LICENSE").to_string_lossy());
         open_in(1, &installed, false, &scratch, &opener).unwrap();
         assert_eq!(last(), installed.join("NOTICES").to_string_lossy());
+        // (Build with us: the guide, where the install puts it, or said missing)
+        assert_eq!(open_in(2, &installed, false, &scratch, &opener), Err("This copy of Ectomatter came without its guide to making a package.".into()));
+        let doc = scratch.join("share/doc/ectomatter");
+        std::fs::create_dir_all(&doc).unwrap();
+        std::fs::write(doc.join("making-a-package.md"), "the guide").unwrap();
+        open_in(2, &installed, false, &scratch, &opener).unwrap();
+        assert_eq!(std::fs::read_to_string(last()).ok().as_deref(), Some("the guide"));
         // (run from the source folder: its LICENSE, and the notices written into the cache)
         let source = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
         open_in(0, source, true, &scratch, &opener).unwrap();
         assert_eq!(last(), source.join("LICENSE").to_string_lossy());
+        open_in(2, source, true, &scratch, &opener).unwrap();
+        assert_eq!(last(), source.join("docs/making-a-package.md").to_string_lossy());
         open_in(1, source, true, &scratch.join("cache"), &opener).unwrap();
         let notices = std::fs::read_to_string(last()).unwrap_or_default();
         let _ = std::fs::remove_dir_all(&scratch);

@@ -1,0 +1,16 @@
+{
+ "authors": [
+  {"name": "Robin Example", "commits": 412, "added": 98120, "removed": 30544},
+  {"name": "Kit Sample", "commits": 388, "added": 87410, "removed": 28012},
+  {"name": "Jo Placeholder", "commits": 57, "added": 6120, "removed": 1980},
+  {"name": "Ari Fixture", "commits": 12, "added": 840, "removed": 112},
+  {"name": "Lee Madeup", "commits": 1, "added": 9, "removed": 2}
+ ],
+ "models": [
+  {"name": "Model Alpha", "commits": 380},
+  {"name": "Model Beta", "commits": 8}
+ ],
+ "commits": 470,
+ "libraries": 512,
+ "typefaces": 9
+}

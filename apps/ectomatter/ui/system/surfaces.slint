@@ -88,8 +88,9 @@ export component PageBox inherits Rectangle {
 export component ScrollBox inherits Rectangle {
     in property <length> need;
     in property <brush> fill: Ink.box;
+    in property <length> corner: Radius.box;
     background: root.fill;
-    border-radius: Radius.box;
+    border-radius: root.corner;
     clip: true;
     sb-flick := Flickable {
         width: parent.width;
@@ -349,6 +350,8 @@ export component FormDialog inherits Scrim {
     in property <string> text;
     in property <string> go;
     in property <bool> go-enabled: true;
+    // a dialog only to read (Credits): its one button closes it, and there's no Cancel
+    in property <bool> only-go;
     in property <string> aside;
     callback go-pressed();
     callback aside-pressed();
@@ -379,7 +382,7 @@ export component FormDialog inherits Scrim {
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
-                VerticalLayout {
+                if !root.only-go: VerticalLayout {
                     alignment: center;
                     WordButton {
                         text: "Cancel";

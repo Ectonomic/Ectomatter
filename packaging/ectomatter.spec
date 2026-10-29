@@ -31,6 +31,7 @@ cp -a %{staged}/. %{buildroot}/
 %{_datadir}/applications/com.ectonomic.ectomatter.desktop
 %{_datadir}/icons/hicolor/scalable/apps/com.ectonomic.ectomatter.svg
 %{_udevrulesdir}/70-ectomatter.rules
+%doc %{_datadir}/doc/ectomatter/
 %license %{_datadir}/licenses/ectomatter/
 
 %post

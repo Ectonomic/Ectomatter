@@ -614,7 +614,7 @@ impl Front {
     }
 
     pub fn animated(&self) -> bool {
-        self.page.animated() || (self.scene_timer.is_some() && self.scene_moves)
+        self.page.animated() || (self.scene_timer.is_some() && self.scene_moves) || self.blob_moves()
     }
 
     /// Home's Scenes menu: No scene, the scenes that come with Ectomatter, the
