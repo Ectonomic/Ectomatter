@@ -429,22 +429,6 @@ fn chip(out: &mut Vec<Cell>, v: &Sensors, checked: &BTreeSet<String>, part: Part
 pub fn page(s: &State, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
     let mut f = Form::new(X0, crate::tokens::space::MARGIN, room - 2.0 * X0);
 
-    // each device with its core, then Add a core; then the plugins
-    devices_section(&mut f, &s.devices);
-    packages_section(&mut f, "Plugins", 1, &s.plugins, "Add a plugin", "Ectomatter checks each plugin’s GitHub releases for updates once a day.");
-
-    // the sections the plugins describe of themselves
-    let mut pmap = PluginMap::default();
-    for p in &s.sections {
-        plugin_section(&mut f, p, &mut pmap);
-    }
-
-    // every sensor on the computer, a tab for each part, and which the screen's layouts can show
-    let mut map = SensorMap::default();
-    if let Some(v) = &s.sensors {
-        sensors_box(&mut f, v, &mut map);
-    }
-
     // starting at login, as the system keeps it: this copy (On), none (Off), or, neither
     // chosen, another copy, named under the note
     section(&mut f, "Startup", |c| {
@@ -464,6 +448,22 @@ pub fn page(s: &State, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
         }
         c.next(top, end - top);
     });
+
+    // each device with its core, then Add a core; then the plugins
+    devices_section(&mut f, &s.devices);
+    packages_section(&mut f, "Plugins", 1, &s.plugins, "Add a plugin", "Ectomatter checks each plugin’s GitHub releases for updates once a day.");
+
+    // the sections the plugins describe of themselves
+    let mut pmap = PluginMap::default();
+    for p in &s.sections {
+        plugin_section(&mut f, p, &mut pmap);
+    }
+
+    // every sensor on the computer, a tab for each part, and which the screen's layouts can show
+    let mut map = SensorMap::default();
+    if let Some(v) = &s.sensors {
+        sensors_box(&mut f, v, &mut map);
+    }
 
     // the HDR interface
     let hdr = &s.settings["hdr"];
