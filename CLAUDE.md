@@ -101,7 +101,9 @@ This is where they live in this repository.
   (`tests/renders/desk/credits.json`, `ECTOMATTER_CREDITS`). About's page is
   `ui/pages/about.slint` and `src/front/about_page.rs`; its Blob,
   `src/blob.rs`, is held to Ectodeck's shader by
-  `the_mesh_draws_what_the_shader_does`.
+  `the_mesh_draws_what_the_shader_does`, and its edges (against the ground,
+  and where it passes in front of itself) to the frame drawn 8x and shrunk
+  by `every_edge_is_smoothed_where_the_body_overlaps_itself_too`.
 - **No compositor.** `apps/ectomatter/tests/compositor.rs` (run by
   `tools/boundaries.sh`; needs `bwrap`, `kwin_wayland`, `dbus-run-session`)
   starts Ectomatter with no compositor, as at login before KWin is ready,

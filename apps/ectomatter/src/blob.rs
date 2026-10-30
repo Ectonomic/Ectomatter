@@ -242,7 +242,8 @@ fn scene<'a>(look: &'a Look, real: f32, pokes: &'a [Poke], w: usize, h: usize) -
 /// The shader marches each pixel's ray to the skin; here the bent sphere is cut into a mesh
 /// (as orb.js builds it) and each piece is laid onto the pixels it covers, nearest kept, so
 /// only the body's own pixels cost anything. Each is then lit as the shader lights it, and
-/// each pixel along the outline takes the body by how much of the pixel it covers.
+/// each pixel along the outline (against the ground, or where a lobe passes in front of the
+/// body) takes what it shows of each side by how much of the pixel that side covers.
 pub fn frame(look: &Look, real: f32, pokes: &[Poke], w: usize, h: usize) -> Vec<u8> {
     drawn(look, real, pokes, w, h, true)
 }
@@ -318,6 +319,66 @@ fn drawn(look: &Look, real: f32, pokes: &[Poke], w: usize, h: usize, smooth: boo
             }
         }
     }
+
+    // the body's outline as the mesh has it: each side between a piece turned to the camera and
+    // one turned away, wherever it lands (against the ground, or a lobe's edge in front of the
+    // body behind it), and the pixels it crosses, 64 to a word; and those pixels with the ones
+    // round them, where the light isn't blended across from the other side of it
+    let words = w.div_ceil(64);
+    let (mut outline, mut by_outline) = (vec![0u64; h * words], vec![0u64; h * words]);
+    if smooth {
+        let turned = |[p, q, r]: [u32; 3]| {
+            let [p, q, r] = [p, q, r].map(|i| corners[i as usize]);
+            let area = (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+            if area.abs() < 1e-6 { 0 } else { area.signum() as i32 }
+        };
+        let mut cross = |a: u32, b: u32| {
+            let (p, q) = (corners[a as usize], corners[b as usize]);
+            let steps = (((q.x - p.x).hypot(q.y - p.y)) * 4.0).ceil() as usize + 1;
+            for s in 0..=steps {
+                let f = s as f32 / steps as f32;
+                let (x, y) = (p.x + (q.x - p.x) * f, p.y + (q.y - p.y) * f);
+                if x >= 0.0 && y >= 0.0 && x < wf && y < hf {
+                    let (x, y) = (x as usize, y as usize);
+                    outline[y * words + x / 64] |= 1u64 << (x % 64);
+                }
+            }
+        };
+        let at = |row: usize, col: usize| (row * cols + col % AROUND) as u32;
+        for row in 0..POLE_TO_POLE {
+            for col in 0..AROUND {
+                let (a, b, c, d) = (at(row, col), at(row, col + 1), at(row + 1, col), at(row + 1, col + 1));
+                let (up, down) = (turned([a, b, d]), turned([a, d, c]));
+                // (the sides of this square's two pieces shared with the square's own, the next
+                // square round's and the one below's; the poles' pieces, folded flat, are passed
+                // over to the ones beside them)
+                let next_down = turned([b, at(row + 1, col + 2), d]);
+                let sides = [
+                    Some((up, down, a, d)),
+                    Some((up, next_down, b, d)),
+                    (row + 1 < POLE_TO_POLE).then(|| (down, turned([c, d, at(row + 2, col + 1)]), c, d)),
+                    (row == 0).then_some((down, next_down, a, d)),
+                    (row + 1 == POLE_TO_POLE).then(|| (up, turned([b, at(row, col + 2), at(row + 1, col + 2)]), b, d)),
+                ];
+                for (s, t, from, to) in sides.into_iter().flatten() {
+                    if s * t < 0 {
+                        cross(from, to);
+                    }
+                }
+            }
+        }
+        let right = |row: &[u64], i: usize| (row[i] << 1) | if i > 0 { row[i - 1] >> 63 } else { 0 };
+        let left = |row: &[u64], i: usize| (row[i] >> 1) | if i + 1 < row.len() { row[i + 1] << 63 } else { 0 };
+        for y in 0..h {
+            for i in 0..words {
+                by_outline[y * words + i] = (y.saturating_sub(1)..(y + 2).min(h)).fold(0, |m, yy| {
+                    let row = &outline[yy * words..(yy + 1) * words];
+                    m | row[i] | right(row, i) | left(row, i)
+                });
+            }
+        }
+    }
+    let (outline, by_outline) = (&outline, &by_outline);
 
     let e = [2.0 / wf, 2.0 / hf];
     let mut hands: Vec<Vec<(usize, &mut [u8])>> = (0..threads).map(|_| Vec::new()).collect();
@@ -404,9 +465,10 @@ fn drawn(look: &Look, real: f32, pokes: &[Poke], w: usize, h: usize, smooth: boo
                         let s = sees(&seen, x, y);
                         (s.piece != u32::MAX).then(|| light_at(x as f32 + 0.5, y as f32 + 0.5, s.piece, s.b1, s.b2, s.near))
                     };
-                    // How much of a pixel the body covers, of its COVER points, and the
-                    // first piece met with where on it (for a pixel whose centre is off the body)
-                    let cover = |x: usize, y: usize, near_by: &mut Vec<([Corner; 3], f32, u32)>| -> (usize, Option<(f32, f32, u32, f32, f32, f32)>) {
+                    // The skin a pixel by the outline shows, of its COVER points: how many of them
+                    // the body covers, and its light summed over them, each piece met with lit
+                    // once, at the middle of the points it's met at, for as many as those are
+                    let cover = |x: usize, y: usize, near_by: &mut Vec<([Corner; 3], f32, u32)>| -> (usize, V) {
                         // (the pieces whose bounds reach the pixel, of those in its column)
                         near_by.clear();
                         let (x0, y0f) = (x as f32, y as f32);
@@ -421,29 +483,47 @@ fn drawn(look: &Look, real: f32, pokes: &[Poke], w: usize, h: usize, smooth: boo
                                 near_by.push((t, 1.0 / area, id));
                             }
                         }
-                        let (mut n, mut met) = (0, None);
+                        // (where a point falls on a piece: how much of each corner it takes, its
+                        // nearness, and whether it's on the piece at all)
+                        let on_piece = |[p, q, r]: [Corner; 3], inv: f32, px: f32, py: f32| {
+                            let b0 = ((r.x - q.x) * (py - q.y) - (r.y - q.y) * (px - q.x)) * inv;
+                            let b1 = ((p.x - r.x) * (py - r.y) - (p.y - r.y) * (px - r.x)) * inv;
+                            let b2 = 1.0 - b0 - b1;
+                            (b1, b2, b0 * p.near + b1 * q.near + b2 * r.near, b0 >= 0.0 && b1 >= 0.0 && b2 >= 0.0)
+                        };
+                        // (each piece met with: which of near_by, at how many points, their sum)
+                        let mut met: [(usize, usize, f32, f32); COVER.len()] = [(0, 0, 0.0, 0.0); COVER.len()];
+                        let (mut kinds, mut n) = (0, 0);
                         for (i, j) in COVER {
-                            {
-                                let (px, py) = (x0 + 0.5 + i / 16.0, y0f + 0.5 + j / 16.0);
-                                let mut best: Option<(f32, u32, f32, f32)> = None;
-                                for &([p, q, r], inv, id) in near_by.iter() {
-                                    let b0 = ((r.x - q.x) * (py - q.y) - (r.y - q.y) * (px - q.x)) * inv;
-                                    let b1 = ((p.x - r.x) * (py - r.y) - (p.y - r.y) * (px - r.x)) * inv;
-                                    let b2 = 1.0 - b0 - b1;
-                                    if b0 >= 0.0 && b1 >= 0.0 && b2 >= 0.0 {
-                                        let near = b0 * p.near + b1 * q.near + b2 * r.near;
-                                        if best.is_none_or(|b| near > b.0) {
-                                            best = Some((near, id, b1, b2));
-                                        }
-                                    }
-                                }
-                                if let Some((near, id, b1, b2)) = best {
-                                    n += 1;
-                                    met.get_or_insert((px, py, id, b1, b2, near));
+                            let (px, py) = (x0 + 0.5 + i / 16.0, y0f + 0.5 + j / 16.0);
+                            let mut best: Option<(f32, usize)> = None;
+                            for (k, &(t, inv, _)) in near_by.iter().enumerate() {
+                                let (_, _, near, inside) = on_piece(t, inv, px, py);
+                                if inside && best.is_none_or(|b| near > b.0) {
+                                    best = Some((near, k));
                                 }
                             }
+                            if let Some((_, k)) = best {
+                                n += 1;
+                                let m = match met[..kinds].iter().position(|m| m.0 == k) {
+                                    Some(m) => m,
+                                    None => {
+                                        kinds += 1;
+                                        met[kinds - 1] = (k, 0, 0.0, 0.0);
+                                        kinds - 1
+                                    }
+                                };
+                                met[m] = (k, met[m].1 + 1, met[m].2 + px, met[m].3 + py);
+                            }
                         }
-                        (n, met)
+                        let mut sum = [0.0; 3];
+                        for &(k, count, sx, sy) in &met[..kinds] {
+                            let (t, inv, id) = near_by[k];
+                            let (px, py) = (sx / count as f32, sy / count as f32);
+                            let (b1, b2, near, _) = on_piece(t, inv, px, py);
+                            sum = add(sum, mul(light_at(px, py, id, b1, b2, near), count as f32));
+                        }
+                        (n, sum)
                     };
                     // lit at every other pixel each way, the rest blended from the four round
                     // them (the light changes slowly across the skin); a pixel by the outline,
@@ -457,7 +537,6 @@ fn drawn(look: &Look, real: f32, pokes: &[Poke], w: usize, h: usize, smooth: boo
                     // where the body is, each laid row 64 pixels to a word (a row of none over and
                     // under them); and the outline: each pixel with a neighbour on the other side
                     // of it, found 64 at a time
-                    let words = w.div_ceil(64);
                     mask.clear();
                     mask.resize((laid + 2) * words, 0);
                     edges.clear();
@@ -491,8 +570,10 @@ fn drawn(look: &Look, real: f32, pokes: &[Poke], w: usize, h: usize, smooth: boo
                         let g = sc.look.ground;
                         for x in 0..w {
                             let on = sees(&seen, x, y).piece != u32::MAX;
-                            // (along the outline: a neighbour on the other side of it)
-                            let edge = smooth && fade > 0.0 && edges[r * words + x / 64] >> (x % 64) & 1 == 1;
+                            let bit = |m: &[u64], at: usize| m[at * words + x / 64] >> (x % 64) & 1 == 1;
+                            // (along the outline: a neighbour on the other side of it, or the
+                            // outline crossing the pixel)
+                            let edge = smooth && fade > 0.0 && (bit(&edges, r) || bit(outline, y));
                             let body = |x: usize| -> Option<V> {
                                 let (cx, cr, ox, oy) = (x / 2, r / 2, x % 2, r % 2);
                                 let blended = match (ox, oy) {
@@ -501,17 +582,14 @@ fn drawn(look: &Look, real: f32, pokes: &[Poke], w: usize, h: usize, smooth: boo
                                     (0, _) => at(cx, cr).zip(at(cx, cr + 1)).map(|(a, b)| mul(add(a, b), 0.5)),
                                     _ => at(cx, cr).zip(at(cx + 1, cr)).zip(at(cx, cr + 1).zip(at(cx + 1, cr + 1))).map(|((a, b), (c, d))| mul(add(add(a, b), add(c, d)), 0.25)),
                                 };
-                                blended.or_else(|| light(x, y))
+                                // (by the outline the four may lie either side of it)
+                                if smooth && bit(by_outline, y) { light(x, y) } else { blended.or_else(|| light(x, y)) }
                             };
                             let noise = (hash(x as f32 + 0.5, fy) - 0.5) * (2.0 / 255.0);
                             let c = if edge {
-                                let (n, met) = cover(x, y, &mut near_by);
+                                let (n, sum) = cover(x, y, &mut near_by);
                                 let share = n as f32 / COVER.len() as f32;
-                                let skin = if on { body(x) } else { met.map(|(px, py, id, b1, b2, near)| light_at(px, py, id, b1, b2, near)) };
-                                match skin {
-                                    Some(k) => add(add(g, mul(sub(k, g), share)), mul([noise, noise, noise], share)),
-                                    None => g,
-                                }
+                                add(add(mul(g, 1.0 - share), mul(sum, 1.0 / COVER.len() as f32)), mul([noise, noise, noise], share))
                             } else if on {
                                 body(x).map_or(g, |k| add(k, [noise, noise, noise]))
                             } else {
@@ -646,8 +724,9 @@ mod tests {
     }
 
     /// The outline smoothed: only pixels along it change from the unsmoothed frame, many of
-    /// them to a share between the body's color and the ground's, and none inside the body
-    /// or out on the ground.
+    /// them to a share between the body's color and the ground's, and none out on the ground
+    /// or inside the body away from where it passes in front of itself (beyond a few levels of
+    /// light, by where it passes behind, lit where they are rather than blended from round them).
     #[test]
     fn the_outline_is_smoothed_and_nothing_else_changes() {
         let look = Look::about([0.094, 0.094, 0.106]);
@@ -659,12 +738,16 @@ mod tests {
         for y in 1..h - 1 {
             for x in 1..w - 1 {
                 let i = y * w + x;
-                if hard[i * 4..i * 4 + 3] == soft[i * 4..i * 4 + 3] {
+                if (0..3).all(|k| (hard[i * 4 + k] as i32 - soft[i * 4 + k] as i32).abs() <= 2) {
                     continue;
                 }
                 changed += 1;
-                let near_outline = (-1..=1).any(|dy: isize| (-1..=1).any(|dx: isize| ground(&hard, ((y as isize + dy) as usize) * w + (x as isize + dx) as usize) != ground(&hard, i)));
-                if !near_outline {
+                // (by the ground, or by a step in the unsmoothed frame: a lobe's edge in front)
+                let round = |f: &dyn Fn(usize) -> bool| (-1..=1).any(|dy: isize| (-1..=1).any(|dx: isize| f(((y as isize + dy) as usize) * w + (x as isize + dx) as usize)));
+                let step = |j: usize| (0..3).any(|k| (hard[j * 4 + k] as i32 - hard[i * 4 + k] as i32).abs() > 8);
+                let near_outline = round(&|j| ground(&hard, j) != ground(&hard, i)) || round(&step);
+                // (away from them, only the light taken where the pixel is: a few levels)
+                if !near_outline && (0..3).any(|k| (hard[i * 4 + k] as i32 - soft[i * 4 + k] as i32).abs() > 8) {
                     far_from_outline += 1;
                 }
                 if !ground(&soft, i) {
@@ -674,6 +757,56 @@ mod tests {
         }
         assert!(changed > 200 && between > changed / 2, "the outline isn't smoothed: {changed} changed, {between} between");
         assert_eq!(far_from_outline, 0, "pixels away from the outline changed");
+    }
+
+    /// Every edge smoothed, the outline against the ground and where the body passes in front
+    /// of itself alike: the frame stays near the same frame drawn eight times as big and shrunk
+    /// (each pixel the mean of its 64), across a few moments of the body's motion, among them
+    /// two where a lobe crosses in front of the body (76 s, 112 s).
+    #[test]
+    fn every_edge_is_smoothed_where_the_body_overlaps_itself_too() {
+        let look = Look::about([0.094, 0.094, 0.106]);
+        let (w, h, k) = (552, 374, 8);
+        let mut jagged = Vec::new();
+        for real in [0.0, 4.0, 52.0, 60.0, 76.0, 112.0] {
+            let soft = frame(&look, real, &[], w, h);
+            let big = drawn(&look, real, &[], w * k, h * k, false);
+            let mut fine = vec![0u8; w * h * 4];
+            for y in 0..h {
+                for x in 0..w {
+                    for c in 0..3 {
+                        let sum: u32 = (0..k).flat_map(|j| (0..k).map(move |i| (j, i))).map(|(j, i)| big[(((y * k + j) * w * k) + x * k + i) * 4 + c] as u32).sum();
+                        fine[(y * w + x) * 4 + c] = ((sum as f32 / (k * k) as f32) + 0.5) as u8;
+                    }
+                    fine[(y * w + x) * 4 + 3] = 255;
+                }
+            }
+            let apart = |i: usize| (0..3).map(|c| (soft[i * 4 + c] as i32 - fine[i * 4 + c] as i32).abs()).max().unwrap_or(0);
+            // (8 points to a pixel against 64: a point's worth off is up to about 12 of 255
+            // along the lime rim, two points' 24; a step left unsmoothed is far more)
+            let far: Vec<usize> = (0..w * h).filter(|&i| apart(i) > 24).collect();
+            let most = (0..w * h).map(apart).max().unwrap_or(0);
+            if let Some(dir) = std::env::var_os("BLOB_DUMP") {
+                let save = |name: &str, f: &[u8]| {
+                    let file = std::fs::File::create(std::path::Path::new(&dir).join(name)).unwrap();
+                    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w as u32, h as u32);
+                    enc.set_color(png::ColorType::Rgba);
+                    enc.write_header().unwrap().write_image_data(f).unwrap();
+                };
+                save(&format!("soft{real}.png"), &soft);
+                save(&format!("fine{real}.png"), &fine);
+                let mut marks = soft.clone();
+                for &i in &far {
+                    marks[i * 4..i * 4 + 3].copy_from_slice(&[255, 0, 255]);
+                }
+                save(&format!("far{real}.png"), &marks);
+            }
+            println!("blob at {real} s: {} pixels apart by more than 24 of 255 from the frame drawn {k}x and shrunk, {most} at most", far.len());
+            if far.len() > 3 || most > 32 {
+                jagged.push((real, far.len(), most));
+            }
+        }
+        assert!(jagged.is_empty(), "edges left jagged (at seconds: pixels more than 24 apart, the most): {jagged:?}");
     }
 
     /// How long a frame takes at About's sizes, to choose how big it's drawn:
