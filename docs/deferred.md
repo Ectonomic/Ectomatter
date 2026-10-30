@@ -463,6 +463,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## The Sensei 310's effects (2026-10-30)
 
+- Reactive doesn't flash on the real mouse (Grant, 2026-10-30), and the
+  cause isn't found. Checked and ruled out: the click connection's report
+  layout (buttons in the first byte, no report number, as the core reads),
+  its permissions, the core's time limits, a scene streaming colors, and
+  the left button's job. Not known: whether the core hears the press, and
+  whether the mouse plays the flash's cycle of 25.5 seconds (longer than
+  any cycle known to have played on it). The core logs neither.
 - Reactive is played by Ectomatter, not the mouse: the core hears each press
   and sends the flash (`cores/steelseries-sensei-310/module/src/lib.rs:459`,
   `flash`), so it shows only while Ectomatter runs. The mouse's own way, the
