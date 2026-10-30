@@ -2837,7 +2837,7 @@ impl Front {
                 }
                 Ask::PollSliders => {
                     changed = false;
-                    if self.page.reads_sliders() && self.ui.get_place() == "keyboard" && !self.sliders_asked && self.kb.is_some() {
+                    if self.page.reads_sliders() && self.wants_slider_readings() && !self.sliders_asked && self.kb.is_some() {
                         self.sliders_asked = true;
                         self.ask_kb(device::Ask::Sliders);
                     }

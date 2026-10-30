@@ -547,6 +547,13 @@ impl Front {
 
     /// Set what a slider drives, but only once it has really moved, so opening
     /// Ectomatter never throws the volume to wherever the slider sits.
+    /// Whether the keyboard's sliders are read now (`slider_readings`): their
+    /// knobs show on its page or on Home's desk, or one does a job of
+    /// Ectomatter's, which it does with the window in the tray too.
+    pub(super) fn wants_slider_readings(&self) -> bool {
+        slider_readings(&self.ui.get_place(), self.desk_keyboard().is_some(), self.hidden, &self.bind)
+    }
+
     pub(super) fn drive_sliders(&mut self, r: &serde_json::Value, f: &[f32]) {
         let sliders = crate::display::sliders();
         // the backlight's level, which every key's light inside the keyboard is scaled by
@@ -719,5 +726,36 @@ impl Front {
         let (rows, _) = self.pad_rows(which);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         self.show_desk();
+    }
+}
+
+/// Whether the sliders are read: while their knobs show, on the keyboard's
+/// page (`place`) or on Home with the keyboard on its desk (`on_desk`), the
+/// window not closed into the tray (`hidden`); and always while one is bound
+/// to a job of Ectomatter's (`bind`, each slider's: "own" the keyboard's,
+/// "none" nothing).
+pub(super) fn slider_readings(place: &str, on_desk: bool, hidden: bool, bind: &[String]) -> bool {
+    let shown = !hidden && (place == "keyboard" || (place == "home" && on_desk));
+    shown || bind.iter().any(|b| b != "own" && b != "none")
+}
+
+#[cfg(test)]
+mod reading_tests {
+    use super::slider_readings;
+
+    /// The sliders are read wherever their knobs show, Home's desk as well as
+    /// the keyboard's page, and wherever a slider does one of Ectomatter's
+    /// jobs, shown or not; nowhere else.
+    #[test]
+    fn the_sliders_are_read_where_their_knobs_show_or_they_have_a_job() {
+        let own = vec!["own".to_string(); 2];
+        let job = vec!["own".to_string(), "volume".to_string()];
+        assert!(slider_readings("keyboard", false, false, &own), "the keyboard's page");
+        assert!(slider_readings("home", true, false, &own), "Home, the keyboard on its desk");
+        assert!(!slider_readings("home", false, false, &own), "Home without the keyboard");
+        assert!(!slider_readings("mouse", true, false, &own), "another page");
+        assert!(!slider_readings("keyboard", false, true, &own), "the window in the tray");
+        assert!(!slider_readings("mouse", false, true, &["own".into(), "none".into()]), "a slider set to nothing");
+        assert!(slider_readings("mouse", false, true, &job), "a slider with a job, the window in the tray");
     }
 }
