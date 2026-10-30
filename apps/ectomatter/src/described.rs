@@ -920,12 +920,19 @@ fn brush(light: &Value, effect: &Value, look: &Look, w: f32) -> Boxes {
     Boxes { kind: 2, title: "Brush".into(), set_h: s.height(), set: s.cells, place: Vec::new(), place_h: 0.0, place_title: String::new() }
 }
 
-/// The small picture and motion of an effect's tile, by its id: the
-/// keyboard's own pictures, a mouse's color shift as Wave's.
+/// The small picture and motion of an effect's tile, by its id (or the id
+/// its description says it looks like, `like`): the app's own pictures, the
+/// keyboard's and those of effects a mouse plays (a color shift as Wave's;
+/// Strobe, Heartbeat, Flicker and Color breathing each its own, flashing,
+/// beating, flickering and breathing through its colors as it's chosen).
 pub fn tile(id: &str) -> (&'static str, i32) {
     match id {
         "off" => ("off", 0),
         "breathing" => ("breathing", 1),
+        "colorbreathing" => ("colorbreathing", 9),
+        "strobe" => ("strobe", 6),
+        "heartbeat" => ("heartbeat", 7),
+        "flicker" => ("flicker", 8),
         "pulse" => ("pulse", 2),
         "spiral" => ("spiral", 0),
         "wave" => ("wave", 3),

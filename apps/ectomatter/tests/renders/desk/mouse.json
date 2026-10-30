@@ -50,9 +50,9 @@
       "note": "One color, steady.",
       "params": {
        "color": {
-        "default": "#FF1000",
+        "type": "color",
         "label": "Color",
-        "type": "color"
+        "default": "#FF1000"
        }
       }
      },
@@ -62,26 +62,52 @@
       "note": "The color fades in and out.",
       "params": {
        "color": {
-        "default": "#FF1000",
+        "type": "color",
         "label": "Color",
-        "type": "color"
+        "default": "#FF1000"
        },
        "speed": {
-        "default": 3000,
-        "label": "Speed",
-        "max": 30000,
+        "type": "duration",
         "min": 500,
-        "type": "duration"
+        "max": 30000,
+        "label": "Speed",
+        "default": 3000
+       }
+      }
+     },
+     {
+      "id": "colorbreathing",
+      "label": "Color breathing",
+      "note": "Each color below fades in and out in turn.",
+      "params": {
+       "colors": {
+        "type": "colors",
+        "max": 6,
+        "label": "Colors",
+        "default": [
+         "#FF0000",
+         "#00FF00",
+         "#0000FF"
+        ]
+       },
+       "speed": {
+        "type": "duration",
+        "min": 500,
+        "max": 30000,
+        "label": "Speed",
+        "default": 9000
        }
       }
      },
      {
       "id": "colorshift",
       "label": "Color shift",
-      "like": "wave",
       "note": "The colors below play in turn, each blending into the next.",
       "params": {
        "colors": {
+        "type": "colors",
+        "max": 7,
+        "label": "Colors",
         "default": [
          "#FF0000",
          "#FFFF00",
@@ -89,17 +115,14 @@
          "#00FFFF",
          "#0000FF",
          "#FF00FF"
-        ],
-        "label": "Colors",
-        "max": 7,
-        "type": "colors"
+        ]
        },
        "speed": {
-        "default": 5000,
-        "label": "Speed",
-        "max": 30000,
+        "type": "duration",
         "min": 500,
-        "type": "duration"
+        "max": 30000,
+        "label": "Speed",
+        "default": 5000
        }
       },
       "start": {
@@ -109,6 +132,90 @@
         "#0000FF"
        ],
        "speed": 1000
+      },
+      "like": "wave"
+     },
+     {
+      "id": "heartbeat",
+      "label": "Heartbeat",
+      "note": "Two quick pulses, then a rest.",
+      "params": {
+       "color": {
+        "type": "color",
+        "label": "Color",
+        "default": "#FF1000"
+       },
+       "speed": {
+        "type": "duration",
+        "min": 500,
+        "max": 3000,
+        "label": "Speed",
+        "default": 1200
+       }
+      }
+     },
+     {
+      "id": "strobe",
+      "label": "Strobe",
+      "note": "The color flashes on and off.",
+      "params": {
+       "color": {
+        "type": "color",
+        "label": "Color",
+        "default": "#FF1000"
+       },
+       "speed": {
+        "type": "duration",
+        "min": 200,
+        "max": 2000,
+        "label": "Speed",
+        "default": 300
+       }
+      }
+     },
+     {
+      "id": "flicker",
+      "label": "Flicker",
+      "note": "The color flickers like a flame.",
+      "params": {
+       "color": {
+        "type": "color",
+        "label": "Color",
+        "default": "#FF6000"
+       },
+       "speed": {
+        "type": "duration",
+        "min": 1000,
+        "max": 10000,
+        "label": "Speed",
+        "default": 3000
+       }
+      }
+     },
+     {
+      "id": "reactive",
+      "label": "Reactive",
+      "note": "The light flashes when you press a button, then fades back. Ectomatter plays the flashes, so they show only while it’s open. Otherwise the light shows its background color.",
+      "reactive": true,
+      "like": "trigger",
+      "params": {
+       "color": {
+        "type": "color",
+        "label": "Flash",
+        "default": "#FF1000"
+       },
+       "background": {
+        "type": "color",
+        "label": "Background",
+        "default": "#000000"
+       },
+       "fade": {
+        "type": "duration",
+        "min": 100,
+        "max": 3000,
+        "label": "Fade",
+        "default": 600
+       }
       }
      }
     ],

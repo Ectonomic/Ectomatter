@@ -568,8 +568,9 @@ pub fn icon(mode: &str, scale: f32, wide: f32) -> slint::Image {
     #[allow(non_snake_case)]
     let W: f32 = wide.max(1.0);
     const H: f32 = part::TILE_PIC;
-    // (Wave rolls along a picture twice as wide; Pulse is five tiles wide, a color each)
-    let across = if mode == "wave" { 2.0 } else if mode == "pulse" { 5.0 } else { 1.0 };
+    // (Wave rolls along a picture twice as wide; Pulse is five tiles wide, a
+    // color each, and Color breathing five, a breath of each)
+    let across = if mode == "wave" { 2.0 } else if mode == "pulse" || mode == "colorbreathing" { 5.0 } else { 1.0 };
     let (w, h) = ((W * across * scale).round() as u32, (H * scale).round() as u32);
     let hex = |s: &str| -> [f32; 3] {
         let s = s.trim_start_matches('#');
@@ -602,6 +603,29 @@ pub fn icon(mode: &str, scale: f32, wide: f32) -> slint::Image {
             // each in turn, with nothing between (the tile, chosen, shows one
             // at a time)
             "pulse" => hex(["#f33", "#fd3", "#3f6", "#3cf", "#94f"][((u * 5.0) as usize).min(4)]),
+            // the effects a mouse plays, each its cycle laid along the picture
+            // as Breathing's is: a breath of each of Pulse's colors in turn,
+            // three hard flashes, two beats (the second softer), and a flame's
+            // uneven brightness
+            "colorbreathing" => {
+                let i = ((u * 5.0) as usize).min(4);
+                let c = ["#f33", "#fd3", "#3f6", "#3cf", "#94f"][i];
+                run(&["#140806", c, "#140806"], u * 5.0 - i as f32)
+            }
+            "strobe" => {
+                let t = (u * 3.0) % 1.0;
+                if (0.38..0.62).contains(&t) { hex("#d8421e") } else { hex("#140806") }
+            }
+            "heartbeat" => {
+                let beat = |at: f32, k: f32| (1.0 - ((u - at) / 0.09).abs()).max(0.0) * k;
+                let lit = beat(0.36, 1.0).max(beat(0.62, 0.75));
+                run(&["#140806", "#d8421e"], lit)
+            }
+            "flicker" => {
+                const LEVELS: [(f32, f32); 13] = [(0.0, 1.0), (0.07, 0.72), (0.12, 0.9), (0.2, 0.55), (0.27, 0.85), (0.38, 0.97), (0.45, 0.62), (0.55, 0.8), (0.63, 0.93), (0.72, 0.58), (0.8, 0.88), (0.9, 0.7), (1.0, 1.0)];
+                let k = LEVELS.windows(2).find(|w| u <= w[1].0).map_or(1.0, |w| w[0].1 + (w[1].1 - w[0].1) * (u - w[0].0) / (w[1].0 - w[0].0));
+                hex("#e2701c").map(|v| v * k)
+            }
             "spiral" => {
                 // conic, from 90deg: 0 at the right, going round clockwise
                 let a = (cy - H / 2.0).atan2(cx - W / 2.0).to_degrees();

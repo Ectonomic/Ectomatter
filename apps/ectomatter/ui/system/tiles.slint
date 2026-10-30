@@ -6,7 +6,9 @@ import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "toke
 // mouse's, the scene form, the Screen Editor): a well with the effect's small
 // picture under a film and its name under it; the chosen one lit, and its
 // picture moving as the effect does (`motion`: 0 still, 1 breathing, 2
-// flashing, 3 rolling, 4 twinkling, 5 a press fading) by the time `t` gives.
+// flashing, 3 rolling, 4 twinkling, 5 a press fading, 6 flashing on and off,
+// 7 beating twice and resting, 8 flickering, 9 breathing through its colors)
+// by the time `t` gives.
 // The Off effect (`blank`) has no picture; a screen's (`screen`) lies across
 // the tile at the screen's shape.
 export component EffectTile inherits Rectangle {
@@ -33,11 +35,13 @@ export component EffectTile inherits Rectangle {
         if !root.blank && !root.screen: Image {
             // rolling: a picture twice as wide, slid along and round again;
             // flashing, chosen: its five colors each as wide as the tile, one
-            // shown at a time, jumping to the next as the keys do
+            // shown at a time, jumping to the next as the keys do; breathing
+            // through them, each a breath (the next one in while it's dark)
             x: root.on && root.motion == 3 ? -mod(parent.phase / 3000, 1) * parent.width
                 : root.on && root.motion == 2 ? -mod(floor(parent.phase / 700), 5) * parent.width
+                : root.on && root.motion == 9 ? -mod(floor(parent.phase / 3000), 5) * parent.width
                 : 0;
-            width: root.motion == 3 ? parent.width * 2 : root.on && root.motion == 2 ? parent.width * 5 : parent.width;
+            width: root.motion == 3 ? parent.width * 2 : root.on && (root.motion == 2 || root.motion == 9) ? parent.width * 5 : parent.width;
             height: parent.height;
             source: root.icon;
             image-fit: fill;
@@ -45,7 +49,15 @@ export component EffectTile inherits Rectangle {
                 : root.motion == 1 ? 0.3 + 0.7 * (0.5 - 0.5 * cos(parent.phase / 3000 * 360deg))
                 : root.motion == 4 ? 0.55 + 0.45 * (0.5 - 0.5 * cos(parent.phase / 1600 * 360deg))
                 : root.motion == 5 ? 1 - 0.75 * min(1, mod(parent.phase, 1400) / 1400)
+                : root.motion == 6 ? (mod(parent.phase, 400) < 100 ? 1 : 0.15)
+                : root.motion == 7 ? 0.15 + 0.85 * max(self.beat(mod(parent.phase, 1200), 0, 1), 0.75 * self.beat(mod(parent.phase, 1200), 280, 1))
+                : root.motion == 8 ? 0.62 + 0.38 * (0.5 + 0.3 * sin(parent.phase / 230 * 360deg) + 0.2 * sin(parent.phase / 97 * 360deg))
+                : root.motion == 9 ? 0.3 + 0.7 * (0.5 - 0.5 * cos(parent.phase / 3000 * 360deg))
                 : 1;
+            // (a beat at `at` ms through Heartbeat's cycle: up in 80 ms, down in 150)
+            pure function beat(t: float, at: float, k: float) -> float {
+                return t < at ? 0 : t < at + 80 ? (t - at) / 80 * k : t < at + 230 ? (1 - (t - at - 80) / 150) * k : 0;
+            }
         }
         // (a screen's picture, across the tile and in its middle)
         if root.screen: Image {

@@ -744,6 +744,10 @@ impl Front {
                 }
                 if down {
                     self.ripple_from_button(&control, Duration::ZERO);
+                    // (a light that flashes as a button is pressed, flashing on the picture as on the mouse)
+                    self.mouse.press(Instant::now());
+                    self.show_mouse_lights();
+                    self.mouse_frames_run();
                 }
                 self.play_for(&format!("mouse/{control}"), crate::mouse::shape().buttons.iter().position(|b| b.id == control).map(|i| self.mouse.job(i)), down);
                 return;

@@ -783,7 +783,7 @@ pub struct Front {
     settings_said: Option<(String, bool, Instant)>,
     /// an added plugin asked about removing
     removing: Option<String>,
-    mouse_icons: Option<(f32, f32, Vec<slint::Image>)>,
+    mouse_icons: Option<(f32, f32, Vec<(&'static str, slint::Image)>)>,
     /// the mouse's picture in layers, for a scale, and the scale being drawn
     mouse_layers: Option<(f32, MouseImages)>,
     mouse_drawing: Option<f32>,
@@ -1999,6 +1999,8 @@ impl Front {
                     changed = false;
                     if self.mouse_pictured() {
                         self.show_mouse_lights();
+                        // (stopped once nothing moves: a press's flash faded)
+                        self.mouse_frames_run();
                     } else {
                         self.mouse_frames = None;
                     }

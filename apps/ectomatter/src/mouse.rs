@@ -540,6 +540,9 @@ pub struct Page {
     pub failed: Option<String>,
     /// what each light (the logo, the wheel) plays, and from when
     pub plays: [Option<(Plays, Instant)>; 2],
+    /// when a button was last pressed, for a light that flashes as one is
+    /// (Reactive): it plays its flash from then
+    pub pressed: Option<Instant>,
     /// where the picture's layers go once drawn, off the page's thread
     pub tell: Option<Sender<Heard>>,
     /// the mouse's profiles, kept by Ectomatter (the mouse keeps one setup in its
@@ -559,18 +562,36 @@ pub const UNDO_FOR: Duration = Duration::from_secs(6);
 
 /// What a light plays, as the core says the mouse runs it: one color held,
 /// or colors at points through a cycle (0 to 255), blended straight from
-/// each to the next, `ms` long and round again.
+/// each to the next, `ms` long and round again; and for a light that
+/// flashes as a button is pressed (Reactive), the flash, played once from
+/// each press over what it plays otherwise.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plays {
     ms: u64,
     held: bool,
     stops: Vec<(f32, [u8; 3])>,
+    press: Option<Box<Plays>>,
 }
 
 impl Plays {
     pub fn of(v: &Value) -> Option<Plays> {
         let stops: Vec<(f32, [u8; 3])> = v["stops"].as_array()?.iter().filter_map(|s| Some((s["at"].as_f64()? as f32, rgb(&s["color"])?))).collect();
-        (!stops.is_empty()).then(|| Plays { ms: v["ms"].as_u64().unwrap_or(1000).max(1), held: v["held"].as_bool().unwrap_or(true), stops })
+        let press = Plays::of(&v["press"]).map(|p| Box::new(Plays { held: false, ..p }));
+        (!stops.is_empty()).then(|| Plays { ms: v["ms"].as_u64().unwrap_or(1000).max(1), held: v["held"].as_bool().unwrap_or(true), stops, press })
+    }
+
+    /// The light's color `since` the cycle began, with a press's flash
+    /// over it `since_press` it was pressed, while the flash plays.
+    pub fn at_pressed(&self, since: Duration, since_press: Option<Duration>) -> [u8; 3] {
+        match (&self.press, since_press) {
+            (Some(p), Some(t)) if (t.as_millis() as u64) < p.ms => p.at(t),
+            _ => self.at(since),
+        }
+    }
+
+    /// Whether a press's flash plays `since_press` it was pressed.
+    pub fn flashing(&self, since_press: Option<Duration>) -> bool {
+        matches!((&self.press, since_press), (Some(p), Some(t)) if (t.as_millis() as u64) < p.ms)
     }
 
     pub fn moves(&self) -> bool {
@@ -598,7 +619,7 @@ impl Plays {
 impl Page {
     pub fn new() -> Page {
         let same_wheel = crate::uistate::get("mouse_same_wheel").and_then(|v| v.as_bool()).unwrap_or(true);
-        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, menu_picks: Vec::new(), failed: None, plays: [None, None], tell: None, profiles: None, said: None, gone: None, names: Default::default() }
+        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, menu_picks: Vec::new(), failed: None, plays: [None, None], pressed: None, tell: None, profiles: None, said: None, gone: None, names: Default::default() }
     }
 
     /// What the core says of the mouse: what each light plays is kept with
@@ -818,14 +839,22 @@ impl Page {
     /// A light's color at `now`, as the mouse shows it; black for off.
     pub fn color_at(&self, i: usize, now: Instant) -> [u8; 3] {
         match &self.plays[i] {
-            Some((p, from)) => p.at(now.saturating_duration_since(*from)),
+            Some((p, from)) => p.at_pressed(now.saturating_duration_since(*from), self.pressed.map(|t| now.saturating_duration_since(t))),
             None => shape().lights.get(i).and_then(|l| self.lit(l)).unwrap_or([0; 3]),
         }
     }
 
-    /// Whether a light's effect moves, so the picture is drawn again as it plays.
+    /// Whether a light's effect moves, or a press's flash plays, so the
+    /// picture is drawn again as it plays.
     pub fn moving(&self) -> bool {
-        self.plays.iter().flatten().any(|(p, _)| p.moves())
+        let since = self.pressed.map(|t| t.elapsed());
+        self.plays.iter().flatten().any(|(p, _)| p.moves() || p.flashing(since))
+    }
+
+    /// A button pressed on the mouse, at `at`: a light that flashes as one
+    /// is plays its flash from then.
+    pub fn press(&mut self, at: Instant) {
+        self.pressed = Some(at);
     }
 
     /// Whether Ectomatter has met the mouse: it is plugged in, or the core
@@ -1333,17 +1362,12 @@ pub fn light_model(desc: &Value) -> Value {
     }
 }
 
-/// The tile an effect's picture borrows from the keyboard's effects, and how
-/// it moves (1 a breath, 3 a wave): its own id's, or that of the one its
+/// The tile an effect's picture borrows from the app's pictures of effects,
+/// and how it moves (described::tile): its own id's, or that of the one its
 /// description says it looks like (`like`); an effect the app has no
 /// picture for shows Static's.
 pub fn tile_of(effect: &Value) -> (&'static str, i32) {
-    match effect["like"].as_str().or(effect["id"].as_str()).unwrap_or("") {
-        "off" => ("off", 0),
-        "breathing" => ("breathing", 1),
-        "wave" => ("wave", 3),
-        _ => ("static", 0),
-    }
+    crate::described::tile(effect["like"].as_str().or(effect["id"].as_str()).unwrap_or(""))
 }
 
 pub fn rgb(v: &Value) -> Option<[u8; 3]> {
@@ -1544,5 +1568,20 @@ mod tests {
         let held = Plays::of(&json!({ "ms": 1000, "held": true, "stops": [{ "at": 0, "color": "#402000" }] })).unwrap();
         assert!(!held.moves());
         assert_eq!(held.at(ms(12345)), [0x40, 0x20, 0]);
+    }
+
+    /// Reactive on the drawing: the background held, and from a press the
+    /// flash, from its color to the background over the fade, then the
+    /// background again; no press, no flash.
+    #[test]
+    fn a_press_flashes_the_light_as_the_mouse_does() {
+        let ms = Duration::from_millis;
+        let p = Plays::of(&json!({ "ms": 1000, "held": true, "stops": [{ "at": 0, "color": "#0000FF" }], "press": { "ms": 300, "stops": [{ "at": 0, "color": "#FF0000" }, { "at": 255, "color": "#0000FF" }] } })).unwrap();
+        assert!(!p.moves(), "held between presses");
+        assert_eq!(p.at_pressed(ms(5000), None), [0, 0, 255], "never pressed: the background");
+        assert_eq!(p.at_pressed(ms(5000), Some(ms(0))), [255, 0, 0], "the flash as the press comes");
+        assert_eq!(p.at_pressed(ms(5000), Some(ms(150))), [128, 0, 128], "halfway faded");
+        assert_eq!(p.at_pressed(ms(5000), Some(ms(300))), [0, 0, 255], "faded back");
+        assert!(p.flashing(Some(ms(299))) && !p.flashing(Some(ms(300))) && !p.flashing(None));
     }
 }

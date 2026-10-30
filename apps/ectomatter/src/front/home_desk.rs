@@ -445,11 +445,10 @@ impl Front {
             ui.set_mouse_all_note(note.into());
             ui.set_mouse_any_rebound(any);
         }
-        // the effects' tiles, their pictures the keyboard's own
+        // the effects' tiles, their pictures the app's own (described::tile), each drawn once
         let wide = pic_wide(self.ui.get_mouse_fx_w());
         if self.mouse_icons.as_ref().map(|(s, w, _)| (*s, *w)) != Some((self.scale, wide)) {
-            let icons = ["off", "static", "breathing", "wave"].iter().map(|e| lighting::icon(e, self.scale, wide)).collect();
-            self.mouse_icons = Some((self.scale, wide, icons));
+            self.mouse_icons = Some((self.scale, wide, Vec::new()));
         }
         let fx = self.mouse.effect();
         let known = self.mouse.light_known(self.mouse.light_name());
@@ -460,7 +459,15 @@ impl Front {
             .enumerate()
             .map(|(i, e)| {
                 let (tile, motion) = crate::mouse::tile_of(e);
-                let icon = self.mouse_icons.as_ref().unwrap().2[["off", "static", "breathing", "wave"].iter().position(|t| *t == tile).unwrap_or(1)].clone();
+                let icons = &mut self.mouse_icons.as_mut().unwrap().2;
+                let icon = match icons.iter().find(|(t, _)| *t == tile) {
+                    Some((_, icon)) => icon.clone(),
+                    None => {
+                        let icon = lighting::icon(tile, self.scale, wide);
+                        icons.push((tile, icon.clone()));
+                        icon
+                    }
+                };
                 EffectItem { name: e["label"].as_str().unwrap_or("").into(), icon, on: i == fx && known, motion }
             })
             .collect();

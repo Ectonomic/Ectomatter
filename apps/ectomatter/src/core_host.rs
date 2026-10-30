@@ -1593,6 +1593,157 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&data);
     }
 
+    /// A light report as the mouse is sent it, read back: the light, the
+    /// cycle's length, whether one color is held, and its stops (where each
+    /// is through the cycle, 0 to 255, and its color).
+    fn light_sent(r: &[u8]) -> (u8, u16, bool, Vec<(u32, String)>) {
+        let n = r[3 + 25] as usize;
+        assert_eq!(r.len(), 3 + 26 + 3 + 4 * n, "a header, the first color, then each stop: {r:02x?}");
+        let mut at = 0u32;
+        let stops = (0..n)
+            .map(|k| {
+                let s = &r[32 + 4 * k..32 + 4 * k + 4];
+                at += s[3] as u32;
+                (at, format!("#{:02X}{:02X}{:02X}", s[0], s[1], s[2]))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(r[29..32], r[32..35], "the first color, then the first stop's");
+        (r[3], u16::from_le_bytes([r[4], r[5]]), r[3 + 17] == 1, stops)
+    }
+
+    /// Every effect the mouse's core offers goes to the mouse as a cycle it
+    /// holds, with its settings as described by default and at each end of
+    /// their ranges: at most 14 stops, as long as the cycles this core has
+    /// always sent (half a second to 30), and ending on its first color
+    /// (or one color held); and what the core says the light plays is what
+    /// it sent. The effects are the ones its description lists, so a new
+    /// one is checked as it's added.
+    #[test]
+    fn every_effect_the_mouse_offers_goes_as_a_cycle_it_holds() {
+        let (core, sent, data) = mouse_core("effects");
+        let desc = core.call("device/describe", &serde_json::json!({ "device": "sensei310" })).unwrap();
+        let effects = desc["capabilities"]["lighting"]["effects"].as_array().unwrap().clone();
+        let mut checked = Vec::new();
+        for e in &effects {
+            for end in ["default", "min", "max"] {
+                let mut params = serde_json::json!({});
+                for (id, d) in e["params"].as_object().unwrap() {
+                    params[id] = match (d["type"].as_str(), end) {
+                        (Some("duration" | "int"), "min" | "max") => d[end].clone(),
+                        (Some("colors"), "min") => serde_json::json!(["#123456"]),
+                        (Some("colors"), "max") => (0..d["max"].as_u64().unwrap()).map(|i| format!("#{:02X}80{:02X}", i * 30, 255 - i * 30)).collect(),
+                        _ => d["default"].clone(),
+                    };
+                }
+                let at = sent.lock().unwrap().len();
+                let set = core.call("lighting/set", &serde_json::json!({ "device": "sensei310", "light": "logo", "effect": e["id"], "params": params })).unwrap();
+                let report = sent.lock().unwrap()[at..].iter().find(|(_, f, b)| *f && b[1] == 0x5b).map(|(_, _, b)| b.clone()).expect("the light sent");
+                let (led, ms, held, stops) = light_sent(&report);
+                let what = format!("{} at {end}: {stops:?}", e["id"]);
+                assert_eq!(led, 0, "{what}");
+                assert!((1..=14).contains(&stops.len()), "at most 14 stops, {what}");
+                assert!((500..=30000).contains(&ms), "{ms} ms, {what}");
+                assert!(stops.windows(2).all(|w| w[0].0 < w[1].0), "each stop past the last, {what}");
+                if !held {
+                    assert_eq!(stops.last().unwrap(), &(255, stops[0].1.clone()), "round to its first color at the end, {what}");
+                }
+                let plays = &set["plays"];
+                assert_eq!((plays["ms"].as_u64(), plays["held"].as_bool()), (Some(ms as u64), Some(held)), "{what}");
+                let told: Vec<(u32, String)> = plays["stops"].as_array().unwrap().iter().map(|s| (s["at"].as_u64().unwrap() as u32, s["color"].as_str().unwrap().to_string())).collect();
+                assert_eq!(told, stops, "what it says the light plays is what it sent, {what}");
+            }
+            checked.push(e["id"].as_str().unwrap().to_string());
+        }
+        let _ = std::fs::remove_dir_all(&data);
+        for id in ["off", "static", "breathing", "colorbreathing", "colorshift", "heartbeat", "strobe", "flicker", "reactive"] {
+            assert!(checked.iter().any(|c| c == id), "{id} offered: {checked:?}");
+        }
+    }
+
+    /// The mouse's core started on the whole fake mouse, with its pointer's
+    /// reports and its key reports to push presses to.
+    fn whole_mouse_core(name: &str) -> (Core, Arc<Mutex<Vec<(Instant, bool, Vec<u8>)>>>, Arc<Mutex<VecDeque<Vec<u8>>>>, PathBuf) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let (pointer, keys) = (Arc::new(Mutex::new(VecDeque::new())), Arc::new(Mutex::new(VecDeque::new())));
+        let usb = MouseWhole(Some(Box::new(FakeMouse { sent: sent.clone(), waiting: VecDeque::new() })), pointer.clone(), keys);
+        let data = std::env::temp_dir().join(format!("ectomatter-mouse-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        let core = Core::start(&crate::cores::dir().join(SENSEI), data.clone(), Box::new(usb)).unwrap();
+        initialize(&core, Value::Null).unwrap();
+        (core, sent, pointer, data)
+    }
+
+    /// Reactive: the light holds its background, and a click flashes it, the
+    /// mouse fading from the flash to the background by itself (a cycle the
+    /// fade's length in 255ths, held at the background to its end); once the
+    /// fade is done the background is put back held, before the cycle could
+    /// come round. It flashes with Ectomatter watching no press (nothing is
+    /// told), only the light playing it flashes, and a flash is never kept
+    /// in the mouse's memory.
+    #[test]
+    fn reactive_flashes_as_a_button_is_pressed_and_fades_back() {
+        let (core, sent, pointer, data) = whole_mouse_core("reactive");
+        let set = core.call("lighting/set", &serde_json::json!({ "device": "sensei310", "light": "logo", "effect": "reactive", "params": { "color": "#FF0000", "background": "#0000FF", "fade": 300 } })).unwrap();
+        assert_eq!(set["plays"]["stops"], serde_json::json!([{ "at": 0, "color": "#0000FF" }]), "the background held");
+        assert_eq!(set["plays"]["press"], serde_json::json!({ "ms": 300, "stops": [{ "at": 0, "color": "#FF0000" }, { "at": 255, "color": "#0000FF" }] }), "and the flash, from each press");
+        let first = sent.lock().unwrap().iter().rev().find(|(_, f, b)| *f && b[1] == 0x5b).map(|(_, _, b)| light_sent(b)).unwrap();
+        assert_eq!(first, (0, 1000, true, vec![(0, "#0000FF".to_string())]), "the background sent held");
+        // (kept once, before any press)
+        std::thread::sleep(Duration::from_millis(1700));
+        let _ = core.call("lighting/get", &serde_json::json!({ "device": "sensei310" }));
+        let at = sent.lock().unwrap().len();
+        let pressed = Instant::now();
+        pointer.lock().unwrap().push_back(vec![0x01, 0, 0, 0, 0, 0, 0, 0, 0]);
+        pointer.lock().unwrap().push_back(vec![0x00, 0, 0, 0, 0, 0, 0, 0, 0]);
+        std::thread::sleep(Duration::from_millis(900));
+        let _ = core.call("lighting/get", &serde_json::json!({ "device": "sensei310" }));
+        let after: Vec<(Instant, Vec<u8>)> = sent.lock().unwrap()[at..].iter().map(|(t, _, b)| (*t, b.clone())).collect();
+        let told: Vec<String> = core.told().into_iter().map(|(m, _)| m).filter(|m| m.starts_with("input/")).collect();
+        let _ = std::fs::remove_dir_all(&data);
+        let lights: Vec<(Instant, (u8, u16, bool, Vec<(u32, String)>))> = after.iter().filter(|(_, b)| b[1] == 0x5b).map(|(t, b)| (*t, light_sent(b))).collect();
+        assert_eq!(lights.len(), 2, "the flash, then the background: {after:02x?}");
+        let (flashed, (led, ms, held, stops)) = &lights[0];
+        assert!(flashed.duration_since(pressed) < Duration::from_millis(100), "flashed within a tenth of a second of the press");
+        assert_eq!((*led, *held), (0, false), "the logo alone, as a cycle");
+        // (300 ms is 3 of 255ths of a cycle of 25.5 s)
+        assert_eq!(*ms, 25500);
+        assert_eq!(*stops, vec![(0, "#FF0000".to_string()), (3, "#0000FF".to_string()), (254, "#0000FF".to_string()), (255, "#FF0000".to_string())]);
+        let (back, sent_back) = &lights[1];
+        assert_eq!(*sent_back, (0, 1000, true, vec![(0, "#0000FF".to_string())]), "the background held again");
+        let gap = back.duration_since(*flashed);
+        assert!(gap >= Duration::from_millis(300) && gap < Duration::from_millis(500), "once the fade is done: {gap:?}");
+        assert!(after.iter().all(|(_, b)| b[1] != 0x59), "a flash never kept");
+        assert!(told.is_empty(), "nothing told with no press watched: {told:?}");
+    }
+
+    /// A change waiting to be kept while a flash plays is kept only once the
+    /// background is back, so the mouse never keeps a flash as its effect.
+    #[test]
+    fn a_flash_is_never_kept_as_the_lights_effect() {
+        let (core, sent, pointer, data) = whole_mouse_core("reactive-keep");
+        let at = sent.lock().unwrap().len();
+        // (the change kept a second and a half after it, while the flash fades for three)
+        core.call("lighting/set", &serde_json::json!({ "device": "sensei310", "light": "logo", "effect": "reactive", "params": { "color": "#FF0000", "background": "#000000", "fade": 3000 } })).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        pointer.lock().unwrap().push_back(vec![0x01, 0, 0, 0, 0, 0, 0, 0, 0]);
+        pointer.lock().unwrap().push_back(vec![0x00, 0, 0, 0, 0, 0, 0, 0, 0]);
+        std::thread::sleep(Duration::from_millis(5200));
+        let _ = core.call("lighting/get", &serde_json::json!({ "device": "sensei310" }));
+        let all: Vec<Vec<u8>> = sent.lock().unwrap()[at..].iter().map(|(_, _, b)| b.clone()).collect();
+        let _ = std::fs::remove_dir_all(&data);
+        let kinds: Vec<&str> = all
+            .iter()
+            .map(|b| match (b[1], b.get(3 + 17)) {
+                (0x5b, Some(1)) => "held",
+                (0x5b, _) => "flash",
+                (0x59, _) => "kept",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, ["held", "flash", "held", "kept"], "{all:02x?}");
+    }
+
+
     /// One of the fake Z10's interfaces as its key reports are read: each
     /// report once, and an error once the keyboard is unplugged.
     struct Ear(Arc<Mutex<VecDeque<Vec<u8>>>>, Arc<std::sync::atomic::AtomicBool>);
@@ -1835,7 +1986,8 @@ pub(crate) mod tests {
         // (what the frontend draws the mouse's settings from)
         assert_eq!(added["kind"], "mouse");
         assert_eq!(added["layout"]["device"][0]["show"], serde_json::json!(["cpi1", "cpi2"]));
-        assert_eq!(added["capabilities"]["lighting"]["effects"][3]["start"]["colors"], serde_json::json!(["#FF0000", "#00FF00", "#0000FF"]));
+        let shift = added["capabilities"]["lighting"]["effects"].as_array().unwrap().iter().find(|e| e["id"] == "colorshift").unwrap();
+        assert_eq!(shift["start"]["colors"], serde_json::json!(["#FF0000", "#00FF00", "#0000FF"]));
         if let Ok(out) = std::env::var("ECTOMATTER_DESCRIPTION_OUT") {
             std::fs::write(out, serde_json::to_vec_pretty(&added).unwrap()).unwrap();
         }

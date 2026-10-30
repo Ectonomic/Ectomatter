@@ -460,3 +460,29 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - Settings no longer keeps its tab for the next run (`settings_tab` in
   `uistate`); the key an Ectomatter before this one wrote stays in the file,
   unread.
+
+## The Sensei 310's effects (2026-10-30)
+
+- Reactive is played by Ectomatter, not the mouse: the core hears each press
+  and sends the flash (`cores/steelseries-sensei-310/module/src/lib.rs:459`,
+  `flash`), so it shows only while Ectomatter runs. The mouse's own way, the
+  light report's byte of the buttons that start its effect (byte 21 of the
+  header, `protocol.rs:116`, which rivalcfg calls the triggers, a buttons
+  mask), has never been tried: it writes to the mouse, and waits for
+  Grant's go.
+- The wheel's flash comes 50 ms after the logo's on the mouse (commands go
+  50 ms apart, `send`); the drawing flashes both at once (`mouse.rs`,
+  `Plays::at_pressed`).
+- Should Ectomatter stop short in the middle of a flash, the mouse plays it
+  round again every 25 to 30 seconds (the cycle `protocol::flash` sends,
+  `protocol.rs:137`) until the next press or the light is set again.
+- Reactive on the mouse offers no pretend presses on its drawing, as the
+  keyboard's Reactive offers pretend typing: the mouse's effect box
+  (`mouse.rs:1283`, `light_box`) leaves out what a `reactive` effect asks
+  for, and the drawing flashes on real presses alone.
+- Strobe sends the mouse three flashes to a cycle (`lib.rs:756`): a cycle
+  under half a second, shorter than any this core had sent, hasn't been
+  tried on the mouse.
+- None of the new effects (Color breathing, Heartbeat, Strobe, Flicker,
+  Reactive) has been played on the real mouse yet: they're held to the
+  stops and lengths the mouse already took (`every_effect_the_mouse_offers_goes_as_a_cycle_it_holds`).
