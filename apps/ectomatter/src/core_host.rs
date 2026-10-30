@@ -1611,6 +1611,11 @@ pub(crate) mod tests {
         (r[3], u16::from_le_bytes([r[4], r[5]]), r[3 + 17] == 1, stops)
     }
 
+    /// The buttons a light report's cycle is started by (header byte 21).
+    fn triggers_sent(r: &[u8]) -> u8 {
+        r[3 + 21]
+    }
+
     /// Every effect the mouse's core offers goes to the mouse as a cycle it
     /// holds, with its settings as described by default and at each end of
     /// their ranges: at most 14 stops, as long as the cycles this core has
@@ -1647,10 +1652,18 @@ pub(crate) mod tests {
                 if !held {
                     assert_eq!(stops.last().unwrap(), &(255, stops[0].1.clone()), "round to its first color at the end, {what}");
                 }
+                let listed = |v: &Value| -> Vec<(u32, String)> { v.as_array().unwrap().iter().map(|s| (s["at"].as_u64().unwrap() as u32, s["color"].as_str().unwrap().to_string())).collect() };
                 let plays = &set["plays"];
-                assert_eq!((plays["ms"].as_u64(), plays["held"].as_bool()), (Some(ms as u64), Some(held)), "{what}");
-                let told: Vec<(u32, String)> = plays["stops"].as_array().unwrap().iter().map(|s| (s["at"].as_u64().unwrap() as u32, s["color"].as_str().unwrap().to_string())).collect();
-                assert_eq!(told, stops, "what it says the light plays is what it sent, {what}");
+                if triggers_sent(&report) == 0 {
+                    assert_eq!((plays["ms"].as_u64(), plays["held"].as_bool()), (Some(ms as u64), Some(held)), "{what}");
+                    assert_eq!(listed(&plays["stops"]), stops, "what it says the light plays is what it sent, {what}");
+                } else {
+                    // (a cycle a press starts: played once from each press, its last color held between)
+                    assert!(held, "a cycle a press starts is sent to play once, {what}");
+                    assert_eq!(plays["press"]["ms"].as_u64(), Some(ms as u64), "{what}");
+                    assert_eq!(listed(&plays["press"]["stops"]), stops, "what it says a press plays is what it sent, {what}");
+                    assert_eq!(listed(&plays["stops"]), vec![(0, stops.last().unwrap().1.clone())], "its last color held between presses, {what}");
+                }
             }
             checked.push(e["id"].as_str().unwrap().to_string());
         }
@@ -1673,74 +1686,37 @@ pub(crate) mod tests {
         (core, sent, pointer, data)
     }
 
-    /// Reactive: the light holds its background, and a click flashes it, the
-    /// mouse fading from the flash to the background by itself (a cycle the
-    /// fade's length in 255ths, held at the background to its end); once the
-    /// fade is done the background is put back held, before the cycle could
-    /// come round. It flashes with Ectomatter watching no press (nothing is
-    /// told), only the light playing it flashes, and a flash is never kept
-    /// in the mouse's memory.
+    /// Reactive is the mouse's own: one report, its cycle from the flash to
+    /// the background played once by the mouse at each press of any of its
+    /// buttons (every bit of the buttons' byte set), resting on the
+    /// background between; kept in the mouse's memory as any effect is, so it
+    /// plays with Ectomatter closed; and a press sends the mouse nothing.
     #[test]
-    fn reactive_flashes_as_a_button_is_pressed_and_fades_back() {
+    fn reactive_is_played_by_the_mouse_itself() {
         let (core, sent, pointer, data) = whole_mouse_core("reactive");
-        let set = core.call("lighting/set", &serde_json::json!({ "device": "sensei310", "light": "logo", "effect": "reactive", "params": { "color": "#FF0000", "background": "#0000FF", "fade": 300 } })).unwrap();
-        assert_eq!(set["plays"]["stops"], serde_json::json!([{ "at": 0, "color": "#0000FF" }]), "the background held");
-        assert_eq!(set["plays"]["press"], serde_json::json!({ "ms": 300, "stops": [{ "at": 0, "color": "#FF0000" }, { "at": 255, "color": "#0000FF" }] }), "and the flash, from each press");
-        let first = sent.lock().unwrap().iter().rev().find(|(_, f, b)| *f && b[1] == 0x5b).map(|(_, _, b)| light_sent(b)).unwrap();
-        assert_eq!(first, (0, 1000, true, vec![(0, "#0000FF".to_string())]), "the background sent held");
-        // (kept once, before any press)
+        // (every press heard, as Ectomatter watches them)
+        assert_eq!(core.call("input/watch", &serde_json::json!({ "device": "sensei310", "all": true })).unwrap()["listening"], true);
+        let at = sent.lock().unwrap().len();
+        let set = core.call("lighting/set", &serde_json::json!({ "device": "sensei310", "light": "logo", "effect": "reactive", "params": { "color": "#FF0000", "background": "#0000FF", "fade": 600 } })).unwrap();
+        assert_eq!(set["plays"]["stops"], serde_json::json!([{ "at": 0, "color": "#0000FF" }]), "the background held between presses");
+        assert_eq!(set["plays"]["press"], serde_json::json!({ "ms": 600, "stops": [{ "at": 0, "color": "#FF0000" }, { "at": 255, "color": "#0000FF" }] }), "and the flash, from each press");
         std::thread::sleep(Duration::from_millis(1700));
         let _ = core.call("lighting/get", &serde_json::json!({ "device": "sensei310" }));
-        let at = sent.lock().unwrap().len();
-        let pressed = Instant::now();
+        let before_press = sent.lock().unwrap().len();
         pointer.lock().unwrap().push_back(vec![0x01, 0, 0, 0, 0, 0, 0, 0, 0]);
         pointer.lock().unwrap().push_back(vec![0x00, 0, 0, 0, 0, 0, 0, 0, 0]);
-        std::thread::sleep(Duration::from_millis(900));
-        let _ = core.call("lighting/get", &serde_json::json!({ "device": "sensei310" }));
-        let after: Vec<(Instant, Vec<u8>)> = sent.lock().unwrap()[at..].iter().map(|(t, _, b)| (*t, b.clone())).collect();
-        let told: Vec<String> = core.told().into_iter().map(|(m, _)| m).filter(|m| m.starts_with("input/")).collect();
-        let _ = std::fs::remove_dir_all(&data);
-        let lights: Vec<(Instant, (u8, u16, bool, Vec<(u32, String)>))> = after.iter().filter(|(_, b)| b[1] == 0x5b).map(|(t, b)| (*t, light_sent(b))).collect();
-        assert_eq!(lights.len(), 2, "the flash, then the background: {after:02x?}");
-        let (flashed, (led, ms, held, stops)) = &lights[0];
-        assert!(flashed.duration_since(pressed) < Duration::from_millis(100), "flashed within a tenth of a second of the press");
-        assert_eq!((*led, *held), (0, false), "the logo alone, as a cycle");
-        // (300 ms is 3 of 255ths of a cycle of 25.5 s)
-        assert_eq!(*ms, 25500);
-        assert_eq!(*stops, vec![(0, "#FF0000".to_string()), (3, "#0000FF".to_string()), (254, "#0000FF".to_string()), (255, "#FF0000".to_string())]);
-        let (back, sent_back) = &lights[1];
-        assert_eq!(*sent_back, (0, 1000, true, vec![(0, "#0000FF".to_string())]), "the background held again");
-        let gap = back.duration_since(*flashed);
-        assert!(gap >= Duration::from_millis(300) && gap < Duration::from_millis(500), "once the fade is done: {gap:?}");
-        assert!(after.iter().all(|(_, b)| b[1] != 0x59), "a flash never kept");
-        assert!(told.is_empty(), "nothing told with no press watched: {told:?}");
-    }
-
-    /// A change waiting to be kept while a flash plays is kept only once the
-    /// background is back, so the mouse never keeps a flash as its effect.
-    #[test]
-    fn a_flash_is_never_kept_as_the_lights_effect() {
-        let (core, sent, pointer, data) = whole_mouse_core("reactive-keep");
-        let at = sent.lock().unwrap().len();
-        // (the change kept a second and a half after it, while the flash fades for three)
-        core.call("lighting/set", &serde_json::json!({ "device": "sensei310", "light": "logo", "effect": "reactive", "params": { "color": "#FF0000", "background": "#000000", "fade": 3000 } })).unwrap();
-        std::thread::sleep(Duration::from_millis(100));
-        pointer.lock().unwrap().push_back(vec![0x01, 0, 0, 0, 0, 0, 0, 0, 0]);
-        pointer.lock().unwrap().push_back(vec![0x00, 0, 0, 0, 0, 0, 0, 0, 0]);
-        std::thread::sleep(Duration::from_millis(5200));
+        std::thread::sleep(Duration::from_millis(300));
         let _ = core.call("lighting/get", &serde_json::json!({ "device": "sensei310" }));
         let all: Vec<Vec<u8>> = sent.lock().unwrap()[at..].iter().map(|(_, _, b)| b.clone()).collect();
+        let after_press = sent.lock().unwrap().len();
+        let heard = core.told().into_iter().filter(|(m, _)| m == "input/down").count();
         let _ = std::fs::remove_dir_all(&data);
-        let kinds: Vec<&str> = all
-            .iter()
-            .map(|b| match (b[1], b.get(3 + 17)) {
-                (0x5b, Some(1)) => "held",
-                (0x5b, _) => "flash",
-                (0x59, _) => "kept",
-                _ => "other",
-            })
-            .collect();
-        assert_eq!(kinds, ["held", "flash", "held", "kept"], "{all:02x?}");
+        assert_eq!(heard, 1, "the press heard");
+        assert_eq!(all.len(), 2, "the light, then kept: {all:02x?}");
+        assert_eq!(light_sent(&all[0]), (0, 600, true, vec![(0, "#FF0000".to_string()), (255, "#0000FF".to_string())]), "the logo, played once from the flash to the background");
+        assert_eq!(triggers_sent(&all[0]), 0xFF, "started by every button");
+        assert_eq!(all[1], [0x00, 0x59, 0x00], "kept in the mouse's memory");
+        assert_eq!(after_press, before_press, "a press sends the mouse nothing");
     }
 
 

@@ -195,7 +195,7 @@
      {
       "id": "reactive",
       "label": "Reactive",
-      "note": "The light flashes when you press a button, then fades back. Ectomatter plays the flashes, so they show only while it’s open. Otherwise the light shows its background color.",
+      "note": "The light flashes when you press a button, then fades back to its background color.",
       "reactive": true,
       "like": "trigger",
       "params": {
@@ -211,10 +211,10 @@
        },
        "fade": {
         "type": "duration",
-        "min": 100,
+        "min": 500,
         "max": 3000,
         "label": "Fade",
-        "default": 600
+        "default": 800
        }
       }
      }
