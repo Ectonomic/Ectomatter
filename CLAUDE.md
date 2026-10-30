@@ -41,6 +41,9 @@ This is where they live in this repository.
   the pictures.
   `ECTOMATTER_RENDERS=name,name` runs only those; `ECTOMATTER_RENDERS_LOG=1`
   keeps every page's log.
+  `a_main_menu_item_opens_its_place_at_its_first_page` leaves each place
+  away from its first page, presses its main menu item, and holds it to
+  its first page's approved picture.
 - **Presenting through wgpu.** `crates/ectomatter-present` turns a composed
   frame into HDR10, scRGB or SDR for a wgpu surface; its tests draw offscreen
   on Mesa's lavapipe (Vulkan on the CPU, `VK_ICD_FILENAMES`), so they touch

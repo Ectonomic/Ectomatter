@@ -443,3 +443,20 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - `tools/security.sh` was proven on the advisories it found; its sources
   rule (crates.io alone, `deny.toml` `[sources]`) hasn't been tried on a
   planted library from elsewhere.
+
+## Each place at its first page (2026-10-29)
+
+- A main menu item opens its place at its first page (`src/front/first_page.rs`):
+  its first tab, nothing chosen, no menu, game's page or form open, the key
+  lists at their top with their groups shut. What's typed in a key list's
+  find box stays: the box's text is the window's own, not the page's, and
+  nothing here clears it.
+- The window opened afresh (from the tray, or Ectomatter opened again) starts
+  at Home (`open_fresh`, called from `shell/wayland.rs` `come_forward` and
+  `wait`, and `shell/winit.rs`); one the person can see, raised from the tray,
+  keeps its page. That it starts at Home is held only through the parts
+  `a_main_menu_item_opens_its_place_at_its_first_page` holds: no test opens
+  the window from the tray and looks at its page.
+- Settings no longer keeps its tab for the next run (`settings_tab` in
+  `uistate`); the key an Ectomatter before this one wrote stays in the file,
+  unread.

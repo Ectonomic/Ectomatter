@@ -696,10 +696,14 @@ impl ApplicationHandler for App {
 
     fn user_event(&mut self, _: &ActiveEventLoop, (): ()) {
         self.poke = true;
-        // (the tray's own asks are the window's: shown, a device's page opened)
+        // (the tray's own asks are the window's: shown, a device's page opened; a window
+        // out of sight opened afresh, at Home: first_page.rs)
         for a in self.s.take(self.scale() as f32) {
+            if self.shown.as_ref().is_some_and(|sh| sh.window.is_visible() != Some(true)) {
+                self.s.front.open_fresh();
+            }
             if let tray::TrayAsk::Device(d) = a {
-                self.s.front.ui.set_place(d.into());
+                self.s.front.open_at_first_page(&d);
             }
             if let Some(sh) = &self.shown {
                 sh.window.set_visible(true);

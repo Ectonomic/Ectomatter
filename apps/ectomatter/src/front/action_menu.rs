@@ -92,6 +92,8 @@ impl Front {
     /// from the open menu closes it, and a press on the button it hangs from
     /// keeps that button's click from opening it again.
     pub fn pressed_at(&mut self, x: f32, y: f32) {
+        let place = self.ui.get_place().to_string();
+        self.press_first = Some((place.clone(), self.at_first_page(&place)));
         self.press_shut = false;
         self.press_closed = None;
         self.let_chosen_go(x, y);

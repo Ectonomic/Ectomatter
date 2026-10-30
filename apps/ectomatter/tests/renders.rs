@@ -551,6 +551,47 @@ fn a_met_keyboard_unplugged_says_so() {
     assert!(wrong.is_empty(), "pages that came out otherwise:\n  {}", wrong.join("\n  "));
 }
 
+/// Each place left away from its first page (another tab, something chosen, the desk
+/// being arranged), and the main menu's item for it pressed, from that place or from
+/// another; and the page it should come out as, its first.
+const RESETS: &[(Case, &str)] = &[
+    (Case { name: "reset-settings", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "about"), ("ECTOMATTER_CLICKS", "30,998"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "settings"),
+    (Case { name: "reset-settings-from-home", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "about"), ("ECTOMATTER_CLICKS", "30,66;30,998"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "settings"),
+    (Case { name: "reset-keyboard", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63;30,122"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "kb-keys"),
+    (Case { name: "reset-keyboard-key", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416;30,122"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "kb-keys"),
+    (Case { name: "reset-mouse", size: WIDE, set: &[("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_MOUSE_TAB", "1"), ("ECTOMATTER_CLICKS", "30,166"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "m-buttons"),
+    (Case { name: "reset-library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "368,63;30,954"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "library"),
+    (Case { name: "reset-home", size: WIDE, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_DESK", "edit"), ("ECTOMATTER_CLICKS", "30,66"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "home"),
+];
+
+/// A press on the main menu's item for a place opens it at its first page, as a tab
+/// bar's item does: each place left away from it comes out as its first page's approved
+/// picture, pixel for pixel (src/front/first_page.rs).
+#[test]
+fn a_main_menu_item_opens_its_place_at_its_first_page() {
+    built();
+    let desk = Desk::new("resets", true, true);
+    let approved = here().join("tests/renders/approved");
+    let at = repo().join("target/renders/resets");
+    let mut wrong = Vec::new();
+    for (case, like) in RESETS {
+        let want = Picture::read_png(&approved.join(format!("{like}.png"))).unwrap_or_else(|| panic!("{like} has no approved picture"));
+        match desk.draw(case, "") {
+            Ok((got, said)) => {
+                let (n, diff) = got.against(&want);
+                if n > 0 {
+                    got.write_png(&at.join(format!("{}.png", case.name)));
+                    diff.write_png(&at.join(format!("{}.diff.png", case.name)));
+                    put(&at.join(format!("{}.log", case.name)), &said);
+                    wrong.push(format!("{}: {n} pixels differ from {like}, its first page (target/renders/resets/)", case.name));
+                }
+            }
+            Err(e) => wrong.push(format!("{}: not drawn: {e}", case.name)),
+        }
+    }
+    assert!(wrong.is_empty(), "places a main menu item didn't open at their first page:\n  {}", wrong.join("\n  "));
+}
+
 /// Two drawings of the same page are the same: nothing on the desk moves
 /// between runs (no clock, no animation caught midway, nothing read from the
 /// computer running the test).

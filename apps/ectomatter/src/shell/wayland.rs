@@ -377,10 +377,14 @@ fn wait(s: &mut Session, slot: &Slot, shown: &mut bool, now: bool) -> Option<Con
         }
         for a in s.take(1.0) {
             match a {
-                tray::TrayAsk::Open(_) => *shown = true,
+                tray::TrayAsk::Open(_) => {
+                    *shown = true;
+                    s.front.open_fresh();
+                }
                 tray::TrayAsk::Device(d) => {
                     *shown = true;
-                    s.front.ui.set_place(d.into());
+                    s.front.open_fresh();
+                    s.front.open_at_first_page(&d);
                 }
                 tray::TrayAsk::Scene(_) | tray::TrayAsk::Quit => {}
             }
@@ -587,7 +591,7 @@ impl App {
                 tray::TrayAsk::Open(token) => self.come_forward(token),
                 tray::TrayAsk::Device(d) => {
                     self.come_forward(None);
-                    self.s.front.ui.set_place(d.into());
+                    self.s.front.open_at_first_page(&d);
                 }
                 tray::TrayAsk::Scene(_) | tray::TrayAsk::Quit => {}
             }
@@ -960,12 +964,17 @@ impl App {
     /// opened again): shown, if it was closed into the tray; made again, if the
     /// person can't see it (on another virtual desktop, or minimized), as a window
     /// just opened goes on the desktop and the screen they're on; and raised with
-    /// the press's activation token, where there is one.
+    /// the press's activation token, where there is one. A window opened, or opened
+    /// again, starts at Home (first_page.rs); one the person can see is left as it is.
     fn come_forward(&mut self, token: Option<String>) {
         match forward(self.hidden, self.suspended) {
-            Forward::Show => self.show(),
+            Forward::Show => {
+                self.s.front.open_fresh();
+                self.show();
+            }
             Forward::Again => {
                 eprintln!("ectomatter: the window was out of sight, so it's opened again where the person is");
+                self.s.front.open_fresh();
                 self.unmap();
                 self.show();
             }

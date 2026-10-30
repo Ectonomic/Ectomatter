@@ -243,13 +243,12 @@ impl Front {
     }
 
     /// Settings, at its Sensor Feed box (from the screen editor's From line, or its Shows menu).
-    /// A Settings tab opened from its bar: kept for next time, its page from its top.
+    /// A Settings tab opened from its bar: its page from its top.
     pub fn open_settings_tab(&mut self, tab: crate::ecto_settings::Tab) {
         if self.settings_tab == tab {
             return;
         }
         self.settings_tab = tab;
-        crate::uistate::set("settings_tab", serde_json::json!(tab.name()));
         self.ui.set_settings_goto(-1.0);
         self.ui.set_settings_goto(0.0);
         self.refresh();

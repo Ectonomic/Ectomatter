@@ -903,6 +903,15 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             r.render(&mut pic.ui, w as usize);
         });
     }
+    // ECTOMATTER_POINTER_AWAY: the pointer gone off the window after the clicks, so
+    // nothing the last one pressed shows as under it
+    if std::env::var_os("ECTOMATTER_POINTER_AWAY").is_some() {
+        window.dispatch_event(WindowEvent::PointerExited);
+        front.act();
+        window.draw_if_needed(|r| {
+            r.render(&mut pic.ui, w as usize);
+        });
+    }
     // ECTOMATTER_ESCAPE=N: Escape pressed N times after those clicks; ECTOMATTER_DELETE:
     // then the Delete key
     let escapes = std::env::var("ECTOMATTER_ESCAPE").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);

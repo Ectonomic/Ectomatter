@@ -23,6 +23,7 @@ use crate::{AppWindow, Cell, CheckItem, DeskItem, DeskPad, EffectItem, KeyItem, 
 mod about_page;
 mod action_menu;
 mod color_picker;
+mod first_page;
 mod game_starts;
 mod home_desk;
 mod lighting_tab;
@@ -560,6 +561,11 @@ fn lib_groups(p: &Page) -> Vec<(String, Vec<keyboard::Key>)> {
 }
 
 /// The keyboard's groups of controls, as its description orders them.
+/// The Key library's groups shut as the page first opens: every one.
+pub(super) fn lib_first_shut() -> std::collections::HashSet<String> {
+    lib_group_names().into_iter().chain(["Sliders".to_string()]).collect()
+}
+
 fn lib_group_names() -> Vec<String> {
     crate::cores::keyboard().and_then(|k| k.device["groups"].as_array().map(|g| g.iter().filter_map(|g| g.as_str().map(String::from)).collect())).unwrap_or_default()
 }
@@ -769,7 +775,7 @@ pub struct Front {
     about_said: Option<(i32, String)>,
     /// About's own: its credits, its Blob, its Credits dialog (about_page.rs)
     about: about_page::AboutState,
-    /// Settings' tab open, kept as the rail's open state is (uistate "settings_tab")
+    /// Settings' tab open: General as Ectomatter starts (ECTOMATTER_SETTINGS_TAB, a snapshot's)
     pub settings_tab: crate::ecto_settings::Tab,
     /// what starts at login, as the system keeps it (autostart.rs), and when it was looked at
     starts: (crate::autostart::Starts, Instant),
@@ -862,6 +868,9 @@ pub struct Front {
     /// whether the press now shut the color picker (a press that shuts it
     /// does nothing else on the desk)
     press_shut: bool,
+    /// the place a press came down on, and whether it stood at its first page before the
+    /// press let anything chosen on it go: what a rail item's click (on the release) goes by
+    press_first: Option<(String, bool)>,
     pick: Option<Pick>,
     overlay_model: Rc<VecModel<crate::Overlay>>,
     /// what each slider controls, which slider's menu is open, and what the
@@ -1273,7 +1282,7 @@ impl Front {
             about_said: None,
             about: Default::default(),
             // (the tab last left; a snapshot's from ECTOMATTER_SETTINGS_TAB)
-            settings_tab: std::env::var("ECTOMATTER_SETTINGS_TAB").ok().or_else(|| crate::uistate::get("settings_tab").and_then(|v| v.as_str().map(String::from))).and_then(|n| crate::ecto_settings::Tab::named(&n)).unwrap_or_default(),
+            settings_tab: std::env::var("ECTOMATTER_SETTINGS_TAB").ok().and_then(|n| crate::ecto_settings::Tab::named(&n)).unwrap_or_default(),
             starts: (crate::autostart::now(), Instant::now()),
             settings_said: None,
             removing: None,
@@ -1321,6 +1330,7 @@ impl Front {
             pad_asked: None,
             pad_note: String::new(),
             press_shut: false,
+            press_first: None,
             ui,
             page,
             kb,
@@ -1328,7 +1338,7 @@ impl Front {
             menu: None,
             layer: 0,
             // (every group shut at first)
-            lib_shut: lib_group_names().into_iter().chain(["Sliders".to_string()]).collect(),
+            lib_shut: lib_first_shut(),
             lib_query: String::new(),
             last_drafts: HashMap::new(),
             changed_at: HashMap::new(),
@@ -2801,19 +2811,25 @@ impl Front {
                     self.close_menu();
                     self.ui.set_place(place.into());
                 }
-                // the item already chosen opens the rail into its blade, or closes it
-                // the lab is a window of its own, not a place in this one
+                // an item opens its place at its first page (first_page.rs); the item already
+                // chosen, its place at its first page already, opens the rail into its blade
+                // or closes it. The lab is a window of its own, not a place in this one
                 Ask::Rail(place) if place == "lab" => {
                     self.close_menu();
                     window.push(WindowAsk::OpenLab);
                 }
                 Ask::Rail(place) => {
                     self.close_menu();
-                    if self.ui.get_place() == place.as_str() {
+                    let first = match self.press_first.take() {
+                        Some((p, first)) if p == place => first,
+                        _ => self.at_first_page(&place),
+                    };
+                    if self.ui.get_place() == place.as_str() && first {
                         let open = !self.ui.get_rail_open();
                         self.ui.set_rail_open(open);
                         crate::uistate::set("rail_open", serde_json::json!(open));
                     } else {
+                        self.to_first_page(&place);
                         self.ui.set_place(place.into());
                     }
                 }
