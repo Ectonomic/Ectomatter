@@ -474,9 +474,10 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - Between presses the mouse is taken to rest on the cycle's last color (the
   background): seen only with a dark background, where resting dark and
   resting on the last color look the same.
-- Reactive's flash is a fade from one color to the background; Engine's
-  Trigger may have taken a cycle of several colors. The core sends what any
-  cycle can hold, so more colors are a description change away, untried.
+- Every moving effect can play once per press (its Plays, `lib.rs`,
+  `cycle`), its cycle closed so it rests on its first color between: only
+  Reactive's fade has been seen on the mouse; the others played once per
+  press haven't.
 - The drawing flashes as each press is told (`mouse.rs`,
   `Plays::at_pressed`), from the moment Ectomatter hears it, a moment after
   the mouse starts its own.

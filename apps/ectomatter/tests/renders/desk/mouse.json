@@ -72,6 +72,21 @@
         "max": 30000,
         "label": "Speed",
         "default": 3000
+       },
+       "plays": {
+        "type": "choice",
+        "label": "Plays",
+        "default": "always",
+        "options": [
+         {
+          "value": "always",
+          "label": "All the time"
+         },
+         {
+          "value": "press",
+          "label": "Once per press"
+         }
+        ]
        }
       }
      },
@@ -96,6 +111,21 @@
         "max": 30000,
         "label": "Speed",
         "default": 9000
+       },
+       "plays": {
+        "type": "choice",
+        "label": "Plays",
+        "default": "always",
+        "options": [
+         {
+          "value": "always",
+          "label": "All the time"
+         },
+         {
+          "value": "press",
+          "label": "Once per press"
+         }
+        ]
        }
       }
      },
@@ -123,6 +153,21 @@
         "max": 30000,
         "label": "Speed",
         "default": 5000
+       },
+       "plays": {
+        "type": "choice",
+        "label": "Plays",
+        "default": "always",
+        "options": [
+         {
+          "value": "always",
+          "label": "All the time"
+         },
+         {
+          "value": "press",
+          "label": "Once per press"
+         }
+        ]
        }
       },
       "start": {
@@ -151,6 +196,21 @@
         "max": 3000,
         "label": "Speed",
         "default": 1200
+       },
+       "plays": {
+        "type": "choice",
+        "label": "Plays",
+        "default": "always",
+        "options": [
+         {
+          "value": "always",
+          "label": "All the time"
+         },
+         {
+          "value": "press",
+          "label": "Once per press"
+         }
+        ]
        }
       }
      },
@@ -170,6 +230,21 @@
         "max": 2000,
         "label": "Speed",
         "default": 300
+       },
+       "plays": {
+        "type": "choice",
+        "label": "Plays",
+        "default": "always",
+        "options": [
+         {
+          "value": "always",
+          "label": "All the time"
+         },
+         {
+          "value": "press",
+          "label": "Once per press"
+         }
+        ]
        }
       }
      },
@@ -189,6 +264,21 @@
         "max": 10000,
         "label": "Speed",
         "default": 3000
+       },
+       "plays": {
+        "type": "choice",
+        "label": "Plays",
+        "default": "always",
+        "options": [
+         {
+          "value": "always",
+          "label": "All the time"
+         },
+         {
+          "value": "press",
+          "label": "Once per press"
+         }
+        ]
        }
       }
      },

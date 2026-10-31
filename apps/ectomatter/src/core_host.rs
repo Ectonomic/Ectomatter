@@ -1629,6 +1629,7 @@ pub(crate) mod tests {
         let desc = core.call("device/describe", &serde_json::json!({ "device": "sensei310" })).unwrap();
         let effects = desc["capabilities"]["lighting"]["effects"].as_array().unwrap().clone();
         let mut checked = Vec::new();
+        let mut pressed = Vec::new();
         for e in &effects {
             for end in ["default", "min", "max"] {
                 let mut params = serde_json::json!({});
@@ -1637,6 +1638,9 @@ pub(crate) mod tests {
                         (Some("duration" | "int"), "min" | "max") => d[end].clone(),
                         (Some("colors"), "min") => serde_json::json!(["#123456"]),
                         (Some("colors"), "max") => (0..d["max"].as_u64().unwrap()).map(|i| format!("#{:02X}80{:02X}", i * 30, 255 - i * 30)).collect(),
+                        // (a choice at its first option and its last: Plays, all the time and once per press)
+                        (Some("choice"), "min") => d["options"][0]["value"].clone(),
+                        (Some("choice"), "max") => d["options"].as_array().unwrap().last().unwrap()["value"].clone(),
                         _ => d["default"].clone(),
                     };
                 }
@@ -1654,12 +1658,18 @@ pub(crate) mod tests {
                 }
                 let listed = |v: &Value| -> Vec<(u32, String)> { v.as_array().unwrap().iter().map(|s| (s["at"].as_u64().unwrap() as u32, s["color"].as_str().unwrap().to_string())).collect() };
                 let plays = &set["plays"];
+                if triggers_sent(&report) != 0 && !pressed.contains(&e["id"]) {
+                    pressed.push(e["id"].clone());
+                }
                 if triggers_sent(&report) == 0 {
                     assert_eq!((plays["ms"].as_u64(), plays["held"].as_bool()), (Some(ms as u64), Some(held)), "{what}");
                     assert_eq!(listed(&plays["stops"]), stops, "what it says the light plays is what it sent, {what}");
                 } else {
                     // (a cycle a press starts: played once from each press, its last color held between)
                     assert!(held, "a cycle a press starts is sent to play once, {what}");
+                    if stops.len() > 2 {
+                        assert_eq!(stops.last().unwrap(), &(255, stops[0].1.clone()), "a moving effect played once ends where it starts, {what}");
+                    }
                     assert_eq!(plays["press"]["ms"].as_u64(), Some(ms as u64), "{what}");
                     assert_eq!(listed(&plays["press"]["stops"]), stops, "what it says a press plays is what it sent, {what}");
                     assert_eq!(listed(&plays["stops"]), vec![(0, stops.last().unwrap().1.clone())], "its last color held between presses, {what}");
@@ -1671,6 +1681,7 @@ pub(crate) mod tests {
         for id in ["off", "static", "breathing", "colorbreathing", "colorshift", "heartbeat", "strobe", "flicker", "reactive"] {
             assert!(checked.iter().any(|c| c == id), "{id} offered: {checked:?}");
         }
+        assert_eq!(pressed.len(), 7, "every moving effect can play once per press, and Reactive does: {pressed:?}");
     }
 
     /// The mouse's core started on the whole fake mouse, with its pointer's
