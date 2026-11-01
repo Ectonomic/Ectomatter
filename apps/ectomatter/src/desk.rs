@@ -995,15 +995,14 @@ impl Desk {
     }
 }
 
-/// Dots across a length `len`, about `pitch` apart, as they lie at rest: the
-/// same margin at both ends, half the spacing (or as near as keeps a dot
-/// whole), and the spacing made to fit by under half a dot over the length
-/// (Grant, 2026-11-01: "equal padding though all the way around"). Where the
-/// first lies, and the spacing.
+/// Dots across a length `len`, about `pitch` apart, as they lie at rest: as
+/// far from each end as from each other, as if the next lay on the edge
+/// (Grant, 2026-11-01: "the gap at the edges to match the gap between
+/// dots"), the spacing made to fit by under half a dot over the length.
+/// Where the first lies, and the spacing (the same).
 fn even(len: f32, pitch: f32) -> (f32, f32) {
-    let margin = (pitch / 2.0).max(CULL);
-    let n = ((len - 2.0 * margin) / pitch).round().max(1.0);
-    (margin, (len - 2.0 * margin) / n)
+    let s = len / (len / pitch).round().max(2.0);
+    (s, s)
 }
 
 /// A place in the desk's units, onto the nearest dot.
@@ -1472,9 +1471,10 @@ mod tests {
 
     /// The dots run to the desk's edges, whole, and none where the window's
     /// rounded corner would cut one (Grant, 2026-10-31, of a gutter a row and
-    /// a column wide). At rest they lie the same distance from all four edges
-    /// at about their spacing (2026-11-01: "equal padding though all the way
-    /// around"); in Arrange, where devices snap onto them, at the snap
+    /// a column wide). At rest each edge is as far from the dots as they are
+    /// from each other, all the way round (2026-11-01: "equal padding though
+    /// all the way around", "the gap at the edges to match the gap between
+    /// dots"); in Arrange, where devices snap onto them, at the snap
     /// spacing, moving with the desk, never a gutter wider than that spacing
     /// and a whole dot's room; and going into Arrange they stay put.
     #[test]
@@ -1517,8 +1517,10 @@ mod tests {
                 d.view = pan;
                 let dots = laid(&d);
                 let (g, far) = gaps(&dots);
-                assert!(g.iter().all(|x| (x - g[0]).abs() < 0.01), "zoom {z}, pan {k}: at rest the margins differ: {g:?}");
-                assert!(g[0] >= whole && g[0] <= pitch, "zoom {z}: a margin of {} at a spacing of {pitch}", g[0]);
+                let [sx, sy] = dots.step;
+                for (gap, s) in g.iter().zip([sx, sy, sx, sy]) {
+                    assert!((gap - s).abs() < 0.01, "zoom {z}, pan {k}: at rest an edge's gap {g:?} isn't the dots' spacing {:?}", dots.step);
+                }
                 for s in dots.step {
                     assert!((s / pitch - 1.0).abs() < 0.01, "zoom {z}: spaced {s} against {pitch}");
                 }
