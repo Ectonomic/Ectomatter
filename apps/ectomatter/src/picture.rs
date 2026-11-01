@@ -111,7 +111,7 @@ impl Photo {
     }
 }
 
-/// A dot every `step` pixels from `(ox, oy)`, `r` round, white at `alpha`
+/// A dot every `step` pixels from `(ox, oy)` (across, then down), `r` round, white at `alpha`
 /// over the ground (every other one each way, from the first, at
 /// `snap_alpha`), only inside `bounds` and outside each of `holes`, and over
 /// the pads only with `over_pads`. A dot a ripple's ring passes takes the
@@ -120,7 +120,7 @@ impl Photo {
 pub struct Dots {
     pub ox: f32,
     pub oy: f32,
-    pub step: f32,
+    pub step: [f32; 2],
     pub r: f32,
     pub alpha: f32,
     pub snap_alpha: f32,
@@ -183,9 +183,9 @@ impl DotLights {
         let cols = (ix1 - ix0 + 1).max(0) as usize;
         let mut light = Vec::with_capacity(cols * (iy1 - iy0 + 1).max(0) as usize);
         for iy in iy0..=iy1 {
-            let ly = d.oy + iy as f32 * d.step;
+            let ly = d.oy + iy as f32 * d.step[1];
             for ix in ix0..=ix1 {
-                light.push(dot_light(&d.rings, d.ox + ix as f32 * d.step, ly));
+                light.push(dot_light(&d.rings, d.ox + ix as f32 * d.step[0], ly));
             }
         }
         DotLights { ix0, iy0, cols, light }
@@ -211,9 +211,10 @@ impl Dots {
     /// down, by their place in the grid.
     fn grid(&self) -> (i64, i64, i64, i64) {
         let [b0, b1, b2, b3] = self.bounds;
-        let first = |b: f32, o: f32| ((b - o) / self.step).ceil() as i64;
-        let last = |b: f32, o: f32| ((b - o) / self.step).floor() as i64;
-        (first(b0, self.ox), last(b2, self.ox), first(b1, self.oy), last(b3, self.oy))
+        let [sx, sy] = self.step;
+        let first = |b: f32, o: f32, s: f32| ((b - o) / s).ceil() as i64;
+        let last = |b: f32, o: f32, s: f32| ((b - o) / s).floor() as i64;
+        (first(b0, self.ox, sx), last(b2, self.ox, sx), first(b1, self.oy, sy), last(b3, self.oy, sy))
     }
 
     /// The boxes round each dot whose light differs between `a` and `b`
@@ -227,11 +228,11 @@ impl Dots {
         let (ix0, ix1, iy0, iy1) = self.grid();
         let mut out = Vec::new();
         for iy in iy0..=iy1 {
-            let ly = self.oy + iy as f32 * self.step;
+            let ly = self.oy + iy as f32 * self.step[1];
             for ix in ix0..=ix1 {
                 let (la, lb) = (a.at(ix, iy), b.at(ix, iy));
                 if la != lb {
-                    let lx = self.ox + ix as f32 * self.step;
+                    let lx = self.ox + ix as f32 * self.step[0];
                     // (its soft edge, and the middles of the pixels it reaches)
                     let reach = self.r + self.grow * la.0.max(lb.0) + 1.0;
                     let (x0, y0) = ((lx - reach).max(0.0) as usize, (ly - reach).max(0.0) as usize);
@@ -319,8 +320,8 @@ impl Decor {
             }
         }
         if let Some(d) = self.dots.as_ref().filter(|d| d.over_pads || !on_pad) {
-            let (ix, iy) = (((px - d.ox) / d.step).round(), ((py - d.oy) / d.step).round());
-            let (lx, ly) = (d.ox + ix * d.step, d.oy + iy * d.step);
+            let (ix, iy) = (((px - d.ox) / d.step[0]).round(), ((py - d.oy) / d.step[1]).round());
+            let (lx, ly) = (d.ox + ix * d.step[0], d.oy + iy * d.step[1]);
             let [b0, b1, b2, b3] = d.bounds;
             let dist = ((px - lx).powi(2) + (py - ly).powi(2)).sqrt();
             if dist <= d.r + d.grow + 0.5 && lx >= b0 && lx <= b2 && ly >= b1 && ly <= b3 && !d.holes.iter().any(|h| lx >= h[0] && lx <= h[2] && ly >= h[1] && ly <= h[3]) {
@@ -342,7 +343,7 @@ impl Decor {
         self.plates.iter().any(|p| py >= p.rect[1] - 1.0 && py <= p.rect[3] + 1.0)
             || self.pads.iter().any(|p| py >= p.rect[1] - 1.0 && py <= p.rect[3] + 1.0)
             || self.dots.as_ref().is_some_and(|d| {
-                let ly = d.oy + ((py - d.oy) / d.step).round() * d.step;
+                let ly = d.oy + ((py - d.oy) / d.step[1]).round() * d.step[1];
                 (py - ly).abs() <= d.r + d.grow + 1.0 && py >= d.bounds[1] - d.r - d.grow - 1.0 && py <= d.bounds[3] + d.r + d.grow + 1.0
             })
     }
@@ -899,7 +900,7 @@ mod tests {
         p.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
         p.set_decor(Decor {
             pads: Vec::new(),
-            dots: Some(Dots { ox: 10.0, oy: 10.0, step: 20.0, r: 1.25, alpha: 0.3, snap_alpha: 0.3, over_pads: true, bounds: [16.0, 16.0, 104.0, 64.0], holes: vec![[45.0, 45.0, 55.0, 55.0]], grow: 0.0, lit: 0.0, rings: Vec::new() }),
+            dots: Some(Dots { ox: 10.0, oy: 10.0, step: [20.0; 2], r: 1.25, alpha: 0.3, snap_alpha: 0.3, over_pads: true, bounds: [16.0, 16.0, 104.0, 64.0], holes: vec![[45.0, 45.0, 55.0, 55.0]], grow: 0.0, lit: 0.0, rings: Vec::new() }),
             plates: vec![Plate { rect: [0.0, 0.0, 30.0, 12.0], radius: 6.0, alpha: 0.2 }],
         });
         p.encode_all();
@@ -923,7 +924,7 @@ mod tests {
             let mut p = Picture::new(254.0, [0x18, 0x18, 0x1b]);
             p.resize(100, 60);
             p.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
-            let dots = dots.then(|| Dots { ox: 30.0, oy: 30.0, step: 20.0, r: 1.25, alpha: 0.3, snap_alpha: 0.3, over_pads: true, bounds: [0.0, 0.0, 100.0, 60.0], holes: Vec::new(), grow: 0.0, lit: 0.0, rings: Vec::new() });
+            let dots = dots.then(|| Dots { ox: 30.0, oy: 30.0, step: [20.0; 2], r: 1.25, alpha: 0.3, snap_alpha: 0.3, over_pads: true, bounds: [0.0, 0.0, 100.0, 60.0], holes: Vec::new(), grow: 0.0, lit: 0.0, rings: Vec::new() });
             p.set_decor(Decor { pads: vec![pad], dots, plates: Vec::new() });
             p.encode_all();
             p.out
@@ -1011,7 +1012,7 @@ mod tests {
             p.resize(200, 120);
             p.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
             let pads = if pad { vec![PadLaid { rect: [120.0, 0.0, 200.0, 120.0], radius: 0.0, color: [0x30, 0x30, 0x36], picture: None, bounds: [0.0, 0.0, 200.0, 120.0] }] } else { Vec::new() };
-            p.set_decor(Decor { pads, dots: Some(Dots { ox: 10.0, oy: 10.0, step: 20.0, r: 1.25, alpha: 0.06, snap_alpha: 0.06, over_pads, bounds: [0.0, 0.0, 200.0, 120.0], holes: Vec::new(), grow: 1.5, lit: 0.94, rings }), plates: Vec::new() });
+            p.set_decor(Decor { pads, dots: Some(Dots { ox: 10.0, oy: 10.0, step: [20.0; 2], r: 1.25, alpha: 0.06, snap_alpha: 0.06, over_pads, bounds: [0.0, 0.0, 200.0, 120.0], holes: Vec::new(), grow: 1.5, lit: 0.94, rings }), plates: Vec::new() });
             p.encode_all();
             p.out.clone()
         };
@@ -1061,7 +1062,7 @@ mod tests {
                         RingLaid { x: 220.0 + 70.0 * k as f32, y: 400.0 + 80.0 * (k % 4) as f32, radius: 40.0 + 520.0 * age, width: 26.0, strength: (1.0 - age / 1.5).max(0.0).powf(1.4), color: [1.0, 0.25, 0.0] }
                     })
                     .collect();
-                let dots = Dots { ox: 60.0, oy: 36.0, step: 14.0, r: 1.25, alpha: 0.06, snap_alpha: 0.06, over_pads: false, bounds: [76.0, 52.0, 1424.0, 1012.0], holes: Vec::new(), grow: 1.5, lit: 0.94, rings };
+                let dots = Dots { ox: 60.0, oy: 36.0, step: [14.0; 2], r: 1.25, alpha: 0.06, snap_alpha: 0.06, over_pads: false, bounds: [76.0, 52.0, 1424.0, 1012.0], holes: Vec::new(), grow: 1.5, lit: 0.94, rings };
                 let boxes = p.set_decor(Decor { pads: Vec::new(), dots: Some(dots), plates: Vec::new() });
                 p.encode_many(&boxes);
             }
@@ -1078,7 +1079,7 @@ mod tests {
         part.resize(320, 200);
         part.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
         part.encode_all();
-        let dots = |rings: Vec<RingLaid>| Dots { ox: 8.0, oy: 8.0, step: 14.0, r: 1.25, alpha: 0.06, snap_alpha: 0.06, over_pads: false, bounds: [10.0, 10.0, 310.0, 190.0], holes: vec![[100.0, 90.0, 140.0, 110.0]], grow: 1.5, lit: 0.94, rings };
+        let dots = |rings: Vec<RingLaid>| Dots { ox: 8.0, oy: 8.0, step: [14.0; 2], r: 1.25, alpha: 0.06, snap_alpha: 0.06, over_pads: false, bounds: [10.0, 10.0, 310.0, 190.0], holes: vec![[100.0, 90.0, 140.0, 110.0]], grow: 1.5, lit: 0.94, rings };
         let ring = |x: f32, y: f32, t: f32, c: [f32; 3]| RingLaid { x, y, radius: 40.0 + 520.0 * t, width: 26.0, strength: (1.0 - t / 1.5).max(0.0).powf(1.4), color: c };
         let mut boxes_seen = 0;
         for i in 0..=24 {

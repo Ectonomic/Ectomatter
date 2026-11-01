@@ -277,6 +277,8 @@ pub struct Desk {
     pub pressed: Option<usize>,
     drag: Option<Drag>,
     ease: Option<(Instant, View, View)>,
+    /// the ease into Arrange running: the dots held where it ends, lined up
+    entering: bool,
     /// the dots' opacity, 0 to 1 of DOT_ALPHA, and its fading
     pub dots: f32,
     fade: Option<(Instant, f32, f32)>,
@@ -333,7 +335,7 @@ impl Desk {
         // (the tests start from a desk nothing was kept for)
         let kept = if cfg!(test) { Vec::new() } else { Desk::saved() };
         let pads = if cfg!(test) { Vec::new() } else { pads_of(&crate::uistate::get("desk_pads").unwrap_or_default()) };
-        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now(), kept, pads, pad_chosen: None, pad_hover: None, draw_tool: false, rings: Vec::new(), now: Instant::now() }
+        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, entering: false, dots: 0.0, fade: None, changed: Instant::now(), kept, pads, pad_chosen: None, pad_hover: None, draw_tool: false, rings: Vec::new(), now: Instant::now() }
     }
 
     /// A ripple from a point of the desk (its logical pixels), in a light's
@@ -589,6 +591,7 @@ impl Desk {
             return false;
         }
         self.ease = None;
+        self.entering = false;
         let v = self.zoomed(self.view.z * (dy * 0.01).exp(), at);
         self.set_view(v);
         true
@@ -596,6 +599,7 @@ impl Desk {
 
     fn ease_to(&mut self, to: View) {
         self.ease = Some((Instant::now(), self.view, to));
+        self.entering = false;
     }
 
     /// Edit mode on or off: the dots fade in or out; out, the desk eases back to the fit.
@@ -612,6 +616,7 @@ impl Desk {
         self.fade = Some((Instant::now(), self.dots, if on { 1.0 } else { 0.0 }));
         // (in, the dots lined up as they come, the short way; out, the exact fit)
         self.ease_to(if on { self.aligned(self.view) } else { self.fitted_free() });
+        self.entering = on;
     }
 
     pub fn animating(&self) -> bool {
@@ -629,6 +634,7 @@ impl Desk {
             self.set_view(View { z: from.z + (to.z - from.z) * e, px: from.px + (to.px - from.px) * e, py: from.py + (to.py - from.py) * e });
             if k >= 1.0 {
                 self.ease = None;
+                self.entering = false;
             }
         }
         if let Some((t0, from, to)) = self.fade {
@@ -701,6 +707,7 @@ impl Desk {
             Some(Drag::Pan { at, from }) => {
                 let v = View { px: from.px + to.0 - at.0, py: from.py + to.1 - at.1, ..*from };
                 self.ease = None;
+                self.entering = false;
                 self.set_view(v);
                 true
             }
@@ -711,6 +718,7 @@ impl Desk {
                 *moved = true;
                 let v = View { px: from.px + to.0 - at.0, py: from.py + to.1 - at.1, ..*from };
                 self.ease = None;
+                self.entering = false;
                 self.set_view(v);
                 true
             }
@@ -932,15 +940,26 @@ impl Desk {
             })
             .collect();
         // the dots, at rest and arranged, and the ripples running through them
+        // (at rest, spread evenly, the same margin all the way round; in
+        // Arrange, where devices snap, held where the ease into it ends, then
+        // moving with the desk)
+        let pitch = Desk::step(v.z) * v.z / 2.0;
+        let (ox, oy, step, inset) = if !self.editing {
+            let ((ox, sx), (oy, sy)) = (even(w, pitch), even(h, pitch));
+            (ox, oy, [sx, sy], ox - pitch / 2.0)
+        } else {
+            let a = if self.entering { self.aligned(v) } else { v };
+            (a.px, a.py, [pitch; 2], CULL)
+        };
         let dots = (!self.items.is_empty()).then(|| Dots {
-            ox: s(at.0 + v.px),
-            oy: s(at.1 + v.py),
-            step: s(Desk::step(v.z) * v.z / 2.0),
+            ox: s(at.0 + ox),
+            oy: s(at.1 + oy),
+            step: step.map(s),
             r: s(DOT_R),
             alpha: DOT_ALPHA,
             snap_alpha: DOT_ALPHA * (1.0 + SNAP_LIFT * self.dots),
             over_pads: self.dots > 0.0,
-            bounds: [s(at.0 + CULL), s(at.1 + CULL), s(at.0 + w - CULL), s(at.1 + h - CULL)],
+            bounds: [s(at.0 + inset), s(at.1 + inset), s(at.0 + w - inset), s(at.1 + h - inset)],
             holes: names
                 .iter()
                 .map(|n| [s(at.0 + n[0] - 8.0), s(at.1 + n[1] - 6.0), s(at.0 + n[2] + 8.0), s(at.1 + n[3] + 6.0)])
@@ -974,6 +993,17 @@ impl Desk {
         };
         Decor { pads, dots, plates }
     }
+}
+
+/// Dots across a length `len`, about `pitch` apart, as they lie at rest: the
+/// same margin at both ends, half the spacing (or as near as keeps a dot
+/// whole), and the spacing made to fit by under half a dot over the length
+/// (Grant, 2026-11-01: "equal padding though all the way around"). Where the
+/// first lies, and the spacing.
+fn even(len: f32, pitch: f32) -> (f32, f32) {
+    let margin = (pitch / 2.0).max(CULL);
+    let n = ((len - 2.0 * margin) / pitch).round().max(1.0);
+    (margin, (len - 2.0 * margin) / n)
 }
 
 /// A place in the desk's units, onto the nearest dot.
@@ -1440,43 +1470,82 @@ mod tests {
         assert!(arranged.snap_alpha > arranged.alpha && arranged.over_pads);
     }
 
-    /// Wherever the desk is panned or zoomed, the dots run to its edges: no
-    /// gutter wider than their spacing and the room a lit dot needs to stay
-    /// whole (Grant, 2026-10-31, of a gutter a row and a column wide), none
-    /// cut by an edge, and none where the window's rounded corner would cut it.
+    /// The dots run to the desk's edges, whole, and none where the window's
+    /// rounded corner would cut one (Grant, 2026-10-31, of a gutter a row and
+    /// a column wide). At rest they lie the same distance from all four edges
+    /// at about their spacing (2026-11-01: "equal padding though all the way
+    /// around"); in Arrange, where devices snap onto them, at the snap
+    /// spacing, moving with the desk, never a gutter wider than that spacing
+    /// and a whole dot's room; and going into Arrange they stay put.
     #[test]
-    fn the_dots_run_to_the_edges_whole() {
+    fn the_dots_run_to_the_edges_evenly_and_whole() {
         let mut d = desk();
         let (w, h) = d.size;
         let corner = 10.0;
         let whole = DOT_R + RING_GROW;
+        let laid = |d: &Desk| d.decor((0.0, 0.0), 1.0, corner, &[], &|_| None).dots.unwrap();
+        // the outermost dots' distance from each edge: left, top, right, bottom
+        let gaps = |dots: &Dots| {
+            let first = |o: f32, b: f32, s: f32| o + ((b - o) / s).ceil() * s;
+            let last = |o: f32, b: f32, s: f32| o + ((b - o) / s).floor() * s;
+            let [sx, sy] = dots.step;
+            let (x0, y0) = (first(dots.ox, dots.bounds[0], sx), first(dots.oy, dots.bounds[1], sy));
+            let (x1, y1) = (last(dots.ox, dots.bounds[2], sx), last(dots.oy, dots.bounds[3], sy));
+            ([x0, y0, w - x1, h - y1], (x1, y1))
+        };
+        let corner_whole = |dots: &Dots, (x1, y1): (f32, f32), what: &str| {
+            let [sx, sy] = dots.step;
+            let mut y = y1;
+            while y > h - corner - sy {
+                let mut x = x1;
+                while x > w - corner - sx {
+                    let (cx, cy) = ((x - (w - corner)).max(0.0), (y - (h - corner)).max(0.0));
+                    let cut = (cx * cx + cy * cy).sqrt() + whole + 0.5 > corner && cx > 0.0 && cy > 0.0;
+                    let left_out = dots.holes.iter().any(|b| x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]);
+                    assert!(!cut || left_out, "{what}: the dot at {x}, {y} is cut by the window's corner");
+                    x -= sx;
+                }
+                y -= sy;
+            }
+        };
         for z in [0.6, 1.0, 1.16, 2.5] {
+            let pitch = Desk::step(z) * z / 2.0;
             for k in 0..48 {
-                d.view = View { z, px: 3.0 + k as f32 * 0.7, py: 5.0 + k as f32 * 0.45 };
-                let dots = d.decor((0.0, 0.0), 1.0, corner, &[], &|_| None).dots.unwrap();
-                let first = |o: f32, b: f32| o + ((b - o) / dots.step).ceil() * dots.step;
-                let last = |o: f32, b: f32| o + ((b - o) / dots.step).floor() * dots.step;
-                let (x0, y0) = (first(dots.ox, dots.bounds[0]), first(dots.oy, dots.bounds[1]));
-                let (x1, y1) = (last(dots.ox, dots.bounds[2]), last(dots.oy, dots.bounds[3]));
-                for (side, gap) in [("left", x0), ("top", y0), ("right", w - x1), ("bottom", h - y1)] {
+                let pan = View { z, px: 3.0 + k as f32 * 0.7, py: 5.0 + k as f32 * 0.45 };
+                // at rest
+                d.editing = false;
+                d.view = pan;
+                let dots = laid(&d);
+                let (g, far) = gaps(&dots);
+                assert!(g.iter().all(|x| (x - g[0]).abs() < 0.01), "zoom {z}, pan {k}: at rest the margins differ: {g:?}");
+                assert!(g[0] >= whole && g[0] <= pitch, "zoom {z}: a margin of {} at a spacing of {pitch}", g[0]);
+                for s in dots.step {
+                    assert!((s / pitch - 1.0).abs() < 0.01, "zoom {z}: spaced {s} against {pitch}");
+                }
+                corner_whole(&dots, far, &format!("at rest, zoom {z}, pan {k}"));
+                // in Arrange, the desk panned or zoomed
+                d.editing = true;
+                d.entering = false;
+                let dots = laid(&d);
+                assert_eq!(dots.step, [pitch; 2], "the snap spacing in Arrange");
+                let (g, far) = gaps(&dots);
+                for (side, gap) in ["left", "top", "right", "bottom"].into_iter().zip(g) {
                     assert!(gap >= whole, "zoom {z}, pan {k}: a dot cut at the {side} edge ({gap})");
-                    assert!(gap <= dots.step + whole + 1.0, "zoom {z}, pan {k}: a gutter at the {side} edge ({gap}) wider than the dots' spacing ({})", dots.step);
+                    assert!(gap <= pitch + whole + 1.0, "zoom {z}, pan {k}: a gutter at the {side} edge ({gap}) wider than the dots' spacing ({pitch})");
                 }
-                // every dot near the bottom right that the corner's curve would cut is left out
-                let mut y = y1;
-                while y > h - corner - dots.step {
-                    let mut x = x1;
-                    while x > w - corner - dots.step {
-                        let (cx, cy) = ((x - (w - corner)).max(0.0), (y - (h - corner)).max(0.0));
-                        let cut = (cx * cx + cy * cy).sqrt() + whole + 0.5 > corner && cx > 0.0 && cy > 0.0;
-                        let left_out = dots.holes.iter().any(|b| x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]);
-                        assert!(!cut || left_out, "zoom {z}, pan {k}: the dot at {x}, {y} is cut by the window's corner");
-                        x -= dots.step;
-                    }
-                    y -= dots.step;
-                }
+                corner_whole(&dots, far, &format!("in Arrange, zoom {z}, pan {k}"));
             }
         }
+        // going into Arrange the dots stay where the ease ends, the devices settling onto them
+        let mut d = desk();
+        d.set_editing(true);
+        let start = laid(&d);
+        d.tick(Instant::now() + EASE / 2);
+        let mid = laid(&d);
+        d.tick(Instant::now() + EASE + FADE);
+        let end = laid(&d);
+        assert_eq!((start.ox, start.oy, start.step), (end.ox, end.oy, end.step), "held from the start");
+        assert_eq!((mid.ox, mid.oy), (end.ox, end.oy), "and through the ease");
     }
 
     /// A ripple runs in the light nearest where it starts: a key's own, the
