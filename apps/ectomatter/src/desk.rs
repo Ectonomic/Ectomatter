@@ -22,9 +22,11 @@ pub const PER_MM: f32 = 760.0 / 470.0;
 /// a dot at a time, `on_dots`).
 pub const SNAP: f32 = 24.0;
 /// At the fit, the dots' least margin from the window's edges; and at any
-/// view, how near the edge a dot may be.
+/// view, how near the edge a dot may be: as near as keeps it whole, lit and
+/// grown by a ring, with its soft edge, so the dots run to the edges with no
+/// gutter wider than their spacing (Grant, 2026-10-31).
 const EDGE: f32 = 24.0;
-const CULL: f32 = 16.0;
+const CULL: f32 = DOT_R + RING_GROW + 1.0;
 /// A dot's radius on the screen, whatever the zoom, and its white's opacity.
 /// The dots lie at half SNAP, at rest too; in edit mode every other one each
 /// way shows brighter.
@@ -913,8 +915,10 @@ impl Desk {
     /// pads, each with its picture as `pictures` has it read, the dots while
     /// they show (none under a device's name, `names`), and the highlight
     /// under the device the pointer is over, outside edit mode. `at` is where
-    /// the desk is in the window, in logical pixels.
-    pub fn decor(&self, at: (f32, f32), scale: f32, names: &[[f32; 4]], pictures: &dyn Fn(&str) -> Option<Arc<Photo>>) -> crate::picture::Decor {
+    /// the desk is in the window, in logical pixels; `corner`, the radius of
+    /// the window's corner at the desk's bottom right (0 when it's square), where
+    /// no dot goes that the corner's curve would cut.
+    pub fn decor(&self, at: (f32, f32), scale: f32, corner: f32, names: &[[f32; 4]], pictures: &dyn Fn(&str) -> Option<Arc<Photo>>) -> crate::picture::Decor {
         let (w, h) = self.size;
         let v = self.view;
         let s = |p: f32| p * scale;
@@ -937,7 +941,11 @@ impl Desk {
             snap_alpha: DOT_ALPHA * (1.0 + SNAP_LIFT * self.dots),
             over_pads: self.dots > 0.0,
             bounds: [s(at.0 + CULL), s(at.1 + CULL), s(at.0 + w - CULL), s(at.1 + h - CULL)],
-            holes: names.iter().map(|n| [s(at.0 + n[0] - 8.0), s(at.1 + n[1] - 6.0), s(at.0 + n[2] + 8.0), s(at.1 + n[3] + 6.0)]).collect(),
+            holes: names
+                .iter()
+                .map(|n| [s(at.0 + n[0] - 8.0), s(at.1 + n[1] - 6.0), s(at.0 + n[2] + 8.0), s(at.1 + n[3] + 6.0)])
+                .chain((corner > 0.0).then(|| [s(at.0 + w - corner), s(at.1 + h - corner), s(at.0 + w), s(at.1 + h)]))
+                .collect(),
             grow: s(RING_GROW),
             lit: RING_LIT,
             rings: self
@@ -1294,7 +1302,7 @@ mod tests {
         d.fit();
         let [x, y, w, h] = d.pad_screen(&d.pads[0]);
         assert!(x >= 0.0 && y >= 0.0 && x + w <= d.size.0 && y + h <= d.size.1, "on the window: {x} {y} {w} {h}");
-        let decor = d.decor((72.0, 36.0), 2.0, &[], &|_| None);
+        let decor = d.decor((72.0, 36.0), 2.0, 0.0, &[], &|_| None);
         assert_eq!(decor.pads.len(), 1);
         assert_eq!(decor.pads[0].bounds, [144.0, 72.0, 144.0 + 2.0 * d.size.0, 72.0 + 2.0 * d.size.1]);
         assert!((decor.pads[0].rect[0] - 2.0 * (72.0 + x)).abs() < 1e-3);
@@ -1302,7 +1310,7 @@ mod tests {
         d.draw_tool = true;
         d.press(None, (60.0, 60.0));
         d.moved((400.0, 300.0));
-        assert_eq!(d.decor((0.0, 0.0), 1.0, &[], &|_| None).pads.len(), 2, "the one being drawn too");
+        assert_eq!(d.decor((0.0, 0.0), 1.0, 0.0, &[], &|_| None).pads.len(), 2, "the one being drawn too");
         assert_eq!(d.pads_shown().iter().filter(|p| p.3).count(), 1);
     }
 
@@ -1404,7 +1412,7 @@ mod tests {
     #[test]
     fn a_press_sends_a_ripple_across_the_dots() {
         let mut d = desk();
-        let rest = d.decor((0.0, 0.0), 1.0, &[], &|_| None).dots.expect("the dots, at rest");
+        let rest = d.decor((0.0, 0.0), 1.0, 0.0, &[], &|_| None).dots.expect("the dots, at rest");
         assert!(rest.rings.is_empty());
         assert_eq!(rest.alpha, rest.snap_alpha, "at rest every dot alike");
         assert!(!rest.over_pads, "a pad covers them at rest");
@@ -1412,9 +1420,9 @@ mod tests {
         let t0 = Instant::now();
         assert!(d.rippling());
         d.tick(t0 + Duration::from_millis(300));
-        let early = d.decor((0.0, 0.0), 1.0, &[], &|_| None).dots.unwrap().rings[0].clone();
+        let early = d.decor((0.0, 0.0), 1.0, 0.0, &[], &|_| None).dots.unwrap().rings[0].clone();
         d.tick(t0 + Duration::from_millis(900));
-        let late = d.decor((0.0, 0.0), 1.0, &[], &|_| None).dots.unwrap().rings[0].clone();
+        let late = d.decor((0.0, 0.0), 1.0, 0.0, &[], &|_| None).dots.unwrap().rings[0].clone();
         assert!(late.radius > early.radius && late.strength < early.strength, "it runs out and fades");
         assert_eq!((early.x, early.y), (400.0, 300.0));
         assert!(early.color[0] > early.color[1], "in the key's light");
@@ -1428,8 +1436,47 @@ mod tests {
         // in Arrange, the dots devices snap onto, brighter, and over the pads
         d.set_editing(true);
         d.tick(Instant::now() + EASE + FADE);
-        let arranged = d.decor((0.0, 0.0), 1.0, &[], &|_| None).dots.unwrap();
+        let arranged = d.decor((0.0, 0.0), 1.0, 0.0, &[], &|_| None).dots.unwrap();
         assert!(arranged.snap_alpha > arranged.alpha && arranged.over_pads);
+    }
+
+    /// Wherever the desk is panned or zoomed, the dots run to its edges: no
+    /// gutter wider than their spacing and the room a lit dot needs to stay
+    /// whole (Grant, 2026-10-31, of a gutter a row and a column wide), none
+    /// cut by an edge, and none where the window's rounded corner would cut it.
+    #[test]
+    fn the_dots_run_to_the_edges_whole() {
+        let mut d = desk();
+        let (w, h) = d.size;
+        let corner = 10.0;
+        let whole = DOT_R + RING_GROW;
+        for z in [0.6, 1.0, 1.16, 2.5] {
+            for k in 0..48 {
+                d.view = View { z, px: 3.0 + k as f32 * 0.7, py: 5.0 + k as f32 * 0.45 };
+                let dots = d.decor((0.0, 0.0), 1.0, corner, &[], &|_| None).dots.unwrap();
+                let first = |o: f32, b: f32| o + ((b - o) / dots.step).ceil() * dots.step;
+                let last = |o: f32, b: f32| o + ((b - o) / dots.step).floor() * dots.step;
+                let (x0, y0) = (first(dots.ox, dots.bounds[0]), first(dots.oy, dots.bounds[1]));
+                let (x1, y1) = (last(dots.ox, dots.bounds[2]), last(dots.oy, dots.bounds[3]));
+                for (side, gap) in [("left", x0), ("top", y0), ("right", w - x1), ("bottom", h - y1)] {
+                    assert!(gap >= whole, "zoom {z}, pan {k}: a dot cut at the {side} edge ({gap})");
+                    assert!(gap <= dots.step + whole + 1.0, "zoom {z}, pan {k}: a gutter at the {side} edge ({gap}) wider than the dots' spacing ({})", dots.step);
+                }
+                // every dot near the bottom right that the corner's curve would cut is left out
+                let mut y = y1;
+                while y > h - corner - dots.step {
+                    let mut x = x1;
+                    while x > w - corner - dots.step {
+                        let (cx, cy) = ((x - (w - corner)).max(0.0), (y - (h - corner)).max(0.0));
+                        let cut = (cx * cx + cy * cy).sqrt() + whole + 0.5 > corner && cx > 0.0 && cy > 0.0;
+                        let left_out = dots.holes.iter().any(|b| x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]);
+                        assert!(!cut || left_out, "zoom {z}, pan {k}: the dot at {x}, {y} is cut by the window's corner");
+                        x -= dots.step;
+                    }
+                    y -= dots.step;
+                }
+            }
+        }
     }
 
     /// A ripple runs in the light nearest where it starts: a key's own, the

@@ -168,7 +168,7 @@ impl Front {
         let d = &self.desk;
         // each device's name, under it, for the dots to leave clear
         let names = self.desk_names();
-        d.decor((self.ui.get_desk_x(), self.ui.get_desk_y()), scale, &names, &|path| self.pad_photos.get(path).cloned())
+        d.decor((self.ui.get_desk_x(), self.ui.get_desk_y()), scale, self.ui.get_ground_radius(), &names, &|path| self.pad_photos.get(path).cloned())
     }
 
     /// Where each device's name is on the desk's room, under it (its words
