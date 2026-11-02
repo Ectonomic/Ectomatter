@@ -424,7 +424,7 @@ pub struct Games {
     /// the tab (0 Favorites, 1 Games, 2 Apps), what is typed in the find box,
     /// which store's games show, in which order
     pub tab: usize,
-    query: String,
+    pub query: String,
     shop: Shop,
     order: Order,
     /// the page of its own open: a game's or app's id, or Every game's

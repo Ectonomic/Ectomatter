@@ -6,7 +6,8 @@
 //! it stays where it is; started as at login (`--hide`), the new one stops
 //! without bringing it forward. The desktop's tray comes after it, as at
 //! login: its icon goes in, its menu has Open and Quit, a press on it with
-//! the window on the other desktop brings the window, and Quit quits.
+//! the window on the other desktop brings the window, a press with it in view
+//! opens it at Home again (each place at its first page), and Quit quits.
 //! Each program runs in a sandbox of its own
 //! with no devices (as in compositor.rs), Ectomatter with no cores or plugins
 //! and fresh folders. Needs `bwrap`, `kwin_wayland` and `dbus-daemon`.
@@ -217,6 +218,13 @@ fn ectomatter_runs_once_and_comes_to_the_desktop_its_opened_on() {
     assert!(until(20, || windows(&said()).len() >= 3), "a press on the tray's icon didn't bring the window:\n{}", said());
     let brought = windows(&said())[2].clone();
     assert_eq!(desktops(&bus, &brought), vec![here.clone()], "the tray's icon didn't bring the window to the desktop the person is on:\n{}", said());
+    // a press on the icon with the window in view opens it at Home too, every place at its
+    // first page (first_page.rs), as from out of sight (Grant: page resets include the tray)
+    let fresh = || said().matches("the window opens at Home").count();
+    let before = fresh();
+    let () = call(&bus, &item, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "Activate", &(0i32, 0i32));
+    assert!(until(10, || fresh() > before), "a press on the tray's icon with the window in view left it on its page:\n{}", said());
+    assert_eq!(windows(&said()).len(), 3, "the window in view was made again rather than raised:\n{}", said());
 
     // Quit, from the tray's menu: Ectomatter quits whole
     let () = call(&bus, &item, menu.as_str(), "com.canonical.dbusmenu", "Event", &(id_of("Quit Ectomatter").unwrap(), "clicked", zbus::wire::Variant::from(""), 0u32));

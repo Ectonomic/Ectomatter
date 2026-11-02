@@ -248,6 +248,58 @@ pub fn frame(look: &Look, real: f32, pokes: &[Poke], w: usize, h: usize) -> Vec<
     drawn(look, real, pokes, w, h, true)
 }
 
+/// A frame `w` by `h` (opaque RGBA) made `to_w` by `to_h`, each pixel blended from the four
+/// nearest it (bilinear), as a browser shows a picture on a screen denser than it was drawn
+/// for: smoother than Slint's software renderer stretching it, which repeats pixels, for
+/// about a ninth of the processor's time drawing the frame that big takes (blob_frame_time:
+/// 15 ms to enlarge a 1380 by 936 frame twice, 138 to draw it so).
+pub fn enlarged(src: &[u8], w: usize, h: usize, to_w: usize, to_h: usize) -> Vec<u8> {
+    let mut out = vec![0u8; to_w * to_h * 4];
+    if w == 0 || h == 0 || to_w == 0 || to_h == 0 {
+        return out;
+    }
+    // (for each place along, its two source pixels and the second's weight, in 256ths)
+    let along = |n: usize, to: usize| -> Vec<(usize, usize, u32)> {
+        (0..to)
+            .map(|i| {
+                let f = ((i as f32 + 0.5) * n as f32 / to as f32 - 0.5).clamp(0.0, (n - 1) as f32);
+                let a = f as usize;
+                (a, (a + 1).min(n - 1), ((f - a as f32) * 256.0).round() as u32)
+            })
+            .collect()
+    };
+    let (xs, ys) = (along(w, to_w), along(h, to_h));
+    // first across: each source row made `to_w` wide once, in 256ths of a level
+    let mut wide = vec![0u16; h * to_w * 4];
+    for (row, line) in src.chunks_exact(w * 4).zip(wide.chunks_exact_mut(to_w * 4)) {
+        for (o, &(a, b, f)) in line.chunks_exact_mut(4).zip(&xs) {
+            let (pa, pb) = (&row[a * 4..a * 4 + 4], &row[b * 4..b * 4 + 4]);
+            for c in 0..4 {
+                o[c] = ((pa[c] as u32 * (256 - f) + pb[c] as u32 * f) >> 4) as u16;
+            }
+        }
+    }
+    // then down, each row of the frame from the two widened rows nearest it
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(12);
+    let per = to_h.div_ceil(threads);
+    let wide = &wide;
+    std::thread::scope(|s| {
+        for (part, rows) in out.chunks_mut(per * to_w * 4).enumerate() {
+            let ys = &ys;
+            s.spawn(move || {
+                for (r, row) in rows.chunks_exact_mut(to_w * 4).enumerate() {
+                    let (a, b, f) = ys[part * per + r];
+                    let (top, bottom) = (&wide[a * to_w * 4..(a + 1) * to_w * 4], &wide[b * to_w * 4..(b + 1) * to_w * 4]);
+                    for ((o, &t), &u) in row.iter_mut().zip(top).zip(bottom) {
+                        *o = ((t as u32 * (256 - f) + u as u32 * f + 2048) >> 12) as u8;
+                    }
+                }
+            });
+        }
+    });
+    out
+}
+
 /// The points of a pixel along the outline looked at, to see how much of it the body
 /// covers, from its centre in sixteenths of a pixel: the standard pattern of 8x
 /// multisampling (Direct3D's and Vulkan's), spread so no two share a row or a column.
@@ -809,6 +861,41 @@ mod tests {
         assert!(jagged.is_empty(), "edges left jagged (at seconds: pixels more than 24 apart, the most): {jagged:?}");
     }
 
+    /// On a screen denser than the page's units the frame drawn a pixel to a unit is shown
+    /// smooth, not in steps: enlarged twice, it is nearer the frame drawn twice as big than
+    /// the same frame stretched as Slint's software renderer stretches it (each pixel
+    /// repeated), and as near at 1.5 times; it takes far less than drawing it that big.
+    #[test]
+    fn a_frame_for_a_denser_screen_is_enlarged_smoothly() {
+        let look = Look::about([0.094, 0.094, 0.106]);
+        let (w, h) = (276, 187);
+        for (k, real) in [(2.0, 4.0), (2.0, 76.0), (1.5, 52.0)] {
+            let (bw, bh) = ((w as f32 * k).round() as usize, (h as f32 * k).round() as usize);
+            let small = frame(&look, real, &[], w, h);
+            let truth = frame(&look, real, &[], bw, bh);
+            let smooth = enlarged(&small, w, h, bw, bh);
+            let mut stretched = vec![0u8; bw * bh * 4];
+            for y in 0..bh {
+                for x in 0..bw {
+                    let (sx, sy) = ((x * w / bw).min(w - 1), (y * h / bh).min(h - 1));
+                    stretched[(y * bw + x) * 4..(y * bw + x) * 4 + 4].copy_from_slice(&small[(sy * w + sx) * 4..(sy * w + sx) * 4 + 4]);
+                }
+            }
+            // (along the outline and the body's own edges: where the frame drawn big changes
+            // sharply from a pixel to the next, the steps a stretch makes show)
+            let lum = |a: &[u8], i: usize| a[i * 4] as f64 + a[i * 4 + 1] as f64 + a[i * 4 + 2] as f64;
+            let edge: Vec<usize> = (0..bh)
+                .flat_map(|y| (0..bw).map(move |x| (x, y)))
+                .filter(|&(x, y)| x + 1 < bw && y + 1 < bh && ((lum(&truth, y * bw + x) - lum(&truth, y * bw + x + 1)).abs() > 30.0 || (lum(&truth, y * bw + x) - lum(&truth, (y + 1) * bw + x)).abs() > 30.0))
+                .map(|(x, y)| y * bw + x)
+                .collect();
+            let off = |a: &[u8]| (edge.iter().map(|&i| (lum(a, i) - lum(&truth, i)).powi(2)).sum::<f64>() / edge.len().max(1) as f64).sqrt();
+            let (smooth_off, stretched_off) = (off(&smooth), off(&stretched));
+            assert!(edge.len() > 500, "{k}x at {real} s: too few edge pixels to tell ({})", edge.len());
+            assert!(smooth_off < stretched_off * 0.85, "{k}x at {real} s: along the edges enlarged {smooth_off:.2} off, stretched {stretched_off:.2}");
+        }
+    }
+
     /// How long a frame takes at About's sizes, to choose how big it's drawn:
     /// `cargo test --release blob_frame_time -- --ignored --nocapture`
     #[test]
@@ -829,5 +916,18 @@ mod tests {
             let wall = start.elapsed().as_secs_f64() * 100.0;
             println!("blob {w}x{h}: {wall:.1} ms a frame, {:.0} ms of the processor's time", (cpu() - used) / 10.0);
         }
+        // and enlarged for a 2x screen
+        let (w, h) = (1380, 936);
+        let small = frame(&look, 1.0, &[], w, h);
+        let cpu = || {
+            let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+            let f: Vec<f64> = stat.rsplit(')').next().unwrap_or("").split_whitespace().filter_map(|v| v.parse().ok()).collect();
+            (f.get(10).unwrap_or(&0.0) + f.get(11).unwrap_or(&0.0)) * 10.0
+        };
+        let (start, used) = (std::time::Instant::now(), cpu());
+        for _ in 0..10 {
+            let _ = enlarged(&small, w, h, 2 * w, 2 * h);
+        }
+        println!("blob {w}x{h} enlarged 2x: {:.1} ms, {:.0} ms of the processor's time", start.elapsed().as_secs_f64() * 100.0, (cpu() - used) / 10.0);
     }
 }

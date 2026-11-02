@@ -377,12 +377,11 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   Animation effects switch and macOS's Reduce motion aren't read: there,
   the Blob always moves.
 - The Blob is drawn a pixel to each of the page's units
-  (`front/about_page.rs`, `BLOB_PER_UNIT`) and Slint's software renderer
-  stretches an image without smoothing, so on a denser screen (1.5 or 2
-  pixels a unit) its outline steps in bigger pixels than the words beside
-  it. Drawn at the screen's own pixels it would cost two to four times the
-  processor's time (40 ms a frame for a 1380 by 936 page now,
-  `blob::tests::blob_frame_time`; 30 frames a second, about a core).
+  (`front/about_page.rs`, `BLOB_PER_UNIT`) and on a denser screen enlarged
+  to its pixels smoothly (`blob::enlarged`), a little softer than drawn that
+  big: drawn so, it would take 138 ms of the processor's time a frame at
+  2x, where enlarging takes 15 (`blob::tests::blob_frame_time`). It hasn't
+  been seen on a screen scaled above 1: the render tests draw at 1.
 - The mock's grain over the page (3.5%, overlaid) is left out: on the
   page's gray it changes a pixel by under one level.
 - The models' makers are known by the address their co-author lines carry,
@@ -443,9 +442,14 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   (RFC 3923, stabilized for Rust 1.100) is ignored by the 1.98.1 here. When
   Rust 1.100 is in, set it in the workspace's `.cargo/config.toml` so
   `cargo update` itself waits the week, and let `tools/fresh.py` read it.
-- The window's keys don't repeat while held (`shell/wayland.rs`,
-  `repeat_key`), as before; smithay-client-toolkit 0.21 hands a compositor's
-  repeats to the window, which takes the first press alone.
+- A key held repeats, at the desktop's delay and rate (`shell/wayland.rs`:
+  smithay-client-toolkit's `get_keyboard_with_repeat`, or the compositor's
+  own repeats on wl_keyboard 10; winit's `repeat` elsewhere), to what has
+  the keys alone (`session.rs`, `key_repeated`), never to Ectomatter's own
+  keys (undo, Escape, Delete on the desk, zoom, a key listened for).
+  `a_key_held_repeats_in_a_box_typed_in` holds what a repeat does in the
+  window; the shells' timing of repeats hasn't been tried with a key held
+  on a real keyboard here.
 - `tools/security.sh` was proven on the advisories it found; its sources
   rule (crates.io alone, `deny.toml` `[sources]`) hasn't been tried on a
   planted library from elsewhere.
@@ -453,19 +457,16 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 ## Each place at its first page (2026-10-29)
 
 - A main menu item opens its place at its first page (`src/front/first_page.rs`):
-  its first tab, nothing chosen, no menu, game's page or form open, the key
-  lists at their top with their groups shut. What's typed in a key list's
-  find box stays: the box's text is the window's own, not the page's, and
-  nothing here clears it.
-- The window opened afresh (from the tray, or Ectomatter opened again) starts
-  at Home (`open_fresh`, called from `shell/wayland.rs` `come_forward` and
-  `wait`, and `shell/winit.rs`); one the person can see, raised from the tray,
-  keeps its page. That it starts at Home is held only through the parts
-  `a_main_menu_item_opens_its_place_at_its_first_page` holds: no test opens
-  the window from the tray and looks at its page.
-- Settings no longer keeps its tab for the next run (`settings_tab` in
-  `uistate`); the key an Ectomatter before this one wrote stays in the file,
-  unread.
+  its first tab, nothing chosen, nothing typed in its find box and none typed
+  in, no menu, game's page or form open, the key lists at their top with
+  their groups shut.
+- The window brought forward (from the tray, or Ectomatter opened again)
+  opens at Home, one the person can see too (`open_fresh`, from
+  `shell/wayland.rs` `come_forward` and `wait`, and `shell/winit.rs`).
+  `tests/once.rs` holds that a press on the tray with the window in view
+  opens it afresh, by the line `open_fresh` logs; what afresh looks like is
+  held by `a_main_menu_item_opens_its_place_at_its_first_page`. No test
+  looks at the page a tray press leaves, in pixels.
 
 ## The Sensei 310's effects (2026-10-30)
 

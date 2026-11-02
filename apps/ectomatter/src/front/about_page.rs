@@ -11,7 +11,10 @@ const FIRST: usize = 3;
 
 /// The Blob's frame is drawn a pixel to each of the page's units, however dense the screen:
 /// a 1380 by 936 page's frame takes 40 ms of one core's time (src/blob.rs, blob_frame_time),
-/// 30 frames a second about one core; a denser screen shows it a little softer.
+/// 30 frames a second about one core; drawn at a 2x screen's own pixels it would take 140.
+/// On a denser screen it's enlarged to the screen's pixels, smoothly (blob::enlarged), a
+/// little softer than drawn that big, where Slint's software renderer would stretch it in
+/// steps.
 const BLOB_PER_UNIT: f32 = 1.0;
 
 /// About's own state: the credits (and their reading while they come, and whether they're
@@ -120,7 +123,9 @@ impl Front {
         let (pw, ph) = (self.ui.get_content_width(), self.ui.get_about_height());
         let per = scale.min(BLOB_PER_UNIT);
         let (w, h) = (((pw * per).round() as usize).max(1), ((ph * per).round() as usize).max(1));
-        if !moving && self.about.drawn == Some((w, h, false)) {
+        // (shown at the screen's own pixels: enlarged there, where it's denser)
+        let (sw, sh) = if scale > per { (((pw * scale).round() as usize).max(1), ((ph * scale).round() as usize).max(1)) } else { (w, h) };
+        if !moving && self.about.drawn == Some((sw, sh, false)) {
             return false;
         }
         let start = *self.about.since.get_or_insert_with(Instant::now);
@@ -131,10 +136,13 @@ impl Front {
         let look = crate::blob::Look::about(ground.map(|c| c as f32 / 255.0));
         // (held still, the Blob stands as it is a few seconds in, its highlight on it)
         let at = if moving { real.as_secs_f32() } else { 3.0 };
-        let px = crate::blob::frame(&look, at, &pokes, w, h);
-        let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&px, w as u32, h as u32);
+        let mut px = crate::blob::frame(&look, at, &pokes, w, h);
+        if (sw, sh) != (w, h) {
+            px = crate::blob::enlarged(&px, w, h, sw, sh);
+        }
+        let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&px, sw as u32, sh as u32);
         self.ui.set_about_blob(slint::Image::from_rgba8(buf));
-        self.about.drawn = Some((w, h, moving));
+        self.about.drawn = Some((sw, sh, moving));
         true
     }
 

@@ -737,6 +737,8 @@ export component AppWindow inherits Window {
     // the Key library
     in property <[LibGroup]> lib-groups;
     in-out property <string> lib-query;
+    // each new count stops typing in the pages' find boxes (a place put back at its first page)
+    in property <int> find-stop;
     callback lib-toggle(string);
     callback lib-find(string);
     // Game mode's keys
@@ -969,6 +971,7 @@ export component AppWindow inherits Window {
         // the tab's words, the mouse's picture (on Buttons with each button's
         // job beside it), and the tab's boxes
         mouse-page := MousePage {
+            find-stop: root.find-stop;
             visible: root.place == "mouse";
             boxes-resized() => { root.boxes-resized(); }
             cell-left(a0, a1, a2) => { root.cell-left(a0, a1, a2); }
@@ -1071,6 +1074,7 @@ export component AppWindow inherits Window {
         // game's or app's own page, and Every game's; its bar stays put over
         // what scrolls, as a device's does
         library-page := LibraryPage {
+            find-stop: root.find-stop;
             visible: root.place == "library";
             cell-left(a0, a1, a2) => { root.cell-left(a0, a1, a2); }
             cell-pick(a0, a1, a2, a3, a4, a5) => { root.cell-pick(a0, a1, a2, a3, a4, a5); }
@@ -1165,6 +1169,7 @@ export component AppWindow inherits Window {
         }
 
         keyboard-page := KeyboardPage {
+            find-stop: root.find-stop;
             visible: root.place == "keyboard";
             action-menu(a0, a1, a2, a3, a4) => { root.action-menu(a0, a1, a2, a3, a4); }
             area-hover(a0, a1) => { root.area-hover(a0, a1); }

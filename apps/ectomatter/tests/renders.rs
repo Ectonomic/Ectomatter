@@ -561,6 +561,10 @@ const RESETS: &[(Case, &str)] = &[
     (Case { name: "reset-keyboard-key", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416;30,122"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "kb-keys"),
     (Case { name: "reset-mouse", size: WIDE, set: &[("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_MOUSE_TAB", "1"), ("ECTOMATTER_CLICKS", "30,166"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "m-buttons"),
     (Case { name: "reset-library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "368,63;30,954"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "library"),
+    // (what's typed in a find box cleared too)
+    (Case { name: "reset-keyboard-find", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "620,784"), ("ECTOMATTER_TYPE", "zq"), ("ECTOMATTER_CLICKS_AFTER", "30,122"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "kb-keys"),
+    (Case { name: "reset-mouse-find", size: WIDE, set: &[("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_CLICKS", "600,711"), ("ECTOMATTER_TYPE", "zq"), ("ECTOMATTER_CLICKS_AFTER", "30,166"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "m-buttons"),
+    (Case { name: "reset-library-find", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "1030,122"), ("ECTOMATTER_TYPE", "zq"), ("ECTOMATTER_CLICKS_AFTER", "30,954"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "library"),
     (Case { name: "reset-home", size: WIDE, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_DESK", "edit"), ("ECTOMATTER_CLICKS", "30,66"), ("ECTOMATTER_POINTER_AWAY", "1"), ("ECTOMATTER_WAIT", "900")] }, "home"),
 ];
 

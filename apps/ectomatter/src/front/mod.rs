@@ -3298,6 +3298,37 @@ pub fn sync_cells(model: &VecModel<Cell>, rows: Vec<Cell>) {
 mod tests {
     use super::*;
 
+    /// A key held repeats in the box being typed in (a menu's search box here): its press and
+    /// the repeats the shells send while it's held (session.rs, `key_repeated`) type it over
+    /// and over.
+    #[test]
+    fn a_key_held_repeats_in_a_box_typed_in() {
+        struct Nowhere;
+        impl slint::platform::Platform for Nowhere {
+            fn create_window_adapter(&self) -> Result<std::rc::Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+                Ok(slint::platform::software_renderer::MinimalSoftwareWindow::new(slint::platform::software_renderer::RepaintBufferType::NewBuffer))
+            }
+        }
+        slint::platform::set_platform(Box::new(Nowhere)).expect("this test's own platform");
+        let ui = crate::AppWindow::new().unwrap();
+        let window = slint::ComponentHandle::window(&ui);
+        window.set_size(slint::LogicalSize::new(1440.0, 1028.0));
+        slint::ComponentHandle::show(&ui).unwrap();
+        window.dispatch_event(slint::platform::WindowEvent::WindowActiveChanged(true));
+        // (a menu open, its search box typed in, as a menu is searched)
+        ui.set_menu_open(true);
+        ui.set_menu_search(true);
+        slint::platform::update_timers_and_animations();
+        ui.invoke_focus_menu();
+        let z: slint::SharedString = "z".into();
+        window.dispatch_event(slint::platform::WindowEvent::KeyPressed { text: z.clone() });
+        for _ in 0..2 {
+            crate::shell::session::repeated(window, Some(z.clone()));
+        }
+        window.dispatch_event(slint::platform::WindowEvent::KeyReleased { text: z });
+        assert_eq!(ui.get_menu_query(), "zzz", "a press and two repeats");
+    }
+
     /// A jump down a page glides there, easing in and out, longer the
     /// farther it goes (Grant, 2026-11-02: "If I click a menu item that leads
     /// to a spot down the page, I want smooth scrolling to it"); a scroll of

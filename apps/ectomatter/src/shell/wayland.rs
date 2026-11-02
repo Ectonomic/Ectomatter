@@ -138,6 +138,9 @@ pub(crate) struct App {
     buffers: Vec<(Buffer, Vec<Rect>)>,
     pointer: Option<ThemedPointer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
+    /// the window's loop, where a held key's repeats are timed (the toolkit's own repeat, at
+    /// the desktop's delay and rate)
+    looped: calloop::LoopHandle<'static, App>,
     seat: Option<wl_seat::WlSeat>,
     /// the desktop's clipboard: its manager, the seat's device, the text
     /// Ectomatter offers on it, and the last key press's serial to offer it at
@@ -449,6 +452,7 @@ fn window(s: Session, conn: Connection, slot: &Slot, shown: bool) -> (Session, O
         buffers: Vec::new(),
         pointer: None,
         keyboard: None,
+        looped: event_loop.handle(),
         seat: None,
         data: DataDeviceManagerState::bind(&globals, &qh).ok(),
         data_device: None,
@@ -1000,17 +1004,15 @@ impl App {
     /// opened again): shown, if it was closed into the tray; made again, if the
     /// person can't see it (on another virtual desktop, or minimized), as a window
     /// just opened goes on the desktop and the screen they're on; and raised with
-    /// the press's activation token, where there is one. A window opened, or opened
-    /// again, starts at Home (first_page.rs); one the person can see is left as it is.
+    /// the press's activation token, where there is one. Whichever, it starts at
+    /// Home, every place at its first page (first_page.rs; Grant, 2026-10-29: page
+    /// resets "includes the tray icon"), one the person can see too.
     fn come_forward(&mut self, token: Option<String>) {
+        self.s.front.open_fresh();
         match forward(self.hidden, self.suspended) {
-            Forward::Show => {
-                self.s.front.open_fresh();
-                self.show();
-            }
+            Forward::Show => self.show(),
             Forward::Again => {
                 eprintln!("ectomatter: the window was out of sight, so it's opened again where the person is");
-                self.s.front.open_fresh();
                 self.unmap();
                 self.show();
             }
@@ -1105,6 +1107,11 @@ impl App {
         if self.s.key_in(self.keys_on, p) {
             self.open(session::Open::Lab);
         }
+    }
+
+    /// A key held, repeated (session.rs, `key_repeated`).
+    fn key_repeated(&mut self, e: &KeyEvent) {
+        self.s.key_repeated(self.keys_on, key_text(e));
     }
 }
 
@@ -1274,7 +1281,9 @@ impl SeatHandler for App {
             self.pointer = self.seats.get_pointer_with_theme::<_, ()>(qh, &seat, self.shm.wl_shm(), surface, ThemeSpec::default()).ok();
         }
         if capability == Capability::Keyboard && self.keyboard.is_none() {
-            self.keyboard = self.seats.get_keyboard(qh, &seat, None).ok();
+            // (a key held repeats, at the desktop's delay and rate: smithay-client-toolkit's own
+            // repeat, timed on the window's loop, or the compositor's on wl_keyboard 10)
+            self.keyboard = self.seats.get_keyboard_with_repeat(qh, &seat, None, self.looped.clone(), Box::new(|app: &mut App, _, e: KeyEvent| app.key_repeated(&e))).ok();
             self.data_device = self.data.as_ref().map(|d| d.get_data_device(qh, &seat));
         }
         self.seat = Some(seat);
@@ -1323,9 +1332,10 @@ impl KeyboardHandler for App {
     fn release_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
         self.key(&event, false);
     }
-    // (a key held repeats on the compositor's word only where it says so, wl_keyboard 10; the
-    // window has never repeated a held key, so it takes the first press alone, as before)
-    fn repeat_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, _: KeyEvent) {}
+    // (a key held, repeated by the compositor itself, wl_keyboard 10)
+    fn repeat_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
+        self.key_repeated(&event);
+    }
     fn update_modifiers(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, mods: Modifiers, _: RawModifiers, _: u32) {
         self.mods = mods;
     }

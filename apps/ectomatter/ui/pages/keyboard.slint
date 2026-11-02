@@ -99,6 +99,7 @@ export component KeyboardPage inherits Rectangle {
     callback lib-new(length, length);
     in property <[PlPage]> lib-pages;
     in-out property <string> lib-query;
+    in property <int> find-stop;
     in property <int> lib-reveal-n;
     in property <length> lib-reveal-y;
     callback lib-toggle(string);
@@ -333,6 +334,7 @@ export component KeyboardPage inherits Rectangle {
                 layer-chosen(i) => { root.layer-changed(i); }
                 groups: root.lib-groups;
                 query <=> root.lib-query;
+                find-stop: root.find-stop;
                 toggle(g) => { root.lib-toggle(g); }
                 find(t) => { root.lib-find(t); }
                 pick(id) => { if (id >= 0) { root.key-clicked(id); } else { root.slider-chosen-at(-id); } }

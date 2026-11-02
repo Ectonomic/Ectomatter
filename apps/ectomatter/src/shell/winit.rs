@@ -502,6 +502,11 @@ impl App {
     /// A key in one of Ectomatter's windows, the session's to take.
     fn key(&mut self, on: Option<usize>, event: &winit::event::KeyEvent) {
         use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+        // (a key held, repeated: to what has the keys alone, as on Wayland, session.rs)
+        if event.repeat && event.state == ElementState::Pressed {
+            self.s.key_repeated(on, key_text(&event.logical_key, &event.key_without_modifiers()));
+            return;
+        }
         let p = shell::Press {
             text: key_text(&event.logical_key, &event.key_without_modifiers()),
             code: key_code(&event.physical_key),
@@ -704,10 +709,10 @@ impl ApplicationHandler for App {
 
     fn user_event(&mut self, _: &ActiveEventLoop, (): ()) {
         self.poke = true;
-        // (the tray's own asks are the window's: shown, a device's page opened; a window
-        // out of sight opened afresh, at Home: first_page.rs)
+        // (the tray's own asks are the window's: shown, a device's page opened; the
+        // window opened afresh, at Home, whether or not it could be seen: first_page.rs)
         for a in self.s.take(self.scale() as f32) {
-            if self.shown.as_ref().is_some_and(|sh| sh.window.is_visible() != Some(true)) {
+            if matches!(a, tray::TrayAsk::Open(_) | tray::TrayAsk::Device(_)) {
                 self.s.front.open_fresh();
             }
             if let tray::TrayAsk::Device(d) = a {

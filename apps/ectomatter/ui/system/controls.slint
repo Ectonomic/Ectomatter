@@ -537,6 +537,9 @@ export component FieldBox inherits Rectangle {
     callback escape();
     public function start-typing() { field-in.focus(); }
     public function stop-typing() { field-in.clear-focus(); }
+    // each new count stops typing in it (its page put back at its first page)
+    in property <int> stop-n;
+    changed stop-n => { root.stop-typing(); }
     height: Size.control;
     border-radius: Radius.control;
     background: field-in.has-focus ? root.fill-typing : root.fill;

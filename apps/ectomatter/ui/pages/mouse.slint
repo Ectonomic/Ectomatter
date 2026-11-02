@@ -51,6 +51,7 @@ export component MousePage inherits Rectangle {
     callback mouse-lib-find(string);
     in property <[LibGroup]> mouse-lib-groups;
     in-out property <string> mouse-lib-query;
+    in property <int> find-stop;
     in property <int> mouse-lib-reveal-n;
     in property <length> mouse-lib-reveal-y;
     callback mouse-lib-toggle(string);
@@ -300,6 +301,7 @@ export component MousePage inherits Rectangle {
                 reveal-n: root.mouse-lib-reveal-n;
                 groups: root.mouse-lib-groups;
                 query <=> root.mouse-lib-query;
+                find-stop: root.find-stop;
                 toggle(g) => { root.mouse-lib-toggle(g); }
                 find(t) => { root.mouse-lib-find(t); }
                 pick(id) => { root.mouse-row(id); }

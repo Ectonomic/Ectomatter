@@ -447,6 +447,8 @@ export component KeyLibrary inherits PageBox {
         lib-flick.content-y = -max(0, min(root.reveal-y - 40px, lib-flick.content-height - lib-flick.height)); // art: the row a little under the list's top
     }
     in-out property <string> query;
+    // each new count stops typing in the find box
+    in property <int> find-stop;
     callback toggle(string);
     callback find(string);
     callback pick(int);
@@ -472,6 +474,7 @@ export component KeyLibrary inherits PageBox {
         width: parent.width - 2 * Space.pad;
         placeholder: root.placeholder;
         keeps-escape: false;
+        stop-n: root.find-stop;
         text <=> root.query;
         edited => { root.find(self.text); }
     }

@@ -36,6 +36,7 @@ export component LibraryPage inherits Rectangle {
     callback gl-play();
     in property <bool> gl-playable;
     in-out property <string> gl-query;
+    in property <int> find-stop;
     in property <bool> gl-removable;
     callback gl-remove();
     in property <string> gl-said;
@@ -96,6 +97,7 @@ export component LibraryPage inherits Rectangle {
                     glyph: Glyph.find;
                     placeholder: root.gl-find-hint;
                     text <=> root.gl-query;
+                    stop-n: root.find-stop;
                     edited => { root.gl-find(self.text); }
                     escape => { self.stop-typing(); }
                 }

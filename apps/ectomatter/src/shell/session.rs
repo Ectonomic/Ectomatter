@@ -139,6 +139,14 @@ pub(crate) struct Session {
     pub(crate) kept: Kept,
 }
 
+/// A key held, repeated, told to a window as Slint takes a repeat: what has the keys in it
+/// types it again, or moves on again.
+pub(crate) fn repeated(window: &slint::Window, text: Option<slint::SharedString>) {
+    if let Some(text) = text {
+        window.dispatch_event(WindowEvent::KeyPressRepeated { text });
+    }
+}
+
 impl Session {
     /// The light the keyboard is lit by: the lab's, if it has tuned
     /// one, or that of the setup in use (the core's, or one of the person's own).
@@ -1049,6 +1057,21 @@ impl Session {
             None => self.key(p),
         }
         false
+    }
+
+    /// A key held, repeated at the desktop's rate, in the window that has the keys: told to
+    /// what has the keys in it alone (a box typed in, a list moved through), as a held key
+    /// repeats in any program, and never to what Ectomatter does with a key itself (undo,
+    /// Escape, Delete on the desk, zoom, a key being listened for, the lab's shortcut), which
+    /// a key held would do over and over.
+    pub(crate) fn key_repeated(&mut self, on: Option<usize>, text: Option<slint::SharedString>) {
+        let window = match on {
+            Some(which) => self.windows[which].clone(),
+            None => Some(self.slint.clone()),
+        };
+        if let Some(w) = window {
+            repeated(w.window(), text);
+        }
     }
 
     /// A press in a window of its own, at (x, y), told to its page first (for
