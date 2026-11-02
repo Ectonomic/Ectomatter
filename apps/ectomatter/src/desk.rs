@@ -299,6 +299,16 @@ pub struct Desk {
     /// the ripples running, and the moment they're drawn at
     rings: Vec<Ring>,
     now: Instant,
+    /// the desk as it was when Arrange opened, while it's open: what Revert
+    /// puts back
+    start: Option<Arrangement>,
+}
+
+/// The desk as Arrange found it: each device's place, by its id, and the pads.
+#[derive(Clone, Debug, PartialEq)]
+struct Arrangement {
+    places: Vec<(String, f32, f32)>,
+    pads: Vec<Pad>,
 }
 
 /// A press's ripple: where it started, in the desk's logical pixels, the
@@ -334,8 +344,18 @@ impl Desk {
     pub fn new() -> Desk {
         // (the tests start from a desk nothing was kept for)
         let kept = if cfg!(test) { Vec::new() } else { Desk::saved() };
-        let pads = if cfg!(test) { Vec::new() } else { pads_of(&crate::uistate::get("desk_pads").unwrap_or_default()) };
-        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, entering: false, dots: 0.0, fade: None, changed: Instant::now(), kept, pads, pad_chosen: None, pad_hover: None, draw_tool: false, rings: Vec::new(), now: Instant::now() }
+        let saved_pads = if cfg!(test) { None } else { crate::uistate::get("desk_pads") };
+        let pads = pads_of(&saved_pads.clone().unwrap_or_default());
+        let desk = Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, entering: false, dots: 0.0, fade: None, changed: Instant::now(), kept, pads, pad_chosen: None, pad_hover: None, draw_tool: false, rings: Vec::new(), now: Instant::now(), start: None };
+        // (a picture of a pad's kept only while a pad shows it; one let go
+        // while Arrange was open waits for Done, and Ectomatter may have quit
+        // before it. Only with the pads read: none read isn't none shown.)
+        if !keeps_nothing() && saved_pads.is_some() {
+            for f in std::fs::read_dir(pictures_dir()).into_iter().flatten().flatten() {
+                desk.forget_picture(Some(f.path().to_string_lossy().to_string()));
+            }
+        }
+        desk
     }
 
     /// A ripple from a point of the desk (its logical pixels), in a light's
@@ -359,11 +379,17 @@ impl Desk {
         crate::uistate::set("desk_pads", pads_value(&self.pads));
     }
 
+    /// Whether a pad shows a picture, or did when Arrange opened, while it's
+    /// open (Revert may put it back).
+    fn shows(&self, path: &str) -> bool {
+        self.pads.iter().chain(self.start.iter().flat_map(|s| s.pads.iter())).any(|p| p.picture.as_deref() == Some(path))
+    }
+
     /// A picture no pad shows any more taken out of Ectomatter's data (only one
     /// Ectomatter kept there itself).
     pub fn forget_picture(&self, picture: Option<String>) {
         let Some(path) = picture else { return };
-        if keeps_nothing() || self.pads.iter().any(|p| p.picture.as_deref() == Some(path.as_str())) {
+        if keeps_nothing() || self.shows(&path) {
             return;
         }
         let path = PathBuf::from(path);
@@ -613,10 +639,57 @@ impl Desk {
         self.pad_chosen = None;
         self.pad_hover = None;
         self.draw_tool = false;
+        // (in, the desk as it is now, for Revert; out, the pictures it held
+        // that no pad shows any more let go)
+        if on {
+            self.start = Some(self.arrangement());
+        } else if let Some(s) = self.start.take() {
+            for p in s.pads.into_iter().filter_map(|p| p.picture) {
+                self.forget_picture(Some(p));
+            }
+        }
         self.fade = Some((Instant::now(), self.dots, if on { 1.0 } else { 0.0 }));
         // (in, the dots lined up as they come, the short way; out, the exact fit)
         self.ease_to(if on { self.aligned(self.view) } else { self.fitted_free() });
         self.entering = on;
+    }
+
+    /// Each device's place and the pads, as they are now.
+    fn arrangement(&self) -> Arrangement {
+        Arrangement { places: self.items.iter().map(|i| (i.id.clone(), i.x, i.y)).collect(), pads: self.pads.clone() }
+    }
+
+    /// Whether anything has changed on the desk since Arrange opened: a
+    /// device moved, or a pad added, taken off, moved, sized, colored or
+    /// given a picture or none.
+    pub fn can_revert(&self) -> bool {
+        let Some(s) = self.start.as_ref().filter(|_| self.editing) else { return false };
+        s.pads != self.pads || s.places.iter().any(|(id, x, y)| self.items.iter().any(|i| i.id == *id && (i.x, i.y) != (*x, *y)))
+    }
+
+    /// Revert, in Arrange: the desk put back as Arrange found it, each device
+    /// where it was and the pads as they were, and kept; Arrange stays open.
+    /// A picture only a pad added since showed is let go. (A device met while
+    /// Arrange was open keeps the place it was given.)
+    pub fn revert(&mut self) {
+        let Some(s) = self.start.clone().filter(|_| self.editing) else { return };
+        self.drag = None;
+        self.pressed = None;
+        self.pad_chosen = None;
+        self.pad_hover = None;
+        self.draw_tool = false;
+        for it in &mut self.items {
+            if let Some((_, x, y)) = s.places.iter().find(|(id, _, _)| *id == it.id) {
+                (it.x, it.y) = (*x, *y);
+            }
+        }
+        let shown: Vec<String> = self.pads.iter().filter_map(|p| p.picture.clone()).collect();
+        self.pads = s.pads;
+        self.save();
+        self.save_pads();
+        for p in shown {
+            self.forget_picture(Some(p));
+        }
     }
 
     pub fn animating(&self) -> bool {
@@ -1436,6 +1509,60 @@ mod tests {
         assert_eq!(d.view, d.fitted_free(), "back to the fit");
         assert_eq!(d.dots, 0.0, "the dots put away");
     }
+    /// Revert, in Arrange, puts the desk back as Arrange found it: every
+    /// device where it was and the pads as they were, whatever was done to
+    /// them since, and Arrange stays open. It can be pressed only once
+    /// something has changed, and again after more changes; outside
+    /// Arrange there's nothing to put back. A picture a pad had when Arrange
+    /// opened stays while it's open, though no pad shows it now, so Revert
+    /// can put it back; at Done it's let go.
+    #[test]
+    fn revert_puts_the_desk_back_as_arrange_found_it() {
+        let mut d = desk();
+        assert!(!d.can_revert(), "outside Arrange");
+        d.pads.push(Pad { x: 0.0, y: 0.0, w: 4.0 * SNAP, h: 4.0 * SNAP, color: [10, 20, 30], picture: Some("kept.png".into()) });
+        d.pads.push(Pad { x: 8.0 * SNAP, y: 0.0, w: 4.0 * SNAP, h: 4.0 * SNAP, color: PAD_COLOR, picture: None });
+        d.set_editing(true);
+        let (items, pads): (Vec<(f32, f32)>, Vec<Pad>) = (d.items.iter().map(|i| (i.x, i.y)).collect(), d.pads.clone());
+        assert!(!d.can_revert(), "nothing changed yet");
+        // a device carried, a pad drawn, one added at a maker's size, one
+        // given another color, one's picture taken off, one taken away
+        let [sx, sy, ..] = d.screen(1);
+        d.press(Some(1), (sx + 5.0, sy + 5.0));
+        d.moved((sx + 5.0 + 3.0 * SNAP * d.view.z, sy + 5.0 + 2.0 * SNAP * d.view.z));
+        d.release();
+        assert!(d.can_revert(), "a device moved");
+        d.draw_tool = true;
+        d.press(None, (20.0, 600.0));
+        d.moved((420.0, 900.0));
+        d.release();
+        d.add_pad(0);
+        d.pad_chosen = Some(1);
+        d.set_pad_color([200, 0, 0]);
+        let b = [d.pads[0].x, d.pads[0].y, d.pads[0].w, d.pads[0].h];
+        assert!(d.set_pad_picture(0, b, None));
+        assert!(d.shows("kept.png"), "the picture Arrange found is held while it's open");
+        d.pad_chosen = Some(1);
+        d.delete_pad();
+        d.pad_chosen = Some(0);
+        assert!(d.can_revert());
+        d.revert();
+        assert_eq!(d.items.iter().map(|i| (i.x, i.y)).collect::<Vec<_>>(), items, "every device where it was");
+        assert_eq!(d.pads, pads, "the pads as they were");
+        assert!(d.editing && !d.can_revert() && d.pad_chosen.is_none() && !d.draw_tool, "Arrange stays open, nothing chosen");
+        // changed again, it can be reverted again; at Done, nothing to revert
+        d.pad_chosen = Some(1);
+        d.set_pad_color([0, 0, 200]);
+        assert!(d.can_revert());
+        let b = [d.pads[0].x, d.pads[0].y, d.pads[0].w, d.pads[0].h];
+        assert!(d.set_pad_picture(0, b, None));
+        d.set_editing(false);
+        assert!(!d.can_revert(), "outside Arrange again");
+        assert!(!d.shows("kept.png"), "at Done, a picture no pad shows is let go");
+        d.revert();
+        assert_eq!(d.pads[1].color, [0, 0, 200], "Revert outside Arrange does nothing");
+    }
+
     /// A key's press sends a ring out across the dots: it runs out as it
     /// fades, and is gone after its run. The dots lie at rest too, a pad over
     /// them; in Arrange the ones devices snap onto show brighter, over the pads.

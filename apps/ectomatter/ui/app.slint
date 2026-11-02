@@ -673,6 +673,9 @@ export component AppWindow inherits Window {
     callback desk-wheel(length, length, length);
     callback desk-hover(int, bool);
     callback desk-arrange();
+    // Arrange's Revert, and whether there's anything for it to put back
+    callback desk-revert();
+    in property <bool> desk-can-revert;
     callback desk-done();
     callback desk-zoom-step(int);
     // the room the page's boxes have across, a device's page's and the mouse's
@@ -917,6 +920,7 @@ export component AppWindow inherits Window {
             board-ready: root.board-ready;
             desk-add-pad(a0, a1, a2) => { root.desk-add-pad(a0, a1, a2); }
             desk-arrange() => { root.desk-arrange(); }
+            desk-can-revert: root.desk-can-revert;
             desk-carrying: root.desk-carrying;
             desk-done() => { root.desk-done(); }
             desk-draw-cancel() => { root.desk-draw-cancel(); }
@@ -953,6 +957,7 @@ export component AppWindow inherits Window {
             desk-panning: root.desk-panning;
             desk-press(a0, a1, a2) => { root.desk-press(a0, a1, a2); }
             desk-release() => { root.desk-release(); }
+            desk-revert() => { root.desk-revert(); }
             desk-wheel(a0, a1, a2) => { root.desk-wheel(a0, a1, a2); }
             desk-zoom: root.desk-zoom;
             desk-zoom-step(a0) => { root.desk-zoom-step(a0); }

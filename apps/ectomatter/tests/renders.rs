@@ -53,6 +53,11 @@ const NARROW: (u32, u32) = (1000, 700);
 const SET_UP: &[Case] = &[
     Case { name: "home", size: WIDE, set: &[("ECTOMATTER_PLACE", "home")] },
     Case { name: "home-edit", size: WIDE, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_DESK", "edit")] },
+    // (Arrange at the narrowest window, a pad added from Add pad's menu and
+    // chosen: the bar at its widest, and Revert there to press)
+    Case { name: "n-home-edit-pad", size: NARROW, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_DESK", "edit"), ("ECTOMATTER_CLICKS", "596,67;600,171")] },
+    // (and Revert pressed: the pad gone, nothing chosen, Revert at rest)
+    Case { name: "n-home-edit-revert", size: NARROW, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_DESK", "edit"), ("ECTOMATTER_CLICKS", "596,67;600,171;726,66")] },
     Case { name: "kb-keys", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard")] },
     // (read, plugged in, and then not answering a read)
     Case { name: "kb-stopped", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_UNREAD", "no reply")] },

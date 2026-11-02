@@ -60,6 +60,7 @@ impl Front {
         ui.set_desk_drawing(d.editing && d.draw_tool);
         ui.set_desk_pad_note(self.pad_note.as_str().into());
         ui.set_desk_editing(d.editing);
+        ui.set_desk_can_revert(d.can_revert());
         self.show_rail();
         ui.set_desk_panning(d.panning());
         ui.set_desk_carrying(d.carrying());

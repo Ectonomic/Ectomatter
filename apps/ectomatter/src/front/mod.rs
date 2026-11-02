@@ -212,6 +212,8 @@ pub enum Ask {
     DeskWheel(f32, f32, f32),
     DeskHover(i32, bool),
     DeskArrange,
+    /// Arrange's Revert: the desk put back as Arrange found it
+    DeskRevert,
     DeskDone,
     DeskZoom(i32),
     DeskTick,
@@ -1119,6 +1121,7 @@ impl Front {
         on!(on_desk_hover, |i, on| Ask::DeskHover(i, on));
         on!(on_desk_arrange, Ask::DeskArrange);
         on!(on_desk_done, Ask::DeskDone);
+        on!(on_desk_revert, Ask::DeskRevert);
         on!(on_desk_zoom_step, |how| Ask::DeskZoom(how));
         on!(on_desk_pad_hover, |i, on| Ask::DeskPadHover(i, on));
         on!(on_desk_pad_edges, |e, x, y| Ask::DeskPadEdges(e, x, y));
@@ -2063,6 +2066,13 @@ impl Front {
                     changed = false;
                     self.desk.set_editing(false);
                     self.desk_frames_run();
+                    self.show_desk();
+                }
+                Ask::DeskRevert => {
+                    changed = false;
+                    self.close_picker();
+                    self.desk.revert();
+                    self.pad_note.clear();
                     self.show_desk();
                 }
                 Ask::DeskZoom(how) => {

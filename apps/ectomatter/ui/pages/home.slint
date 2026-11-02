@@ -14,6 +14,7 @@ export component HomePage inherits Rectangle {
     in property <bool> board-ready;
     callback desk-add-pad(length, length, length);
     callback desk-arrange();
+    in property <bool> desk-can-revert;
     in property <bool> desk-carrying;
     callback desk-done();
     callback desk-draw-cancel();
@@ -50,6 +51,7 @@ export component HomePage inherits Rectangle {
     in property <bool> desk-panning;
     callback desk-press(int, length, length);
     callback desk-release();
+    callback desk-revert();
     callback desk-wheel(length, length, length);
     in property <string> desk-zoom;
     callback desk-zoom-step(int);
@@ -385,7 +387,7 @@ export component HomePage inherits Rectangle {
             }
         }
     }
-    // edit mode: what to do and Done, on a bar of its own over the dots
+    // edit mode: what to do, Revert and Done, on a bar of its own over the dots
     if root.desk-editing: FloatBar {
         x: (parent.width - self.width) / 2;
         y: Space.row;
@@ -456,8 +458,17 @@ export component HomePage inherits Rectangle {
             color: Ink.bad;
             vertical-alignment: center;
         }
-        // (Done apart from the rest, Space.inline more)
+        // (Revert and Done apart from the rest, Space.inline more; Revert puts
+        // the desk back as Arrange found it, there in every state of the bar
+        // so Done never moves, and can be pressed once something has changed)
         if root.desk-pad-chosen >= 0: Rectangle { width: Space.inline; }
+        WordButton {
+            text: "Revert";
+            compact: true;
+            on-box: true;
+            enabled: root.desk-can-revert;
+            clicked => { root.desk-revert(); }
+        }
         WordButton {
             text: "Done";
             compact: true;
