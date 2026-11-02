@@ -995,14 +995,15 @@ impl Desk {
     }
 }
 
-/// Dots across a length `len`, about `pitch` apart, as they lie at rest: as
-/// far from each end as from each other, as if the next lay on the edge
-/// (Grant, 2026-11-01: "the gap at the edges to match the gap between
-/// dots"), the spacing made to fit by under half a dot over the length.
-/// Where the first lies, and the spacing (the same).
+/// Dots across a length `len`, about `pitch` apart, as they lie at rest: the
+/// open ground between an end and the nearest dot's edge as wide as between
+/// two dots (Grant, 2026-11-01: "the gap at the edges to match the gap
+/// between dots", then a dot's radius less "to accommodate the size of the
+/// dot"), the spacing made to fit by under half a dot over the length. Where
+/// the first lies, and the spacing.
 fn even(len: f32, pitch: f32) -> (f32, f32) {
-    let s = len / (len / pitch).round().max(2.0);
-    (s, s)
+    let s = (len + 2.0 * DOT_R) / ((len + 2.0 * DOT_R) / pitch).round().max(3.0);
+    (s - DOT_R, s)
 }
 
 /// A place in the desk's units, onto the nearest dot.
@@ -1471,8 +1472,8 @@ mod tests {
 
     /// The dots run to the desk's edges, whole, and none where the window's
     /// rounded corner would cut one (Grant, 2026-10-31, of a gutter a row and
-    /// a column wide). At rest each edge is as far from the dots as they are
-    /// from each other, all the way round (2026-11-01: "equal padding though
+    /// a column wide). At rest the open ground at each edge is as wide as
+    /// between the dots, all the way round (2026-11-01: "equal padding though
     /// all the way around", "the gap at the edges to match the gap between
     /// dots"); in Arrange, where devices snap onto them, at the snap
     /// spacing, moving with the desk, never a gutter wider than that spacing
@@ -1518,8 +1519,9 @@ mod tests {
                 let dots = laid(&d);
                 let (g, far) = gaps(&dots);
                 let [sx, sy] = dots.step;
+                // (the open ground: from the edge to a dot's edge, and between two dots)
                 for (gap, s) in g.iter().zip([sx, sy, sx, sy]) {
-                    assert!((gap - s).abs() < 0.01, "zoom {z}, pan {k}: at rest an edge's gap {g:?} isn't the dots' spacing {:?}", dots.step);
+                    assert!((gap - DOT_R - (s - 2.0 * DOT_R)).abs() < 0.01, "zoom {z}, pan {k}: at rest an edge's gap {g:?} isn't the gap between dots spaced {:?}", dots.step);
                 }
                 for s in dots.step {
                     assert!((s / pitch - 1.0).abs() < 0.01, "zoom {z}: spaced {s} against {pitch}");
