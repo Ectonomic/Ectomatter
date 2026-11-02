@@ -7,8 +7,5 @@ cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 for m in apps/ectomatter/tests/packages/*/module/Cargo.toml; do
   package=$(dirname "$(dirname "$m")")
-  cargo build --quiet --release --target wasm32-wasip2 --manifest-path "$m" --target-dir target/cores
-  name=$(sed -n 's/^name = "\(.*\)"/\1/p' "$m" | head -1 | tr - _)
-  cp "target/cores/wasm32-wasip2/release/$name.wasm" "$package/core.wasm"
-  echo "$package/core.wasm $(stat -c %s "$package/core.wasm") bytes"
+  tools/build-module.sh "$m" "$package/core.wasm"
 done

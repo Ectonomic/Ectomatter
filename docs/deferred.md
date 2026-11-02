@@ -296,13 +296,30 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - The list of packages Ectonomic reviewed (`registry/`, Grant's go
   2026-10-28) is published at Ectonomic/ectomatter-packages (Grant,
   2026-11-02: "Put it on GitHub now"), a copy of `registry/` made by hand:
-  nothing keeps the two the same, so a change here is pushed there too. The
-  list pins packages built on this computer (`tools/list-packages.py`);
-  none of Ectonomic's packages has a GitHub release yet (their repositories
-  are there, empty), so adding one from the list fails at its download
-  (`registry.rs`, `fetch`) and `registry/check.py` without `--releases`
-  fails on each of them. No pull request runs the check by itself: Ectonomic
-  runs it.
+  nothing keeps the two the same, so a change here is pushed there too. No
+  pull request runs the check by itself: Ectonomic runs it.
+- Each of Ectonomic's packages is published from its own repository
+  (Ectonomic/ectomatter-<folder>, Grant, 2026-11-02: "Lets publish all the
+  plugins and cores"), laid out by `tools/package-repos.py` and pushed by
+  hand: nothing keeps a package's repository in step with this one, so a
+  package's next version is laid out and pushed again.
+- A release's package is zipped from this repository's folder
+  (`tools/list-packages.py`, through `tools/release-package.py`) with the
+  module in it as it stands; for the releases of 2026-11-02 the modules were
+  built in the packages' own repositories and copied in first, by hand.
+  Built here, the same source gives five of the seven modules a few bytes
+  of another order of functions, and a copy of a package's repository in
+  another folder can do the same; built twice in one folder, a module comes
+  out the same. The cause isn't found (Cargo hashing a path dependency's
+  absolute folder into its symbols is the likely one; the flags' part of
+  it, rust-lang/cargo#6914, is why `tools/build-module.sh` passes its flags
+  as a compiler wrapper). So nobody can yet rebuild a release byte for byte
+  from its tag.
+- The Sensei 310's drawing (`cores/steelseries-sensei-310/art/sensei-310.svg`)
+  isn't committed here (untracked art waits for Grant's word): a fresh clone
+  of Ectomatter has no drawing for the mouse. Its released copy, with the
+  tracing photo and the guides it was drawn over taken out (2026-11-02), is
+  in Ectonomic/ectomatter-steelseries-sensei-310.
 - `registry/check.py` takes a release's files as given: nothing rebuilds a
   package from its repository's source to see the release is what that
   source makes. Nothing is signed either: the checksums pinned in the list
@@ -350,7 +367,9 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - The source beside each download: Ectomatter is under the GPLv3 (Grant,
   2026-10-27), which asks that
   directions to the source sit beside the program wherever it's offered
-  (GPLv3 section 6). Nothing is offered yet; a release needs them. Settings'
+  (GPLv3 section 6). Each package's release has its source in its own
+  repository, at the release's tag; Ectomatter's own isn't offered yet, and
+  a release of it needs them. Settings'
   About (`ui/pages/about.slint`) has no way to the source either; it gets
   one when the repository has it.
 - About's Read opens `LICENSE` and `NOTICES` as the desktop opens a file

@@ -35,17 +35,24 @@ interface in `wit/core.wit`:
 
 ```sh
 rustup target add wasm32-wasip2
-cargo build --release --target wasm32-wasip2 --manifest-path my-mouse/module/Cargo.toml
-cp my-mouse/module/target/wasm32-wasip2/release/my_mouse_core.wasm my-mouse/core.wasm
+tools/build-module.sh my-mouse/module/Cargo.toml my-mouse/core.wasm
 ```
 
-`tools/build-cores.sh` and `tools/build-plugins.sh` do this for every package
-in this repository. Put the folder in Ectomatter's own (`cores/` or
+`tools/build-module.sh` runs Cargo with the paths of the files the module
+is built from written short (this repository's folder as `.`, Cargo's as
+`cargo`): a module keeps them for its error messages, and built as it comes
+they'd be your own folders, your home folder among them, in every copy of
+your package. `tools/release-package.py` refuses a module that still holds
+them. `tools/build-cores.sh` and `tools/build-plugins.sh` build every package
+in this repository this way. Put the folder in Ectomatter's own (`cores/` or
 `plugins/`) and run Ectomatter from the source folder to try it, or add its
 file in Settings (Devices, Add a device core, then From an address or a file).
 
-For now a package builds only inside this repository: its module depends on
-the crate `ectomatter-protocol` by path (`docs/deferred.md`).
+A module depends on the crate `ectomatter-protocol` by path, so it builds
+inside this repository, or in a repository that carries the crate beside it
+as Ectonomic's packages do: each is its own repository, laid out as here
+(github.com/Ectonomic/ectomatter-evga-z10, for one, made by
+`tools/package-repos.py`).
 
 ## License
 

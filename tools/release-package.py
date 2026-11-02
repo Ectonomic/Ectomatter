@@ -66,6 +66,17 @@ def package(folder):
     return files
 
 
+# (what a drawing must not carry out into a release: a picture inside it, such
+# as the photo it was traced from, hidden or not, and anything its maker marked
+# to delete before shipping)
+UNSHIPPED = re.compile(rb'<image\b|before shipping', re.I)
+
+
+def unshipped(files):
+    """The package's drawings that still carry what a release mustn't."""
+    return [name for name, data in files.items() if name.lower().endswith('.svg') and UNSHIPPED.search(data)]
+
+
 def main(argv):
     if not argv or argv[0].startswith('-'):
         sys.exit(__doc__)
@@ -80,6 +91,15 @@ def main(argv):
     at.mkdir(parents=True, exist_ok=True)
     (at / 'core.json').write_text(text)
     files = {str(f.relative_to(folder)): f.read_bytes() for f in package(folder)}
+    held = unshipped(files)
+    # (a module built without tools/build-module.sh keeps the builder's folders
+    # in its error messages: the home folder, the folder it was built in)
+    builders = [str(Path.home()), str(folder.parent.parent)]
+    kept = [b for b in builders if b.encode() in files[m['module']]]
+    if kept:
+        sys.exit(f'release-package: {folder.name}\'s module holds the folder {kept[0]}; build it with tools/build-module.sh')
+    if held:
+        sys.exit(f'release-package: {", ".join(held)} in {folder.name} still holds a picture or a layer marked to delete before shipping')
     own = tomllib_license()
     if 'LICENSE' not in files and own and m.get('license') == own:
         files['LICENSE'] = (ROOT / 'LICENSE').read_bytes()

@@ -126,8 +126,13 @@ This is where they live in this repository.
   have; `check.py`, what every change to the list must pass (run by
   `tools/boundaries.sh` against release files made here); its README, how to
   send a package in. `tools/release-package.py` makes a package's release
-  files; `tools/list-packages.py` writes Ectomatter's own into the list after
-  a package changes. `docs/making-a-package.md` is for someone making one.
+  files, and refuses a drawing that still holds a picture or a layer marked
+  to delete before shipping, and a module holding the builder's folders
+  (build with `tools/build-module.sh`); `tools/list-packages.py` writes
+  Ectomatter's own into the list after a package changes;
+  `tools/package-repos.py` lays each of them out as its own repository,
+  Ectonomic/ectomatter-<folder>, where its releases are published.
+  `docs/making-a-package.md` is for someone making one.
 - **Libraries.** `tools/fresh.py` (run by `tools/boundaries.sh`; needs the
   network) holds every library Ectomatter and its packages name to its
   newest release a week old or more (a newer one is listed with its due
