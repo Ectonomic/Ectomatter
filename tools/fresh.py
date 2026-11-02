@@ -7,6 +7,13 @@ and every library under them at the newest their own needs allow (nothing
 `cargo update` would still move). A library held back by another that needs
 an older one isn't Ectomatter's to move: it's counted, not failed.
 
+A release under a week old isn't required yet (Grant, 2026-11-02): a week
+lets others find what's wrong with it first, as cargo's own
+registry.global-min-publish-age will (stable from Rust 1.100; RFC 3923).
+Until then the newest counted is the newest at least AGE old, by its
+publish time in crates.io's index; one newer is reported, with the day it's
+due, and doesn't fail the check.
+
 A dependency docs/deferred.md names as a known failure (its line
 "`tools/fresh.py` known failures:", each crate in backticks) is one whose
 move waits for work written down there: it's reported, and the check exits 3.
@@ -22,9 +29,13 @@ import re
 import subprocess
 import sys
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# how old a release must be before it's required
+AGE = timedelta(days=7)
+NOW = datetime.now(timezone.utc)
 # (cargo where rustup puts it, as the other tools here find it)
 os.environ["PATH"] = str(Path.home() / ".cargo" / "bin") + os.pathsep + os.environ.get("PATH", "")
 
@@ -47,8 +58,9 @@ def version(v):
     return tuple(nums + [0] * (3 - len(nums))), pre
 
 
-def newest(name, cache={}):
-    """The newest release crates.io has of `name`, from its index."""
+def releases(name, cache={}):
+    """Each release crates.io has of `name` (not yanked, not a pre-release),
+    and when it was published (None where the index doesn't say)."""
     if name in cache:
         return cache[name]
     n = name.lower()
@@ -56,9 +68,27 @@ def newest(name, cache={}):
     req = urllib.request.Request(f"https://index.crates.io/{path}", headers={"User-Agent": "ectomatter-fresh-check"})
     with urllib.request.urlopen(req, timeout=30) as r:
         lines = [json.loads(line) for line in r.read().decode().splitlines() if line.strip()]
-    releases = [e["vers"] for e in lines if not e.get("yanked") and not version(e["vers"])[1]]
-    cache[name] = max(releases, key=lambda v: version(v)[0]) if releases else None
+    when = lambda e: datetime.fromisoformat(e["pubtime"].replace("Z", "+00:00")) if e.get("pubtime") else None
+    cache[name] = {e["vers"]: when(e) for e in lines if not e.get("yanked") and not version(e["vers"])[1]}
     return cache[name]
+
+
+def due(published):
+    """When a release published then is required: AGE after it."""
+    return published + AGE if published else None
+
+
+def newest(name, now=None):
+    """The newest release of `name` old enough to be required, and the newest
+    of all where that's another, too new yet."""
+    now = now or NOW
+    rel = releases(name)
+    if not rel:
+        return None, None
+    top = max(rel, key=lambda v: version(v)[0])
+    ready = [v for v, t in rel.items() if t is None or t + AGE <= now]
+    old = max(ready, key=lambda v: version(v)[0]) if ready else None
+    return old, (top if top != old else None)
 
 
 def direct(manifest):
@@ -102,19 +132,37 @@ def main():
             name = "ectomatter"
         try:
             named = direct(manifest)
-            behind = []
+            behind, waiting = [], []
             for dep, locked in sorted(named.items()):
-                top = newest(dep)
+                top, young = newest(dep)
                 for v in sorted(locked, key=lambda v: version(v)[0]):
                     if listing:
-                        print(f"  {name}: {dep} {v} (newest {top})")
+                        print(f"  {name}: {dep} {v} (newest {top}" + (f"; {young} due {due(releases(dep)[young]):%Y-%m-%d})" if young else ")"))
                     if top and version(v)[0] < version(top)[0]:
                         behind.append((dep, v, top))
+                    if young and version(v)[0] < version(young)[0]:
+                        waiting.append(f"{dep} {young}, due {due(releases(dep)[young]):%Y-%m-%d}")
         except OSError as e:
             print(f"fresh: crates.io wasn't reached ({e})")
             return 2
         moves, held = pending(manifest)
         held_total += len(held)
+        # (a move to a release too new yet waits for its day, as the newest named does)
+        try:
+            ripe = []
+            for line in moves:
+                m = re.match(r"(?:Updating|Adding|Downgrading) (\S+) (?:v\S+ -> )?v(\S+)", line)
+                t = releases(m.group(1)).get(m.group(2)) if m else None
+                if t and t + AGE > NOW:
+                    waiting.append(f"{m.group(1)} {m.group(2)}, due {due(t):%Y-%m-%d}")
+                else:
+                    ripe.append(line)
+            moves = ripe
+        except OSError as e:
+            print(f"fresh: crates.io wasn't reached ({e})")
+            return 2
+        for w in sorted(set(waiting)):
+            print(f"fresh: {name}: under a week old, not required yet: {w}")
         for dep, v, top in behind:
             if dep in waits:
                 print(f"fresh: {name} is on {dep} {v}, and {top} is out (known failure, docs/deferred.md)")

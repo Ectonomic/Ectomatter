@@ -437,6 +437,12 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   legends (`crates/ectomatter-draw`) beside Slint's 0.12 and 0.44; resvg 0.49
   beside the 0.48 Slint builds with. A library held back by another isn't
   failed, only counted.
+- A release under a week old isn't required yet (Grant, 2026-11-02): the
+  week is `tools/fresh.py`'s own (`AGE`, from each release's publish time in
+  crates.io's index), because cargo's `registry.global-min-publish-age`
+  (RFC 3923, stabilized for Rust 1.100) is ignored by the 1.98.1 here. When
+  Rust 1.100 is in, set it in the workspace's `.cargo/config.toml` so
+  `cargo update` itself waits the week, and let `tools/fresh.py` read it.
 - The window's keys don't repeat while held (`shell/wayland.rs`,
   `repeat_key`), as before; smithay-client-toolkit 0.21 hands a compositor's
   repeats to the window, which takes the first press alone.

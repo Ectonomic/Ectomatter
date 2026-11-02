@@ -130,8 +130,8 @@ This is where they live in this repository.
   a package changes. `docs/making-a-package.md` is for someone making one.
 - **Libraries.** `tools/fresh.py` (run by `tools/boundaries.sh`; needs the
   network) holds every library Ectomatter and its packages name to its
-  newest release, and everything under them to what `cargo update` can
-  reach; `tools/security.sh` (the same; needs cargo-deny) holds them to
+  newest release a week old or more (a newer one is listed with its due
+  day), and everything under them to what `cargo update` can reach; `tools/security.sh` (the same; needs cargo-deny) holds them to
   RustSec's advisories and to crates.io alone (`deny.toml`, `[advisories]`
   and `[sources]`). A library or advisory whose fix waits is a known
   failure named in `docs/deferred.md`.
