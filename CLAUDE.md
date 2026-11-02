@@ -124,14 +124,19 @@ This is where they live in this repository.
   Ectonomic reviewed (to be its own repository, Ectonomic/ectomatter-packages):
   `packages.json`, each version's manifest and the checksum its package must
   have; `check.py`, what every change to the list must pass (run by
-  `tools/boundaries.sh` against release files made here); its README, how to
+  `tools/boundaries.sh` against the releases on GitHub); its README, how to
   send a package in. `tools/release-package.py` makes a package's release
   files, and refuses a drawing that still holds a picture or a layer marked
   to delete before shipping, and a module holding the builder's folders
   (build with `tools/build-module.sh`); `tools/list-packages.py` writes
   Ectomatter's own into the list after a package changes;
   `tools/package-repos.py` lays each of them out as its own repository,
-  Ectonomic/ectomatter-<folder>, where its releases are published.
+  Ectonomic/ectomatter-<folder>, where its releases are published;
+  `tools/released.py` holds each package here to its release's source, so
+  one changed without a new version fails; and
+  `every_package_is_added_from_its_release_on_github` (`registry.rs`) adds
+  each from the list and its release on GitHub and starts it (all three run
+  by `tools/boundaries.sh`, and need the network).
   `docs/making-a-package.md` is for someone making one.
 - **Libraries.** `tools/fresh.py` (run by `tools/boundaries.sh`; needs the
   network) holds every library Ectomatter and its packages name to its

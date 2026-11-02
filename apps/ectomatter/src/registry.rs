@@ -159,6 +159,46 @@ mod tests {
         }
     }
 
+    /// Every package that comes with Ectomatter is added from the list on
+    /// GitHub as a stranger's Ectomatter adds it: the list read from its
+    /// address, the package downloaded from its release and taken as it was
+    /// reviewed, put in a folder of its own, and started there, with no
+    /// device, speaking this Ectomatter's protocol. The packages are named
+    /// by their own manifests here.
+    #[test]
+    #[ignore = "needs the network: tools/boundaries.sh runs it"]
+    fn every_package_is_added_from_its_release_on_github() {
+        let _one = crate::updates::tests::GITHUB.lock().unwrap_or_else(|p| p.into_inner());
+        // (the real list and the real releases, not a test's)
+        unsafe {
+            std::env::remove_var("ECTOMATTER_GITHUB");
+            std::env::remove_var("ECTOMATTER_REGISTRY");
+        }
+        let list: Value = serde_json::from_slice(&crate::updates::get(&address()).expect("the list on GitHub")).unwrap();
+        let listed = of(&list).unwrap();
+        let into = std::env::temp_dir().join(format!("ectomatter-registry-live-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&into);
+        let mut added = 0;
+        for dir in [crate::cores::dir(), crate::cores::plugins_dir()] {
+            for e in std::fs::read_dir(dir).unwrap().flatten().filter(|e| e.path().join("core.json").is_file()) {
+                let own = ectomatter_draw::jsonc::parse(&std::fs::read_to_string(e.path().join("core.json")).unwrap()).unwrap();
+                let id = own["id"].as_str().unwrap().to_string();
+                let l = listed.iter().find(|l| l.id() == id).unwrap_or_else(|| panic!("{id} isn't on the list on GitHub"));
+                let m = install(l, &into).unwrap_or_else(|e| panic!("{id} wasn't added from its release: {e}"));
+                assert_eq!(m.id, id);
+                let at = into.join(&id).join(l.version());
+                let data = into.join(format!("{id}-data"));
+                let core = crate::core_host::Core::start_within(&at, data, Box::new(crate::core_host::NoDevices), None, crate::core_host::Limits::default())
+                    .unwrap_or_else(|e| panic!("{id} as added doesn't start: {e}"));
+                crate::core_host::initialize_within(&core, Value::Null, Duration::from_secs(30)).unwrap_or_else(|e| panic!("{id} as added doesn't answer: {e}"));
+                let _ = core.call_within("shutdown", &Value::Null, Duration::from_secs(10));
+                added += 1;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&into);
+        assert!(added >= 2, "only {added} packages found here");
+    }
+
     /// A package from the list is taken only as it was reviewed: a package
     /// that doesn't match the checksum the list pins isn't, even with its
     /// release's own checksum right, nor one whose manifest isn't the list's.
