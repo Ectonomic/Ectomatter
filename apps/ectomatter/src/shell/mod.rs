@@ -114,6 +114,7 @@ mod tests {
 pub type Rect = (usize, usize, usize, usize);
 
 pub mod session;
+pub mod wheel;
 #[cfg(target_os = "linux")]
 pub mod wayland;
 pub mod winit;

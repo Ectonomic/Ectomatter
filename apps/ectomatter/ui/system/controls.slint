@@ -301,6 +301,53 @@ export component ScrollBar inherits Rectangle {
     }
 }
 
+// A scroll that glides to a place down its page, as a browser scrolls to a
+// link on its own page: easing in and out, longer the farther it goes (the
+// square root of the distance in pixels, in sixtieths of a second, as
+// Chromium times a scroll it plays itself; 0.15 s at least, 0.7 s at most).
+// `now` is how far the area is scrolled; `at` is told each place on the way.
+// Scrolled any other way while it glides (the wheel, the scrollbar), away
+// from where it last put it, it lets go. (A wheel's own steps the window's
+// loop eases, shell/wheel.rs.)
+export component Glide {
+    in property <length> now;
+    callback at(length);
+    out property <bool> on;
+    property <length> from;
+    property <length> to;
+    property <length> last;
+    property <float> k: 1;
+    property <duration> span: 0ms;
+    animate k { duration: root.span; easing: ease-in-out; }
+    changed k => {
+        if (root.on) {
+            if (root.now != root.last) {
+                root.on = false;
+            } else {
+                root.last = root.from + (root.to - root.from) * root.k;
+                root.at(root.last);
+                if (root.k >= 1) {
+                    root.on = false;
+                }
+            }
+        }
+    }
+    public function go(to: length) {
+        root.on = false;
+        root.span = 0ms;
+        root.k = 0;
+        root.from = root.now;
+        root.last = root.now;
+        root.to = to;
+        root.span = max(150ms, min(700ms, 1000ms * sqrt(abs(to - root.now) / 1px) / 60));
+        root.on = true;
+        root.k = 1;
+    }
+    public function stop() {
+        root.on = false;
+    }
+}
+
 // a number or code in the color picker, its name under it
 export component PickField inherits VerticalLayout {
     in-out property <string> value;

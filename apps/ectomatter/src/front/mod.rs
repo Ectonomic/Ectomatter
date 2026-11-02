@@ -3298,6 +3298,104 @@ pub fn sync_cells(model: &VecModel<Cell>, rows: Vec<Cell>) {
 mod tests {
     use super::*;
 
+    /// A jump down a page glides there, easing in and out, longer the
+    /// farther it goes (Grant, 2026-11-02: "If I click a menu item that leads
+    /// to a spot down the page, I want smooth scrolling to it"); a scroll of
+    /// the person's own lets it go; a page opened at its top opens there at
+    /// once; the wheel's own steps ease too. Settings' jump (to its Sensor
+    /// Feed box) and the Library's (On this page) both, on the window itself,
+    /// its clock stepped by hand.
+    #[test]
+    fn a_jump_down_a_page_glides_there() {
+        thread_local!(static NOW: std::cell::Cell<u64> = const { std::cell::Cell::new(0) });
+        struct Clock;
+        impl slint::platform::Platform for Clock {
+            fn create_window_adapter(&self) -> Result<std::rc::Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+                Ok(slint::platform::software_renderer::MinimalSoftwareWindow::new(slint::platform::software_renderer::RepaintBufferType::NewBuffer))
+            }
+            fn duration_since_start(&self) -> std::time::Duration {
+                std::time::Duration::from_millis(NOW.with(|n| n.get()))
+            }
+        }
+        slint::platform::set_platform(Box::new(Clock)).expect("this test's own clock");
+        let at = |ms: u64| {
+            NOW.with(|n| n.set(ms));
+            slint::platform::update_timers_and_animations();
+        };
+        let ui = crate::AppWindow::new().unwrap();
+        slint::ComponentHandle::window(&ui).set_size(slint::LogicalSize::new(1440.0, 1028.0));
+        ui.set_place("settings".into());
+        ui.set_settings_h(5000.0);
+        at(1000);
+        let down = |ui: &crate::AppWindow| -ui.get_settings_scroll();
+        // the jump: it starts where the page is, moves slowly, then fast, then slowly in
+        ui.set_settings_goto(-1.0);
+        ui.set_settings_goto(1200.0);
+        at(1000);
+        let mut way = vec![down(&ui)];
+        for t in (1050..=1800).step_by(50) {
+            at(t);
+            way.push(down(&ui));
+        }
+        assert!(way[0] < 1.0, "it didn't jump: {way:?}");
+        assert!(way.windows(2).all(|w| w[1] >= w[0]), "only on down: {way:?}");
+        assert!((way[way.len() - 1] - 1200.0).abs() < 0.5, "it gets there: {way:?}");
+        // (about 0.58 s for 1200 pixels: under half way at a fifth of it, there before 0.6 s)
+        let done = way.iter().position(|y| (y - 1200.0).abs() < 0.5).unwrap();
+        assert!((10..=12).contains(&done), "there in about 0.58 s, not {} ms: {way:?}", done * 50);
+        let steps: Vec<f32> = way.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(steps[0] < steps[5] && steps[9] < steps[5], "easing in and out: {steps:?}");
+        // a short one is quicker (0.15 s at the least)
+        ui.set_settings_goto(-1.0);
+        ui.set_settings_goto(1220.0);
+        at(1810);
+        at(1960);
+        assert!((down(&ui) - 1220.0).abs() < 0.5, "a short glide: {}", down(&ui));
+        // the person's own scroll while it glides lets it go
+        ui.set_settings_goto(-1.0);
+        ui.set_settings_goto(3000.0);
+        at(2000);
+        at(2150);
+        let was = down(&ui);
+        slint::ComponentHandle::window(&ui).dispatch_event(slint::platform::WindowEvent::PointerMoved { position: slint::LogicalPosition::new(700.0, 600.0) });
+        slint::ComponentHandle::window(&ui).dispatch_event(slint::platform::WindowEvent::PointerScrolled { position: slint::LogicalPosition::new(700.0, 600.0), delta_x: 0.0, delta_y: 40.0 });
+        for t in (2200..=3000).step_by(50) {
+            at(t);
+        }
+        assert!((down(&ui) - (was - 40.0)).abs() < 0.5, "let go where the wheel took it, 40 up from {was}: {}", down(&ui));
+        // a tab opened: its top, at once
+        ui.set_settings_goto(-1.0);
+        ui.set_settings_goto(0.0);
+        at(3010);
+        assert_eq!(down(&ui), 0.0, "at once");
+        // and a wheel's step eases too, sent a frame at a time as the window's loop
+        // sends it (shell/wheel.rs: a scroll Ectomatter sends Slint is taken at once)
+        let t0 = std::time::Instant::now();
+        let mut wheel = crate::shell::wheel::Wheel::default();
+        wheel.step([0.0, -100.0], t0);
+        let mut way = Vec::new();
+        for f in 1..=14u64 {
+            if let Some(d) = wheel.due(t0 + std::time::Duration::from_millis(16 * f)) {
+                slint::ComponentHandle::window(&ui).dispatch_event(slint::platform::WindowEvent::PointerScrolled { position: slint::LogicalPosition::new(700.0, 600.0), delta_x: d[0], delta_y: d[1] });
+            }
+            at(3020 + 16 * f);
+            way.push(down(&ui));
+        }
+        assert!(way[0] > 0.0 && way[0] < 30.0 && (way[way.len() - 1] - 100.0).abs() < 0.5, "the wheel eases down: {way:?}");
+        // the Library's On this page: the same glide
+        ui.set_place("library".into());
+        ui.set_gl_page_h(5000.0);
+        at(3300);
+        let lib = |ui: &crate::AppWindow| ui.get_gl_scroll();
+        ui.set_gl_jump_y(400.0);
+        ui.set_gl_jump_n(1);
+        at(3300);
+        at(3400);
+        let mid = lib(&ui);
+        at(4300);
+        assert!(mid > 0.0 && mid < 400.0 && (lib(&ui) - 400.0).abs() < 0.5, "the Library glides too: {mid}, then {}", lib(&ui));
+    }
+
     /// A keyboard that can't be read is said to be unplugged, not to be opened,
     /// or not answering, as the system shows it; the core's words where it can't.
     #[test]

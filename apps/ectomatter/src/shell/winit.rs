@@ -48,6 +48,8 @@ struct Sub {
     slint: Rc<MinimalSoftwareWindow>,
     px: Vec<PremultipliedRgbaColor>,
     at: (f64, f64),
+    /// the wheel's steps running out over the window (shell/wheel.rs)
+    wheel: super::wheel::Wheel,
     held: bool,
     hidden: bool,
     full: bool,
@@ -69,6 +71,8 @@ struct App {
     /// the pointer's place in the window's logical pixels, and the modifiers held
     at: (f64, f64),
     mods: ModifiersState,
+    /// the wheel's steps running out over the main window (shell/wheel.rs)
+    wheel: super::wheel::Wheel,
     /// the desktop's white, for SDR and for the frame's encoding; the
     /// screen's peak, for how bright the keys' light may go; and the nits
     /// at scRGB's 1.0 (80 on Windows, the screen's white on macOS)
@@ -98,7 +102,7 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
     // (the system's own clipboard, the shell having none of its own)
     clipboard::use_system();
     let session = Session::start(slint, made, ui, settings, reference, gain, &wake);
-    let mut app = App { s: session, shown: None, subs: [None, None, None], soft: None, keys_on: None, lab_asked: std::env::var_os("ECTOMATTER_OPEN_LAB").is_some(), open_macros: std::env::var("ECTOMATTER_OPEN_MACROS").ok().and_then(|v| v.parse().ok()), at: (0.0, 0.0), mods: ModifiersState::default(), reference, peak: 1000.0, unit: 80.0, exit: false, poke: true, redraw_asked: false, occluded: false, fps: std::env::var_os("ECTOMATTER_FPS").map(|_| (Instant::now(), 0, Duration::ZERO)) };
+    let mut app = App { s: session, shown: None, subs: [None, None, None], soft: None, keys_on: None, lab_asked: std::env::var_os("ECTOMATTER_OPEN_LAB").is_some(), open_macros: std::env::var("ECTOMATTER_OPEN_MACROS").ok().and_then(|v| v.parse().ok()), at: (0.0, 0.0), mods: ModifiersState::default(), wheel: Default::default(), reference, peak: 1000.0, unit: 80.0, exit: false, poke: true, redraw_asked: false, occluded: false, fps: std::env::var_os("ECTOMATTER_FPS").map(|_| (Instant::now(), 0, Duration::ZERO)) };
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("ectomatter: the window's loop stopped: {e}");
     }
@@ -351,7 +355,7 @@ impl App {
                         let px = window.inner_size();
                         slint.set_size(PhysicalSize::new(px.width.max(1), px.height.max(1)));
                         window.request_redraw();
-                        self.subs[which] = Some(Sub { window, surface, slint, px: Vec::new(), at: (0.0, 0.0), held: false, hidden: false, full: true });
+                        self.subs[which] = Some(Sub { window, surface, slint, px: Vec::new(), at: (0.0, 0.0), wheel: Default::default(), held: false, hidden: false, full: true });
                     }
                     Err(e) => eprintln!("ectomatter: a window of its own couldn't be made: {e}"),
                 }
@@ -482,8 +486,12 @@ impl App {
             }
             Event::MouseWheel { delta, .. } => {
                 let (dx, dy) = scroll(delta, scale);
-                let position = LogicalPosition::new(sw.at.0 as f32, sw.at.1 as f32);
-                sw.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: dx, delta_y: dy });
+                if matches!(delta, MouseScrollDelta::LineDelta(..)) {
+                    sw.wheel.step([dx, dy], Instant::now());
+                } else {
+                    let position = LogicalPosition::new(sw.at.0 as f32, sw.at.1 as f32);
+                    sw.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: dx, delta_y: dy });
+                }
             }
             Event::ModifiersChanged(m) => self.mods = m.state(),
             Event::KeyboardInput { event, .. } => self.key(Some(which), &event),
@@ -775,8 +783,13 @@ impl ApplicationHandler for App {
             }
             Event::MouseWheel { delta, .. } => {
                 let (dx, dy) = scroll(delta, scale);
-                let position = LogicalPosition::new(self.at.0 as f32, self.at.1 as f32);
-                self.s.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: dx, delta_y: dy });
+                // (a wheel's steps eased, shell/wheel.rs; a touchpad's pixels as they come)
+                if matches!(delta, MouseScrollDelta::LineDelta(..)) {
+                    self.wheel.step([dx, dy], Instant::now());
+                } else {
+                    let position = LogicalPosition::new(self.at.0 as f32, self.at.1 as f32);
+                    self.s.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: dx, delta_y: dy });
+                }
             }
             Event::ModifiersChanged(m) => self.mods = m.state(),
             Event::KeyboardInput { event, .. } => self.key(None, &event),
@@ -794,6 +807,18 @@ impl ApplicationHandler for App {
             el.exit();
             return;
         }
+        // what the wheel's steps have due over each window, scrolled where the pointer is
+        let now = Instant::now();
+        if let Some(d) = self.wheel.due(now) {
+            let position = LogicalPosition::new(self.at.0 as f32, self.at.1 as f32);
+            self.s.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: d[0], delta_y: d[1] });
+        }
+        for sw in self.subs.iter_mut().flatten() {
+            if let Some(d) = sw.wheel.due(now) {
+                let position = LogicalPosition::new(sw.at.0 as f32, sw.at.1 as f32);
+                sw.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: d[0], delta_y: d[1] });
+            }
+        }
         slint::platform::update_timers_and_animations();
         // (Ectomatter's own macros don't wait for the keyboard)
         if let Some(n) = self.open_macros.filter(|_| macro_lib() == macros::Lib::Ectomatter || self.s.front.page.dev.is_some()) {
@@ -806,7 +831,7 @@ impl ApplicationHandler for App {
         }
         self.act(el);
         // each window of its own drawn again where Slint has something new for it
-        for sw in self.subs.iter().flatten().filter(|sw| !sw.hidden && (sw.slint.pending() || sw.slint.has_active_animations())) {
+        for sw in self.subs.iter().flatten().filter(|sw| !sw.hidden && (sw.slint.pending() || sw.slint.has_active_animations() || sw.wheel.running())) {
             sw.window.request_redraw();
         }
         // a lighting effect's next frame, 30 a second; Slint's timers; or
@@ -815,7 +840,7 @@ impl ApplicationHandler for App {
         // waited on: the system gives the frame when it can.
         let shows = !self.occluded && !self.redraw_asked;
         let effect = (self.s.front.animated() && shows).then(|| self.s.effect_due.saturating_duration_since(Instant::now()));
-        let animating = self.s.slint.has_active_animations() && shows;
+        let animating = (self.s.slint.has_active_animations() || self.wheel.running() || self.subs.iter().flatten().any(|sw| sw.wheel.running())) && shows;
         // drawn again only for what may have changed: input or a wake, the
         // page asking to be, an animation running, an effect's frame due
         let due = self.poke || self.s.slint.pending() || animating || effect.is_some_and(|e| e.is_zero());

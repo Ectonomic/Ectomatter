@@ -29,7 +29,7 @@ import "../../../crates/ectomatter-draw/typefaces/JetBrainsMono.ttf";
 import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 export { Ink }
 // The design system's parts (ui/system/), which every page is built from.
-import { ColorSquare, DialogHead, FormLabel, FormNote, FormWarning, CarryChip, ScreenBay, FormDialog, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn, PackageItem, PackageRow } from "system/system.slint";
+import { ColorSquare, DialogHead, FormLabel, FormNote, FormWarning, CarryChip, ScreenBay, FormDialog, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, Glide, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn, PackageItem, PackageRow } from "system/system.slint";
 export { Typing, MenuRow, Cell, LaidBox, ProfileItem }
 
 // The rows and items the pages are handed, and the page parts drawn from them (pages/shared.slint).
@@ -113,7 +113,7 @@ export component AppWindow inherits Window {
     callback gl-toc-jump(int);
     // (a jump from On this page: the section near the top, as far as the page goes)
     changed gl-jump-n => {
-        library-page.gl-flick-content-y = -max(0, min(root.gl-jump-y, library-page.gl-flick-content-height - library-page.gl-flick-height));
+        gl-glide.go(max(0, min(root.gl-jump-y, library-page.gl-flick-content-height - library-page.gl-flick-height)));
     }
     // the form for a script (gl-modal 3): its words, what's typed into it, its choices
     in property <string> gl-script-title;
@@ -287,11 +287,15 @@ export component AppWindow inherits Window {
     in property <length> about-more-w;
     callback about-credits-close();
     out property <length> settings-scroll: settings-page.set-flick-content-y;
-    // Settings scrolled to a place on its page (its Sensor Feed box), as far as it scrolls
+    // Settings scrolled to a place on its page (its Sensor Feed box), as far as it
+    // scrolls, gliding there; to its top (a tab opened), at once
     in property <length> settings-goto: -1px;
     changed settings-goto => {
-        if (root.settings-goto >= 0) {
-            settings-page.set-flick-content-y = -min(root.settings-goto, max(0px, root.settings-h - settings-page.set-flick-height));
+        if (root.settings-goto == 0) {
+            set-glide.stop();
+            settings-page.set-flick-content-y = 0;
+        } else if (root.settings-goto > 0) {
+            set-glide.go(min(root.settings-goto, max(0px, root.settings-h - settings-page.set-flick-height)));
         }
     }
     // the keyboard is showing the page's preview
@@ -1465,6 +1469,17 @@ export component AppWindow inherits Window {
     sink := FocusScope {
         width: 0;
         height: 0;
+    }
+
+    // a jump down the Library's page (On this page) and Settings' (to its Sensor Feed
+    // box), gliding there
+    gl-glide := Glide {
+        now: -library-page.gl-flick-content-y;
+        at(y) => { library-page.gl-flick-content-y = -y; }
+    }
+    set-glide := Glide {
+        now: -settings-page.set-flick-content-y;
+        at(y) => { settings-page.set-flick-content-y = -y; }
     }
 
     // Each page's scrollbar runs beside what scrolls and nothing else: under

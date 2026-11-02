@@ -150,7 +150,7 @@ In `ui/system/`, each drawn once:
   it sets, up to a small plain knob; `notch` marks its middle, `saved` where a
   value was saved once it has moved), `Tag`,
   `ColorButton`, `ColorSquare`, `Fold` (a heading that opens and shuts),
-  `ScrollBar`, `Spinner`, `PickField`, `SmallCap`, `StripIcon`, `PlayButton`,
+  `ScrollBar`, `Glide` (a jump down a page, glided to), `Spinner`, `PickField`, `SmallCap`, `StripIcon`, `PlayButton`,
   and `Glyph` (the app's own glyphs).
 - **lists**: `ListBox`, `ListRow`, `AnchorColumn`, `AnchorRow`, `AnchorHead`
   (every heading in capitals over a list), `RailItem`.

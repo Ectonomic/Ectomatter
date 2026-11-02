@@ -32,7 +32,7 @@ use smithay_client_toolkit::{
     registry_handlers,
     seat::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
-        pointer::{CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer},
+        pointer::{AxisScroll, CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer},
         Capability, SeatHandler, SeatState,
     },
     shell::{
@@ -163,6 +163,8 @@ pub(crate) struct App {
     /// another of Ectomatter's windows brings the main one forward
     activation: Option<ActivationState>,
     at: (f64, f64),
+    /// the wheel's steps running out over the window (shell/wheel.rs)
+    wheel: super::wheel::Wheel,
     ready: bool,
     failed: Option<String>,
     /// color management: the picture's description on the surface, each
@@ -218,6 +220,8 @@ pub(crate) struct SubWin {
     buffers: Vec<(Buffer, Vec<Rect>)>,
     px: Vec<PremultipliedRgbaColor>,
     at: (f64, f64),
+    /// the wheel's steps running out over the window (shell/wheel.rs)
+    wheel: super::wheel::Wheel,
     /// the pointer is over the window, and a button is held down on it
     inside: bool,
     held: bool,
@@ -462,6 +466,7 @@ fn window(s: Session, conn: Connection, slot: &Slot, shown: bool) -> (Session, O
         press: 0,
         activation: ActivationState::bind(&globals, &qh).ok(),
         at: (0.0, 0.0),
+        wheel: Default::default(),
         ready: false,
         failed: None,
         cm,
@@ -521,8 +526,8 @@ fn window(s: Session, conn: Connection, slot: &Slot, shown: bool) -> (Session, O
             app.exit = true;
             break;
         }
-        let busy = (app.s.slint.has_active_animations() && !app.frame_pending)
-            || app.subs.iter().flatten().any(|m| !m.hidden && m.slint.has_active_animations() && !m.frame_pending);
+        let busy = ((app.s.slint.has_active_animations() || app.wheel.running()) && !app.frame_pending)
+            || app.subs.iter().flatten().any(|m| !m.hidden && (m.slint.has_active_animations() || m.wheel.running()) && !m.frame_pending);
         // a lighting effect's next frame, 30 a second; none while the window is
         // closed into the tray, where it is not drawn
         let effect = (app.s.front.animated() && !app.frame_pending && !app.hidden).then(|| app.s.effect_due.saturating_duration_since(Instant::now()));
@@ -534,6 +539,7 @@ fn window(s: Session, conn: Connection, slot: &Slot, shown: bool) -> (Session, O
         if event_loop.dispatch(wait, &mut app).is_err() {
             return app.lost();
         }
+        app.wheel_due();
         slint::platform::update_timers_and_animations();
         // closed into a tray that isn't there (none on this desktop, or gone a
         // while): shown, as there's no other way back to it
@@ -582,7 +588,34 @@ fn window(s: Session, conn: Connection, slot: &Slot, shown: bool) -> (Session, O
     (app.s, None)
 }
 
+/// Whether a scroll comes from a wheel, whose steps are eased (shell/wheel.rs),
+/// rather than a touchpad's or a knob's run, smooth already: its source says,
+/// or without one (an older compositor), its counted clicks.
+fn a_wheel(source: Option<wl_pointer::AxisSource>, h: &AxisScroll, v: &AxisScroll) -> bool {
+    match source {
+        Some(wl_pointer::AxisSource::Wheel | wl_pointer::AxisSource::WheelTilt) => true,
+        Some(_) => false,
+        None => h.discrete != 0 || v.discrete != 0 || h.value120 != 0 || v.value120 != 0,
+    }
+}
+
 impl App {
+    /// What the wheel's steps have due over each window, scrolled where the
+    /// pointer is.
+    fn wheel_due(&mut self) {
+        let now = Instant::now();
+        if let Some(d) = self.wheel.due(now) {
+            let position = LogicalPosition::new(self.at.0 as f32, self.at.1 as f32);
+            self.s.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: d[0], delta_y: d[1] });
+        }
+        for mw in self.subs.iter_mut().flatten() {
+            if let Some(d) = mw.wheel.due(now) {
+                let position = LogicalPosition::new(mw.at.0 as f32, mw.at.1 as f32);
+                mw.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: d[0], delta_y: d[1] });
+            }
+        }
+    }
+
     /// What Ectomatter's threads have told the window, taken in; and what
     /// the tray asks of the window itself.
     fn take(&mut self) {
@@ -695,7 +728,7 @@ impl App {
         let window = self._xdg.create_window(surface, WindowDecorations::RequestClient, &self.qh);
         name(&window, title, min);
         window.commit();
-        SubWin { window, slint, size, margins: Margins::default(), scale: 1, configured: false, maximized: false, frame_pending: false, hidden: false, full: true, buffers: Vec::new(), px: Vec::new(), at: (0.0, 0.0), inside: false, held: false }
+        SubWin { window, slint, size, margins: Margins::default(), scale: 1, configured: false, maximized: false, frame_pending: false, hidden: false, full: true, buffers: Vec::new(), px: Vec::new(), at: (0.0, 0.0), wheel: Default::default(), inside: false, held: false }
     }
 
     /// Show a window of its own again, as it was.
@@ -855,11 +888,14 @@ impl App {
                 // now, the hand that was dragging shows what is under it the moment it lets go)
                 mw.slint.dispatch_event(WindowEvent::PointerMoved { position });
             }
-            PointerEventKind::Axis { horizontal, vertical, .. } => mw.slint.dispatch_event(WindowEvent::PointerScrolled {
-                position,
-                delta_x: -horizontal.absolute as f32,
-                delta_y: -vertical.absolute as f32,
-            }),
+            PointerEventKind::Axis { horizontal, vertical, source, .. } => {
+                let d = [-horizontal.absolute as f32, -vertical.absolute as f32];
+                if a_wheel(source, &horizontal, &vertical) {
+                    mw.wheel.step(d, Instant::now());
+                } else {
+                    mw.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: d[0], delta_y: d[1] });
+                }
+            }
         }
         let icon = edge_cursor(edge(mw.size, mw.margins, mw.maximized, sx, sy)).unwrap_or(mw.slint.pointer());
         self.set_cursor(icon);
@@ -1346,12 +1382,13 @@ impl PointerHandler for App {
                     // (the cursor asked for again at once: see sub_pointer)
                     self.s.slint.dispatch_event(WindowEvent::PointerMoved { position });
                 }
-                PointerEventKind::Axis { horizontal, vertical, .. } => {
-                    self.s.slint.dispatch_event(WindowEvent::PointerScrolled {
-                        position,
-                        delta_x: -horizontal.absolute as f32,
-                        delta_y: -vertical.absolute as f32,
-                    });
+                PointerEventKind::Axis { horizontal, vertical, source, .. } => {
+                    let d = [-horizontal.absolute as f32, -vertical.absolute as f32];
+                    if a_wheel(source, &horizontal, &vertical) {
+                        self.wheel.step(d, Instant::now());
+                    } else {
+                        self.s.slint.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: d[0], delta_y: d[1] });
+                    }
                 }
             }
             // the cursor: resizing at the edges, the hand over what can be clicked
@@ -1762,5 +1799,17 @@ mod key_tests {
         assert_eq!(key(Keysym::c, Some("c")).as_deref(), Some("c"), "c");
         assert_eq!(key(Keysym::C, Some("C")).as_deref(), Some("C"), "Shift+C");
         assert_eq!(key(Keysym::c, None).as_deref(), Some("c"), "c let go");
+    }
+
+    /// A wheel's steps are eased; a touchpad's run, and a knob's, go as
+    /// they come; without a source, a scroll with counted clicks is a wheel's.
+    #[test]
+    fn a_wheel_is_told_from_a_touchpad() {
+        use wl_pointer::AxisSource;
+        let (none, mut click) = (AxisScroll::default(), AxisScroll::default());
+        click.value120 = 120;
+        assert!(a_wheel(Some(AxisSource::Wheel), &none, &click) && a_wheel(Some(AxisSource::WheelTilt), &click, &none));
+        assert!(!a_wheel(Some(AxisSource::Finger), &none, &none) && !a_wheel(Some(AxisSource::Continuous), &none, &none));
+        assert!(a_wheel(None, &none, &click) && !a_wheel(None, &none, &none));
     }
 }
