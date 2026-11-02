@@ -330,10 +330,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   dialog (`ui/app.slint`, `gl-modal == 6`).
 - Adding a package from the list runs untested past choosing it: the renders
   draw the list and a package chosen (`add-core`), and the parts are tested
-  on their own (`registry.rs`, `permission.rs`), but nothing presses Add and
-  follows the package in and the password prompt.
+  on their own (`registry.rs`, `permission.rs`; each package added from its
+  real release on GitHub and started: `every_package_is_added_from_its_release_on_github`),
+  but nothing presses Add in the dialog and follows the package in and the
+  password prompt.
 - No template repository for someone making a package: `docs/making-a-package.md`
-  points at the packages in this repository.
+  points at the packages in this repository and at Ectonomic's own
+  package repositories.
 - `tools/install.sh` lays Ectomatter out under a prefix (its programs, its
   packages as installed, a desktop entry and its icon, udev's rule made from
   the cores' manifests, the licenses), tried by `tests/install.rs`, and
