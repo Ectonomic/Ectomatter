@@ -294,13 +294,15 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   only.
 
 - The list of packages Ectonomic reviewed (`registry/`, Grant's go
-  2026-10-28) isn't published: its repository, Ectonomic/ectomatter-packages,
-  doesn't exist, so Add a device core and Add a plugin say Ectomatter can't read the
-  list (`front/package_browser.rs`) until it does, and the daily check finds
-  no listed versions (`updates.rs`, `check_all`). The list pins packages
-  built on this computer (`tools/list-packages.py`); none of Ectonomic's
-  packages has a GitHub release yet, so `registry/check.py` without
-  `--releases` fails on each of them.
+  2026-10-28) is published at Ectonomic/ectomatter-packages (Grant,
+  2026-11-02: "Put it on GitHub now"), a copy of `registry/` made by hand:
+  nothing keeps the two the same, so a change here is pushed there too. The
+  list pins packages built on this computer (`tools/list-packages.py`);
+  none of Ectonomic's packages has a GitHub release yet (their repositories
+  are there, empty), so adding one from the list fails at its download
+  (`registry.rs`, `fetch`) and `registry/check.py` without `--releases`
+  fails on each of them. No pull request runs the check by itself: Ectonomic
+  runs it.
 - `registry/check.py` takes a release's files as given: nothing rebuilds a
   package from its repository's source to see the release is what that
   source makes. Nothing is signed either: the checksums pinned in the list
@@ -474,10 +476,12 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   `cycle`): its cycle is started by every button, all eight bits of the
   light report's buttons byte set (`protocol.rs`, `light`, byte 21 of the
   header, rivalcfg's "triggers"). That lit the logo on a click on Grant's
-  mouse (2026-10-30). Which bit is which button hasn't been tried, so
-  Reactive can't yet be set to some buttons alone, as SteelSeries Engine's
-  Trigger could: finding out writes to the mouse, a button at a time, and
-  waits for Grant's go.
+  mouse (2026-10-30). Which bit is which button isn't known, so Reactive
+  can't be set to some buttons alone, as SteelSeries Engine's Trigger could.
+  A test to find out was started and set aside on Grant's word (2026-11-02:
+  "Restore the lights, skip the test"); both lights were put back to Static
+  #FF1000, unsaved. `trigger-test/round.py` in the session's scratch did it:
+  each light flashing on a mask of bits, two rounds to tell eight buttons.
 - Between presses the mouse is taken to rest on the cycle's last color (the
   background): seen only with a dark background, where resting dark and
   resting on the last color look the same.
