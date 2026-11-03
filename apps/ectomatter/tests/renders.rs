@@ -137,6 +137,8 @@ const SHOWCASE: &[Case] = &[
     Case { name: "readme-library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "296,63"), ("ECTOMATTER_LIBRARY", SHOWN_LIBRARY)] },
     Case { name: "readme-game", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_LIBRARY_PAGE", "steam_app_1091500"), ("ECTOMATTER_LIBRARY", SHOWN_LIBRARY), ("ECTOMATTER_WAIT", "1500")] },
     Case { name: "readme-plugins", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "plugins")] },
+    Case { name: "readme-keyboard-lab.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1")] },
+    Case { name: "readme-mouse-lab.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "mouse")] },
 ];
 
 /// Where the showcase's Library is in the sandbox (`Desk::showcase` writes it;
@@ -503,8 +505,10 @@ impl Desk {
         put(&d.join("states/mouse.json"), &shown_mouse().to_string());
         desk.steam = at.join("home/.local/share/Steam");
         desk.states = Some((at.join("states/keyboard.json"), at.join("states/mouse.json")));
-        // (a desk mat under the keyboard and the mouse, as most desks have)
-        put(&d.join("pads.json"), &serde_json::json!([{ "x": -72.0, "y": -48.0, "w": 1200.0, "h": 456.0, "color": "#272A31" }]).to_string());
+        // (a desk mat under the keyboard and the mouse, as most desks have, with
+        // a photo on it: tests/renders/showcase/pad.jpg, CC0, REUSE.toml)
+        let photo = Path::new(SOURCE).join("apps/ectomatter/tests/renders/showcase/pad.jpg");
+        put(&d.join("pads.json"), &serde_json::json!([{ "x": -72.0, "y": -48.0, "w": 1200.0, "h": 456.0, "color": "#272A31", "picture": photo }]).to_string());
         desk.pads = Some(at.join("pads.json"));
         desk
     }
@@ -681,30 +685,39 @@ fn the_readmes_pictures_are_the_app_as_it_is() {
     assert!(wrong.is_empty(), "pictures that came out otherwise:\n  {}", wrong.join("\n  "));
 }
 
-/// The frames of the README's moving picture (`tools/readme-hero.sh` makes
-/// it from them): the showcase's desk at Home, the keyboard's wave at each
-/// moment of one turn (ECTOMATTER_LIGHT_AT), into target/readme-hero/.
+/// The README's moving pictures (`tools/readme-moving.sh` makes each one
+/// from its frames): the showcase desk's Home, the keyboard's Lighting page
+/// and its Keys page, each at every moment of one turn of the keyboard's wave
+/// (ECTOMATTER_LIGHT_AT), into target/readme-moving/<name>/.
+const MOVING: &[(&str, &[(&str, &str)])] = &[
+    ("readme-hero", &[("ECTOMATTER_PLACE", "home")]),
+    ("readme-lighting", &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")]),
+    ("readme-keys", &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416")]),
+];
+
 #[test]
-#[ignore = "makes the README's moving picture's frames: tools/readme-hero.sh runs it"]
-fn the_readmes_moving_picture() {
+#[ignore = "makes the README's moving pictures' frames: tools/readme-moving.sh runs it"]
+fn the_readmes_moving_pictures() {
     built();
     let desk = Desk::showcase();
-    let frames: u32 = std::env::var("ECTOMATTER_HERO_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+    let frames: u32 = std::env::var("ECTOMATTER_MOVING_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(64);
     let turn = 4000;
-    let out = repo().join("target/readme-hero");
+    let out = repo().join("target/readme-moving");
     let _ = std::fs::remove_dir_all(&out);
-    let times: Vec<String> = (0..frames).map(|n| (n * turn / frames).to_string()).collect();
+    let jobs: Vec<(&str, &[(&str, &str)], u32)> = MOVING.iter().flat_map(|(name, set)| (0..frames).map(move |n| (*name, *set, n * turn / frames))).collect();
     std::thread::scope(|s| {
-        for group in times.chunks(4) {
+        for group in jobs.chunks(4) {
             let handles: Vec<_> = group
                 .iter()
-                .map(|ms| {
+                .map(|(name, set, ms)| {
                     let (desk, out) = (&desk, &out);
                     s.spawn(move || {
-                        let set: &'static [(&'static str, &'static str)] = Box::leak(vec![("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_LIGHT_AT", Box::leak(ms.clone().into_boxed_str()) as &str)].into_boxed_slice());
-                        let case = Case { name: "hero", size: WIDE, set };
+                        let at: &'static str = Box::leak(ms.to_string().into_boxed_str());
+                        let mut all: Vec<(&'static str, &'static str)> = set.iter().map(|(k, v)| (*k, *v)).collect();
+                        all.push(("ECTOMATTER_LIGHT_AT", at));
+                        let case = Case { name: Box::leak(name.to_string().into_boxed_str()), size: WIDE, set: Box::leak(all.into_boxed_slice()) };
                         let (picture, _) = desk.draw(&case, &format!("-{ms}")).unwrap();
-                        picture.write_png(&out.join(format!("frame-{:05}.png", ms.parse::<u32>().unwrap())));
+                        picture.write_png(&out.join(name).join(format!("frame-{ms:05}.png")));
                     })
                 })
                 .collect();

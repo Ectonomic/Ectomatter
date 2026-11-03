@@ -20,7 +20,7 @@
 <br>
 
 <p align="center">
-  <img src="docs/pictures/readme-hero.webp" width="100%" alt="Ectomatter's Home: a keyboard with a wave of orange and teal rolling across its keys, beside a mouse with its logo lit teal">
+  <img src="docs/pictures/readme-hero.webp" width="100%" alt="Ectomatter's Home: a keyboard with a wave of orange and teal rolling across its keys and a mouse with its logo lit teal, on a desk mat printed with mountains at sunset">
 </p>
 
 Keyboards, mice and the rest of a desk usually each come with their maker's
@@ -29,7 +29,7 @@ own app. Ectomatter is one app for all of them.
 A device comes in as a **core**, a small package that knows how to talk to
 it. The core describes its device (its picture, its keys, its lights and
 effects, its screen, its settings), and Ectomatter does the rest: it draws the
-device's pages, keeps its profiles and macros, plays it in scenes with
+device's pages, its lights in HDR, keeps its profiles and macros, plays it in scenes with
 everything else on the desk, and switches it for each game. **Plugins** bring
 in what isn't a device: your games, your monitors, other programs, the
 weather.
@@ -76,7 +76,24 @@ Every effect a device offers, each with its colors, brightness and speed,
 across the whole device or the zones you pick, played on the device's own
 picture as it plays on the device.
 
-<img src="docs/pictures/readme-lighting.png" width="100%" alt="A keyboard's Lighting page: the keyboard lit by a wave of orange and teal, its profiles, its effects, the wave's colors and its zones">
+<img src="docs/pictures/readme-lighting.webp" width="100%" alt="A keyboard's Lighting page: a wave of orange and teal rolling across the keyboard, its profiles, its effects, the wave's colors and its zones">
+
+### Light that looks real
+
+Ectomatter works out each device's light as it really falls: up through each
+switch and keycap, around each legend, into the wells between the keys,
+through a mouse's diffusing logo. It draws that light in HDR, so on an HDR
+screen a lit key glows brighter than the white of the page, as an LED does.
+
+The **Keyboard Lab** and the **Mouse Lab** tune that light to match the device
+on your desk: its keycaps and their plastic, its legends' typeface, size and
+place, its LEDs, its wells, its screen, its windows. Save the result as a
+setup of your own.
+
+<p>
+  <img src="docs/pictures/readme-keyboard-lab.png" width="49%" alt="The Keyboard Lab: one key's legends lit, with their typeface, weight, size and place, and a readout of the brightest legend in nits, well above the desktop's white">
+  <img src="docs/pictures/readme-mouse-lab.png" width="49%" alt="The Mouse Lab: a light's LED under its window, with its depth, output, how much passes through the window and the halo round it">
+</p>
 
 ### Keys, buttons and macros
 
@@ -85,7 +102,7 @@ macro, a profile, or nothing at all. The Macro Editor records what you type
 and keeps each macro on the device when the device can hold it, or in
 Ectomatter when it can't.
 
-<img src="docs/pictures/readme-keys.png" width="100%" alt="A keyboard's Keys page with one key chosen, the jobs it can have and the keys to give it">
+<img src="docs/pictures/readme-keys.webp" width="100%" alt="A keyboard's Keys page with one key chosen, the jobs it can have and the keys to give it, the wave rolling across the keys">
 
 <img src="docs/pictures/readme-macros.png" width="100%" alt="The Macro Editor: a keyboard's macros listed by name, one open with its steps">
 
