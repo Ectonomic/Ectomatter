@@ -5,6 +5,9 @@ the package's checksum (<id>.ectocore.sha256). The same folder always makes
 the same package, byte for byte, so the checksum the list of packages pins
 is the one a release gives.
 
+  release-package.py --list DIR
+      the files of the package in DIR, one a line, as a release carries them
+      and tools/install.sh installs them (LICENSE and NOTICES aside)
   release-package.py DIR [--out OUT] [--repository OWNER/NAME]
       the release files of the package in DIR (built: its module beside its
       manifest), into OUT/<id>/<version> (target/releases); prints the entry
@@ -18,6 +21,7 @@ the notices of the libraries it's built from (tools/notices.py).
 """
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -25,9 +29,14 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# (git's own variables left out: a commit hook sets them for this repository,
+# and they'd point a package's git there too)
+GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
 # (what a package's folder holds that isn't the package: its module's source
-# and build, and the lab's copies of what it changed)
-LEFT_OUT = re.compile(r'(^|/)(module|target)(/|$)|\.before-|(^|/)\.')
+# and build, the lab's copies of what it changed, and what its own repository
+# keeps beside it: its libraries, tools, test cases, README and license tables)
+LEFT_OUT = re.compile(r'(^|/)(module|target)(/|$)|\.before-|(^|/)\.'
+                      r'|^(crates|tools|parity|LICENSES)(/|$)|^(Cargo\.toml|Cargo\.lock|README\.md|REUSE\.toml)$')
 
 
 def jsonc(text):
@@ -62,8 +71,17 @@ def tomllib_license():
 
 
 def package(folder):
-    files = sorted(p for p in folder.rglob('*') if p.is_file() and not LEFT_OUT.search(str(p.relative_to(folder))))
-    return files
+    """The package's files. A package that is a repository of its own (as each
+    of Ectonomic's is) ships only what it has committed, and its built module:
+    nothing left in its folder, kept there or ignored, goes out with it."""
+    if (folder / '.git').exists():
+        out = subprocess.run(['git', '-C', str(folder), 'ls-files', '-z'], check=True, capture_output=True, env=GIT_ENV).stdout
+        found = [folder / f for f in out.decode().split('\0') if f]
+        module = folder / jsonc((folder / 'core.json').read_text())['module']
+        found += [module] if module.is_file() else []
+    else:
+        found = folder.rglob('*')
+    return sorted({p for p in found if p.is_file() and not LEFT_OUT.search(str(p.relative_to(folder)))})
 
 
 # (what a drawing must not carry out into a release: a picture inside it, such
@@ -78,6 +96,10 @@ def unshipped(files):
 
 
 def main(argv):
+    if argv[:1] == ['--list'] and len(argv) == 2:
+        folder = Path(argv[1]).resolve()
+        print('\n'.join(str(f.relative_to(folder)) for f in package(folder) if f.name != 'LICENSE' or f.parent != folder))
+        return 0
     if not argv or argv[0].startswith('-'):
         sys.exit(__doc__)
     folder = Path(argv[0]).resolve()

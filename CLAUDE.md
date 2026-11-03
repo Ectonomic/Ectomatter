@@ -15,6 +15,18 @@ This is where they live in this repository.
   folds the plugins describe when run (`hosted.rs`,
   `no_plugins_setting_or_button_is_written_into_the_app`). A new check
   counts only after it has failed on a planted violation.
+- **Packages are repositories of their own.** Each core and plugin
+  (Ectonomic/ectomatter-<name>) and the list of packages
+  (Ectonomic/ectomatter-packages) is linked here as a Git submodule, at
+  `cores/<name>`, `plugins/<name>` and `registry/` (Grant, 2026-11-02:
+  "Cores don't go in the Ectomatter repo. They get their own repos."). A
+  change to a package is committed in its own repository, then this one
+  takes the new commit (`git add cores/<name>`). Packages build inside this
+  tree, reaching `crates/ectomatter-protocol`, `wit/core.wit` and the Sensor
+  Feed `crates/ectomatter-sensors` by path. `tools/packages-apart.sh` (run by
+  `tools/boundaries.sh`) fails on a package's file committed here or a
+  package folder that isn't linked. The keyboard's private parity vectors
+  live in `cores/evga-z10/parity/private/`, ignored there.
 - **Deferred list.** `docs/deferred.md`. Anything put off, stubbed, faked or
   hardcoded goes there with its file and line the moment it's put off. Every
   report starts from it.
@@ -121,7 +133,7 @@ This is where they live in this repository.
   (`src/tray.rs`) goes in it, brings the window with a press and quits from
   its menu.
 - **Packages from others.** `registry/` is the list of cores and plugins
-  Ectonomic reviewed (to be its own repository, Ectonomic/ectomatter-packages):
+  Ectonomic reviewed (its own repository, Ectonomic/ectomatter-packages, linked here):
   `packages.json`, each version's manifest and the checksum its package must
   have; `check.py`, what every change to the list must pass (run by
   `tools/boundaries.sh` against the releases on GitHub); its README, how to
@@ -130,10 +142,9 @@ This is where they live in this repository.
   to delete before shipping, and a module holding the builder's folders
   (build with `tools/build-module.sh`); `tools/list-packages.py` writes
   Ectomatter's own into the list after a package changes;
-  `tools/package-repos.py` lays each of them out as its own repository,
-  Ectonomic/ectomatter-<folder>, where its releases are published;
-  `tools/released.py` holds each package here to its release's source, so
-  one changed without a new version fails; and
+  `tools/released.py` holds each package linked here to its release (its
+  files to the release's package, its source to the release's tag), so one
+  changed without a new version fails; and
   `every_package_is_added_from_its_release_on_github` (`registry.rs`) adds
   each from the list and its release on GitHub and starts it (all three run
   by `tools/boundaries.sh`, and need the network).
@@ -150,14 +161,15 @@ This is where they live in this repository.
 
 ## Never
 
-- Push this repository.
+- Push this repository, or a package's, without Grant's word for that push.
 - Commit Grant's tuning from the lab (`cores/evga-z10/device.json`,
   `cores/steelseries-sensei-310/light.json`) without his word. He had his
   tuning as of 2026-10-26 shipped as the cores' defaults; later
   tuning waits for him again. Stage explicit paths only; never `git stash`,
   `git checkout -- file` or `git reset --hard`.
 - Commit `before-*.svg`, `tools/sensei-310-art/`, untracked mocks,
-  `cores/*/module/target` or `docs/drafts`.
+  `docs/drafts`, or the keyboard's private parity vectors
+  (`cores/evga-z10/parity/private/`).
 - Write to a device from a test or a scratch tool without Grant's go. Set
   `MOUSE_LIVE` (it opens the real mouse). Send firmware commands.
 - Signal a process without checking its exe, cwd and command line.

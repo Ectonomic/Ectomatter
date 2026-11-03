@@ -19,8 +19,8 @@ from fontTools.varLib import instancer
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'crates/ectomatter-draw/fonts'
 DEJAVU_LICENSE = Path('/usr/share/licenses/dejavu-sans-fonts/LICENSE')
-# the OFL's own words, after the Barlow copyright line the core's copy starts with
-OFL = ROOT / 'cores/evga-z10/fonts/OFL.txt'
+# the OFL's own words, after the Barlow copyright line the app's copy starts with
+OFL = ROOT / 'apps/ectomatter/ui/fonts/Barlow-OFL.txt'
 NOTO_COPYRIGHT = 'Copyright 2022 The Noto Project Authors (https://github.com/notofonts/symbols)'
 
 # The blocks a keyboard's glyphs come from: arrows, mathematical operators,

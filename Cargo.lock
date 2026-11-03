@@ -1250,15 +1250,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ectomatter-weather"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "ureq",
-]
-
-[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1373,7 +1364,6 @@ name = "evga-z10"
 version = "0.1.0"
 dependencies = [
  "ectomatter-protocol",
- "flate2",
  "hidapi",
  "serde",
  "serde_json",

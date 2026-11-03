@@ -47,8 +47,6 @@ SPDX-License-Identifier = "LGPL-2.1-or-later"
 path = [
   "apps/ectomatter/ui/fonts/Barlow-*",
   "apps/ectomatter/ui/fonts/BarlowSemiCondensed-*",
-  "cores/evga-z10/fonts/BarlowSemiCondensed-SemiBold.ttf",
-  "cores/evga-z10/fonts/OFL.txt",
   "design/fonts/Barlow-*",
   "design/fonts/BarlowSemiCondensed-*",
   "crates/ectomatter-draw/typefaces/Barlow-*",
@@ -94,21 +92,11 @@ path = ["apps/ectomatter/data/z10font.json"]
 SPDX-FileCopyrightText = "2026 Ectonomic LLC"
 SPDX-License-Identifier = "GPL-3.0-only"
 
-# Ectonomic's own: the list of packages it reviewed and its check. Its README
-# speaks of the licenses packages come under, which marks the folder as
-# holding others' work; nothing in it is.
-[[annotations]]
-path = ["registry/**"]
-SPDX-FileCopyrightText = "2026 Ectonomic LLC"
-SPDX-License-Identifier = "GPL-3.0-only"
-
 # the glyphs typefaces lack, cut from DejaVu Sans Bold and Noto Sans Symbols
 [[annotations]]
 path = [
   "crates/ectomatter-draw/fonts/KeyGlyphs-Bold.ttf",
   "crates/ectomatter-draw/fonts/DejaVu-LICENSE.txt",
-  "cores/evga-z10/fonts/Z10Symbols-Bold.ttf",
-  "cores/evga-z10/fonts/DejaVu-LICENSE.txt",
 ]
 SPDX-FileCopyrightText = ["2003 Bitstream, Inc.", "2006 Tavmjong Bah"]
 SPDX-License-Identifier = "Bitstream-Vera AND LicenseRef-Arev"
@@ -197,15 +185,3 @@ SPDX-License-Identifier = "OFL-1.1"
 path = ["crates/ectomatter-draw/typefaces/OpenGorton-*"]
 SPDX-FileCopyrightText = "2020 dakotafelder (https://github.com/dakotafelder/open-gorton)"
 SPDX-License-Identifier = "MIT"
-
-# the weather's warning regions (crates/ectomatter-weather/data/NOTICE.md)
-[[annotations]]
-path = ["crates/ectomatter-weather/data/meteoalarm-regions.json", "crates/ectomatter-weather/data/NOTICE.md"]
-SPDX-FileCopyrightText = ["2025 Niklas Jordan (https://github.com/NiklasJordan/meteoalarm)", "EUMETNET (MeteoAlarm, https://meteoalarm.org)"]
-SPDX-License-Identifier = "MIT AND CC-BY-4.0"
-
-# EVGA's E, from Wikimedia Commons (File:EVGA_Logo.svg), drawn on the Z10's G/PC button
-[[annotations]]
-path = ["tools/z10-art/from/evga-e.svg"]
-SPDX-FileCopyrightText = "EVGA Corporation (the mark); Wikimedia Commons (the drawing)"
-SPDX-License-Identifier = "CC0-1.0"

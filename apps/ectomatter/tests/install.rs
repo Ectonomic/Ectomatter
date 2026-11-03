@@ -49,20 +49,31 @@ fn shipped(manifest: &Path) -> (Vec<String>, Vec<PathBuf>) {
     (libraries, folders)
 }
 
-/// The repository's files under these folders that show another's work as
-/// they are: a typeface, or a file naming its makers' copyright.
+/// Whether a file of the repository (by its path in it) shows another's
+/// work as it is: a typeface, or a file naming its makers' copyright.
+fn shows_anothers(f: &str) -> bool {
+    let font = [".ttf", ".otf", ".woff", ".woff2"].iter().any(|x| f.to_lowercase().ends_with(x));
+    font || std::fs::read_to_string(repo().join(f)).is_ok_and(|t| t.contains(concat!("<copy", "right>")) || t.contains(concat!("SPDX-File", "CopyrightText")))
+}
+
+/// The repository's files under these folders that show another's work.
 fn carried(folders: &[PathBuf]) -> Vec<String> {
     let root = repo().canonicalize().unwrap();
     let out = Command::new("git").arg("-C").arg(&root).args(["ls-files", "-z"]).output().unwrap();
     String::from_utf8_lossy(&out.stdout)
         .split('\0')
         .filter(|f| !f.is_empty() && folders.iter().any(|d| root.join(f).starts_with(d.canonicalize().unwrap())))
-        .filter(|f| {
-            let font = [".ttf", ".otf", ".woff", ".woff2"].iter().any(|x| f.to_lowercase().ends_with(x));
-            font || std::fs::read_to_string(root.join(f)).is_ok_and(|t| t.contains(concat!("<copy", "right>")) || t.contains(concat!("SPDX-File", "CopyrightText")))
-        })
+        .filter(|f| shows_anothers(f))
         .map(str::to_owned)
         .collect()
+}
+
+/// The files a package's release carries, as the install lays them out
+/// (tools/release-package.py --list), each by its path in the repository.
+fn released(kind: &str, id: &str) -> Vec<String> {
+    let out = Command::new("python3").args(["-I"]).arg(repo().join("tools/release-package.py")).arg("--list").arg(repo().join(kind).join(id)).output().unwrap();
+    assert!(out.status.success(), "release-package.py --list: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).lines().map(|f| format!("{kind}/{id}/{f}")).collect()
 }
 
 /// tools/install.sh's layout under /usr, staged in a folder of the test's
@@ -115,13 +126,19 @@ fn an_install_lays_ectomatter_out_and_it_starts_from_there() {
             let at = usr.join("share/ectomatter").join(kind).join(&id);
             assert!(at.join("core.json").is_file() && at.join("core.wasm").is_file(), "{kind}/{id} not installed whole");
             assert!(!at.join("module").exists(), "{kind}/{id}'s source installed");
+            // nor what its own repository keeps beside it
+            for kept in ["crates", "tools", "parity", "Cargo.toml", "README.md", "REUSE.toml", ".git"] {
+                assert!(!at.join(kept).exists(), "{kind}/{id}'s {kept} installed");
+            }
             if e.path().join("module/Cargo.toml").is_file() {
                 let notices = std::fs::read_to_string(at.join("NOTICES")).unwrap_or_default();
                 let (libraries, _) = shipped(&e.path().join("module/Cargo.toml"));
                 for l in libraries {
                     assert!(notices.lines().any(|n| n.starts_with(&format!("{l} ")) || n == l), "{l} isn't in {kind}/{id}'s notices");
                 }
-                for f in carried(&[e.path()]) {
+                // (each file it carries from others: what its release carries, not
+                // what its own repository keeps beside it)
+                for f in released(kind, &id).into_iter().filter(|f| shows_anothers(f)) {
                     assert!(notices.lines().any(|n| n == f), "{f} isn't in {kind}/{id}'s notices");
                 }
             }

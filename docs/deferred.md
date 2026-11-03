@@ -293,17 +293,33 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   (`shell/wayland.rs`, `open`); `tests/compositor.rs` tries the main window
   only.
 
-- The list of packages Ectonomic reviewed (`registry/`, Grant's go
-  2026-10-28) is published at Ectonomic/ectomatter-packages (Grant,
-  2026-11-02: "Put it on GitHub now"), a copy of `registry/` made by hand:
-  nothing keeps the two the same, so a change here is pushed there too. No
-  pull request runs the check by itself: Ectonomic runs it.
-- Each of Ectonomic's packages is published from its own repository
-  (Ectonomic/ectomatter-<folder>, Grant, 2026-11-02: "Lets publish all the
-  plugins and cores"), laid out by `tools/package-repos.py` and pushed by
-  hand: nothing keeps a package's repository in step with this one, so a
-  package's next version is laid out and pushed again.
-- A release's package is zipped from this repository's folder
+- The list of packages Ectonomic reviewed (Grant's go 2026-10-28) is its
+  own repository, Ectonomic/ectomatter-packages (Grant, 2026-11-02: "Put it
+  on GitHub now"), linked here at `registry/`. No pull request runs the
+  check by itself: the workflow that would (`.github/workflows/check.yml`,
+  which `registry/` held before it was linked) was never published there,
+  and Ectonomic runs the check by hand.
+- Each core and plugin is a repository of its own, linked here at
+  `cores/<name>` or `plugins/<name>` (Grant, 2026-11-02: "Cores don't go in
+  the Ectomatter repo. They get their own repos."; Ectonomic's are
+  Ectonomic/ectomatter-<name>, `tools/packages-apart.sh`). A package builds
+  only inside Ectomatter's tree: its module reaches this repository's
+  `crates/ectomatter-protocol`, `wit/core.wit` and, for the Sensor Feed,
+  `crates/ectomatter-sensors` by path (`cores/*/module/Cargo.toml`). The
+  protocol's library published on its own (crates.io, Grant's call) would
+  let a package build anywhere. The releases of 2026-11-02 were built before
+  this, each in its repository with its own copy of those parts, which their
+  tags keep.
+- The app's tests take the keyboard core's own library as a test
+  dependency (`apps/ectomatter/Cargo.toml`, `evga-z10` from
+  `cores/evga-z10/crates/evga-z10`) to check what its module sends, so the
+  app's tests build only with the packages linked (`git clone
+  --recurse-submodules`), and a crate named `ectomatter-protocol` in the
+  keyboard core's repository would clash with this one's.
+- A release made inside Ectomatter's tree doesn't record the Ectomatter
+  commit it was built in, so `tools/released.py` holds such a release's own
+  source to its tag and the parts it took from Ectomatter to nothing.
+- A release's package is zipped from the linked package
   (`tools/list-packages.py`, through `tools/release-package.py`) with the
   module in it as it stands; for the releases of 2026-11-02 the modules were
   built in the packages' own repositories and copied in first, by hand.
@@ -443,7 +459,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   (`motion.rs`) and the screens' brightness through PowerDevil
   (`monitors.rs`) moved to it untried: nothing here tries them on a bus.
   `tools/fresh.py` known failures: none.
-  `tools/security.sh` known failures: none.
+  `tools/security.sh` known failures: `RUSTSEC-2026-0433` (pulldown-cmark 0.13.5, below).
+- RUSTSEC-2026-0433 (2026-10-28): pulldown-cmark 0.13.5, which Slint's
+  styled text parses with, takes quadratic time over nested image wikilinks
+  when its wikilinks option is on. Slint turns on strikethrough alone
+  (i-slint-common 1.18.1, `styled_text.rs`), so Ectomatter never reaches the
+  flaw. The fix, 0.13.6, came out on 2026-10-30: a week old, and taken
+  (`cargo update -p pulldown-cmark`), on 2026-11-06.
 - winit is built without its Wayland side (`apps/ectomatter/Cargo.toml`), so
   it doesn't bring smithay-client-toolkit 0.19 (and through it an unsound
   memmap2, RUSTSEC-2026-0186) beside the Wayland shell's 0.21. On Linux the

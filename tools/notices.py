@@ -15,10 +15,13 @@ license text. A text many share is written once, under all their names.
       line each: `unannotated PATH`, `stale PATTERN`, `no-text ID`,
       `unapproved ID PATH...`, and exits 1 when anything is printed
 
-Reads only this repository, Cargo's metadata and the crates' own folders.
+Reads only this repository, the packages linked in it (each core's and
+plugin's own repository, at cores/<name> and plugins/<name>: their files and
+their own REUSE.toml), Cargo's metadata and the crates' own folders.
 Runs the Cargo $CARGO names, else the one on the PATH.
 """
 import fnmatch
+import importlib.util
 import json
 import os
 import re
@@ -31,6 +34,9 @@ ROOT = Path(__file__).resolve().parents[1]
 TEXTS = ROOT / 'LICENSES'
 # REUSE.toml's keys (split, so this file doesn't show them: SHOWS)
 WHO, LICENSE = 'SPDX-File' + 'CopyrightText', 'SPDX-License' + '-Identifier'
+# (git's own variables left out: a commit hook sets them for this repository,
+# and they'd point a package's git there too)
+GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
 
 
 def own_license():
@@ -172,9 +178,22 @@ def library(p, order, allow, per_crate):
 
 # ---- the files carried from others
 
+def packages():
+    """The packages linked here: each core's and plugin's own repository."""
+    return sorted(d for kind in ('cores', 'plugins') for d in (ROOT / kind).glob('*') if (d / 'core.json').is_file())
+
+
+def files_of(root):
+    out = subprocess.run(['git', 'ls-files', '-z'], cwd=root, check=True, capture_output=True, env=GIT_ENV).stdout
+    return [f for f in out.decode().split('\0') if f and (root / f).is_file()]
+
+
 def tracked():
-    out = subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT, check=True, capture_output=True).stdout
-    return [f for f in out.decode().split('\0') if f and (ROOT / f).is_file()]
+    """This repository's files and each package's, by their paths here."""
+    files = files_of(ROOT)
+    for d in packages():
+        files += [f'{d.relative_to(ROOT)}/{f}' for f in files_of(d)]
+    return files
 
 
 def glob(pattern):
@@ -186,12 +205,24 @@ def glob(pattern):
 
 
 def tables():
-    t = tomllib.loads((ROOT / 'REUSE.toml').read_text())['annotations']
-    for a in t:
-        for k in ('path', WHO):
-            if isinstance(a.get(k), str):
-                a[k] = [a[k]]
-        a['rx'] = [glob(p) for p in a['path']]
+    """REUSE.toml's tables, then each package's own after its first (which,
+    as here, says every file is Ectonomic's), their paths as they are here;
+    a package's tables carry its folder (`at`)."""
+    def read(path, at=None):
+        t = tomllib.loads(path.read_text())['annotations']
+        for a in t:
+            for k in ('path', WHO):
+                if isinstance(a.get(k), str):
+                    a[k] = [a[k]]
+            if at:
+                a['path'] = [f'{at}/{p}' for p in a['path']]
+            a['rx'] = [glob(p) for p in a['path']]
+            a['at'] = at
+        return t
+    t = read(ROOT / 'REUSE.toml')
+    for d in packages():
+        if (d / 'REUSE.toml').is_file():
+            t += read(d / 'REUSE.toml', str(d.relative_to(ROOT)))[1:]
     return t
 
 
@@ -205,11 +236,26 @@ def table_of(path, ts):
     return hit or None
 
 
+def left_out():
+    """What a package's folder holds that its release leaves out
+    (tools/release-package.py's LEFT_OUT)."""
+    spec = importlib.util.spec_from_file_location('release_package', ROOT / 'tools/release-package.py')
+    rp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rp)
+    return rp.LEFT_OUT
+
+
 def carried(dirs, files, ts):
     under = [str(Path(d).resolve().relative_to(ROOT)).rstrip('/') + '/' for d in dirs]
+    # (a package's folder: only what its release carries, not what its own
+    # repository keeps beside it)
+    packages = [u for u in under if (ROOT / u / 'core.json').is_file()]
+    left = left_out() if packages else None
     groups = {}
     for f in files:
         if not any(f.startswith(u) or u == './' for u in under):
+            continue
+        if any(f.startswith(u) and left.search(f[len(u):]) for u in packages):
             continue
         n = table_of(f, ts)
         if n is not None and ts[n][LICENSE] != own_license():
@@ -238,21 +284,23 @@ def check():
     files = tracked()
     _, allow, _ = approved()
     said = []
-    skip = {'REUSE.toml', 'LICENSE'}
+    # (each repository's own REUSE.toml, LICENSE and LICENSES/: here's and each package's)
+    tops = [''] + [f'{d.relative_to(ROOT)}/' for d in packages()]
+    skip = {top + f for top in tops for f in ('REUSE.toml', 'LICENSE')}
     folders = {}
     for f in files:
         folders.setdefault(str(Path(f).parent), []).append(f)
     # a folder whose notice or readme names a license holds others' work
     marked = set()
     for d, fs in folders.items():
-        if d == '.':
+        if d == '.' or d + '/' in tops:
             continue
         for f in fs:
             name = Path(f).name
             if NOTICE.search(name) and (not name.lower().startswith('readme') or re.search(r'(?i)licen[sc]e', (ROOT / f).read_text(errors='replace'))):
                 marked.add(d)
     for f in files:
-        if f in skip or f.startswith('LICENSES/'):
+        if f in skip or any(f.startswith(top + 'LICENSES/') for top in tops):
             continue
         name = Path(f).name
         shows = FONT.search(f) or (str(Path(f).parent) in marked and not name.lower().startswith('readme'))
@@ -273,6 +321,9 @@ def check():
         for t in alternatives(a[LICENSE])[0]:
             for i in ids(t):
                 used.setdefault(i, []).extend(a['path'])
+                # (a package's own repository carries the texts its tables name)
+                if a['at'] and i != own_license() and not (ROOT / a['at'] / 'LICENSES' / f'{i}.txt').is_file():
+                    said.append(f'no-text {i} {a["at"]}/LICENSES')
     for i, paths in sorted(used.items()):
         if i != own_license() and not (TEXTS / f'{i}.txt').is_file():
             said.append(f'no-text {i}')

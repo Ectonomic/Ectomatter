@@ -88,9 +88,9 @@ pub(crate) mod tests {
     }
 
     /// The app's own Rust: the window's, the launcher's, and the crates it
-    /// builds in that are no package's (the cores' and plugins' shared
-    /// crates, crates/ectomatter-sensors and crates/ectomatter-weather, and
-    /// the Z10's driver are theirs).
+    /// builds in that are no package's (crates/ectomatter-sensors, which the
+    /// Sensor Feed is built from, is the plugins'; each package's own
+    /// libraries are in its own repository).
     pub(crate) fn rust_files() -> Vec<String> {
         let mut out = Vec::new();
         let mut dirs: Vec<PathBuf> = ["apps/ectomatter/src", "apps/ectomatter-launch/src", "crates/ectomatter-draw/src", "crates/ectomatter-tokens/src", "crates/ectomatter-protocol/src"].iter().map(|d| repo().join(d)).collect();

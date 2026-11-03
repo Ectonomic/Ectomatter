@@ -1,0 +1,24 @@
+[submodule "cores/evga-z10"]
+	path = cores/evga-z10
+	url = https://github.com/Ectonomic/ectomatter-evga-z10.git
+[submodule "cores/steelseries-sensei-310"]
+	path = cores/steelseries-sensei-310
+	url = https://github.com/Ectonomic/ectomatter-steelseries-sensei-310.git
+[submodule "plugins/game-configurator"]
+	path = plugins/game-configurator
+	url = https://github.com/Ectonomic/ectomatter-game-configurator.git
+[submodule "plugins/monitor-switcher"]
+	path = plugins/monitor-switcher
+	url = https://github.com/Ectonomic/ectomatter-monitor-switcher.git
+[submodule "plugins/openrgb-link"]
+	path = plugins/openrgb-link
+	url = https://github.com/Ectonomic/ectomatter-openrgb-link.git
+[submodule "plugins/sensor-feed"]
+	path = plugins/sensor-feed
+	url = https://github.com/Ectonomic/ectomatter-sensor-feed.git
+[submodule "plugins/weather-feed"]
+	path = plugins/weather-feed
+	url = https://github.com/Ectonomic/ectomatter-weather-feed.git
+[submodule "registry"]
+	path = registry
+	url = https://github.com/Ectonomic/ectomatter-packages.git

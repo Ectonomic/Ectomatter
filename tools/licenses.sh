@@ -57,8 +57,11 @@ while read -r part lic; do
     bad=1
   fi
 done < "$tmp"
-# (the files carried from others)
-python3 -I tools/notices.py --check > "$tmp"
+# (the files carried from others; a check that didn't finish holds nothing)
+python3 -I tools/notices.py --check > "$tmp"; ran=$?
+if [ $ran -ne 0 ] && [ ! -s "$tmp" ]; then
+  echo "licenses: tools/notices.py --check didn't finish (exit $ran)"; bad=1
+fi
 while read -r what id rest; do
   [ -n "$what" ] || continue
   if [ "$what" = unapproved ] && is_known "$id"; then

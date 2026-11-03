@@ -58,7 +58,8 @@ for kind in cores plugins; do
     [ -f "$dir/core.wasm" ] || { echo "install.sh: $kind/$id isn't built: run tools/build-$kind.sh" >&2; exit 1; }
     out="$root/share/ectomatter/$kind/$id"
     mkdir -p "$out"
-    (cd "$dir" && find . -path ./module -prune -o -type f ! -name '*.before-*' -print) | while read -r f; do
+    # (the files a release of it carries: tools/release-package.py)
+    python3 -I tools/release-package.py --list "$dir" | while read -r f; do
       install -Dm644 "$dir/$f" "$out/$f"
     done
     [ ! -f "$dir/module/Cargo.toml" ] || python3 -I tools/notices.py "$dir/module/Cargo.toml" --files "$dir" > "$out/NOTICES"

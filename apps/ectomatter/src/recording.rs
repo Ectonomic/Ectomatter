@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn recording_turns_key_presses_into_the_same_steps() {
         let mut s = String::new();
-        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../parity/vectors.json.gz");
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../cores/evga-z10/parity/vectors.json.gz");
         flate2::read::GzDecoder::new(std::fs::File::open(file).unwrap()).read_to_string(&mut s).unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         let r = &v["recorder"];

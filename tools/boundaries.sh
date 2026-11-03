@@ -60,6 +60,13 @@ licenses=$(tools/licenses.sh); case $? in
   3) echo "  not yet    every_shipped_dependencys_license_is_approved (known failures, docs/deferred.md)"; not=$((not + 1)) ;;
   *) printf '%s\n' "$licenses"; echo "  FAILS      every_shipped_dependencys_license_is_approved: a crate or carried file not approved and not in docs/deferred.md, or a carried file not in REUSE.toml"; exit 1 ;;
 esac
+# (each core and plugin a repository of its own, linked here, none of its
+# files Ectomatter's: tools/packages-apart.sh)
+if apart=$(tools/packages-apart.sh); then
+  echo "  holds      every_package_is_a_repository_of_its_own"; held=$((held + 1))
+else
+  printf '%s\n' "$apart"; echo "  FAILS      every_package_is_a_repository_of_its_own: a package's file is in Ectomatter's repository, or a package folder isn't linked (git submodule add)"; exit 1
+fi
 # (every library Ectomatter and its packages name themselves at its newest
 # release, and every one under them at the newest their own needs allow:
 # tools/fresh.py; a library docs/deferred.md names is a known failure)
@@ -78,13 +85,13 @@ security=$(tools/security.sh); case $? in
 esac
 # (the list of packages, registry/packages.json, held to the releases on
 # GitHub by the check every change to the list must pass, registry/check.py;
-# and every package that comes with Ectomatter as it stands here held to its
-# release's source, tools/released.py: one changed since, without a new
-# version, fails)
+# and every package linked here as it stands held to its release, its files
+# to the release's package and its source to the release's tag,
+# tools/released.py: one changed since, without a new version, fails)
 if listed=$(python3 -I registry/check.py) && released=$(python3 -I tools/released.py); then
   echo "  holds      the_list_of_packages_is_as_they_are_released"; held=$((held + 1))
 else
-  printf '%s\n' "$listed" "${released:-}"; echo "  FAILS      the_list_of_packages_is_as_they_are_released: a release isn't what the list pins, or a package changed here since its release (give it a new version: tools/package-repos.py, tools/list-packages.py)"; exit 1
+  printf '%s\n' "$listed" "${released:-}"; echo "  FAILS      the_list_of_packages_is_as_they_are_released: a release isn't what the list pins, or a package changed here since its release (give it a new version, release it, then tools/list-packages.py)"; exit 1
 fi
 echo "$held hold, $not don't yet"
 # (a boundary test renamed or gone is a boundary no longer tried)

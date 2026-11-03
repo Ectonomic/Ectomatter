@@ -70,7 +70,7 @@ wayland-backend = "0.3"
 [dev-dependencies]
 # the Z10's driver, for tests that check what its core sends against what the
 # original editor sent; the app itself reaches the keyboard only through its core
-evga-z10 = { version = "0.1.0", path = "../../crates/evga-z10" }
+evga-z10 = { version = "0.1.0", path = "../../cores/evga-z10/crates/evga-z10" }
 # (tests read made-up computers themselves, as the Sensor Feed plugin reads this one)
 ectomatter-sensors = { path = "../../crates/ectomatter-sensors", features = ["read", "fake"] }
 # the parity vectors the Z10 module is checked against are gzipped

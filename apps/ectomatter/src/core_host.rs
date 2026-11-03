@@ -1289,7 +1289,7 @@ pub(crate) mod tests {
     /// and the same answers given, in those shapes.
     #[test]
     fn the_z10_module_sends_what_the_original_editor_sent() {
-        let root = crate::cores::dir().join("../parity");
+        let root = crate::cores::dir().join("evga-z10/parity");
         let mut files = vec![root.join("vectors.json.gz")];
         if let Ok(dir) = std::fs::read_dir(root.join("private")) {
             files.extend(dir.flatten().map(|e| e.path()).filter(|p| p.to_string_lossy().ends_with(".json.gz")));
@@ -2184,7 +2184,7 @@ pub(crate) mod tests {
     /// effect the screen asked for; and the read gives what it gave alone.
     #[test]
     fn a_preview_goes_out_during_a_whole_read() {
-        let root = crate::cores::dir().join("../parity");
+        let root = crate::cores::dir().join("evga-z10/parity");
         let mut text = String::new();
         flate2::read::GzDecoder::new(std::fs::File::open(root.join("vectors.json.gz")).unwrap()).read_to_string(&mut text).unwrap();
         let v: Value = serde_json::from_str(&text).unwrap();

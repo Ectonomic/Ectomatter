@@ -4,9 +4,10 @@ A **core** makes one device work in Ectomatter: a keyboard, a mouse, anything
 on USB. A **plugin** brings in something that isn't a device, such as another
 program (OpenRGB), the games on the computer, or the weather. Both are
 packages, built and run the same way: a WebAssembly module that runs inside
-Ectomatter and reaches only what its manifest names. The two in this
-repository's `cores/` and the five in `plugins/` are complete examples; start
-from the one closest to yours.
+Ectomatter and reaches only what its manifest names. Each is a repository of
+its own. Ectonomic's two cores and five plugins are complete examples, linked
+into this repository at `cores/` and `plugins/` (clone it with
+`git clone --recurse-submodules`); start from the one closest to yours.
 
 ## The folder
 
@@ -19,6 +20,14 @@ my-mouse/
   LICENSE        its license's text
   module/        the module's source (not shipped)
 ```
+
+The folder is the top of the package's own repository. Beside the package, the
+repository may keep what isn't shipped: `crates/` (its own libraries),
+`tools/`, `parity/` (test cases), `README.md`, `REUSE.toml` and `LICENSES/`
+(who made the files it carries from others, and their licenses' texts),
+`Cargo.toml` and `Cargo.lock`. A release leaves those out, and anything the
+repository hasn't committed (`tools/release-package.py --list` shows what it
+carries).
 
 The manifest's fields are in `docs/core-protocol.md`, section 3, and the
 calls a package answers in sections 5 and 6 (11 for a plugin). Ectomatter
@@ -44,15 +53,16 @@ is built from written short (this repository's folder as `.`, Cargo's as
 they'd be your own folders, your home folder among them, in every copy of
 your package. `tools/release-package.py` refuses a module that still holds
 them. `tools/build-cores.sh` and `tools/build-plugins.sh` build every package
-in this repository this way. Put the folder in Ectomatter's own (`cores/` or
-`plugins/`) and run Ectomatter from the source folder to try it, or add its
-file in Settings (Devices, Add a device core, then From an address or a file).
+linked here this way.
 
-A module depends on the crate `ectomatter-protocol` by path, so it builds
-inside this repository, or in a repository that carries the crate beside it
-as Ectonomic's packages do: each is its own repository, laid out as here
-(github.com/Ectonomic/ectomatter-evga-z10, for one, made by
-`tools/package-repos.py`).
+A module is built inside this repository: it depends on the crate
+`ectomatter-protocol` (`crates/ectomatter-protocol`) and the interface
+(`wit/core.wit`) by path, from `cores/<name>/module/` or
+`plugins/<name>/module/` (`../../../crates/ectomatter-protocol`,
+`../../../wit`). Clone your package's repository there, or link it
+(`git submodule add <its address> cores/my-mouse`), build it, and run
+Ectomatter from the source folder to try it; or add its file in Settings
+(Devices, Add a device core, then From an address or a file).
 
 ## License
 

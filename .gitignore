@@ -1,14 +1,9 @@
 /target
-# parity vectors built from a real keyboard's backups stay on the machine that made them
-/parity/private/
 __pycache__/
 
 # screenshots of the original editor holding a real keyboard's profiles and macros
 /docs/baseline/
 
-# each core's WebAssembly module, built by tools/build-cores.sh
-/cores/*/core.wasm
-/plugins/*/core.wasm
 # the test packages' modules, built by tools/build-test-packages.sh
 /apps/ectomatter/tests/packages/*/core.wasm
 /apps/ectomatter/tests/packages/*/module/target/

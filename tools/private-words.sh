@@ -6,6 +6,9 @@
 # passed over. The list is $ECTOMATTER_PRIVATE_WORDS, else
 # ~/.config/ectomatter-dev/private-words; with no list there's nothing to
 # hold to, and it says so.
+# Each package linked here (a core's or plugin's own repository, a submodule)
+# and the list of packages are held too, as they are and through their own
+# history.
 #   tools/private-words.sh            the tracked files
 #   tools/private-words.sh --staged   what a commit would add (the commit hook)
 #   tools/private-words.sh --history  every commit's files and messages
@@ -18,11 +21,13 @@ grep -v -e '^#' -e '^[[:space:]]*$' "$list" > "$words"
 case "${1:-}" in
   --staged) hits=$(git diff --cached -U0 --no-color | grep '^+' | grep -v '^+++' | grep -n -i -F -f "$words") ;;
   --history)
-    hits=$(git log --all --format=%B | grep -i -F -f "$words" | sed 's/^/message: /')
-    for c in $(git rev-list --all); do
-      hits+=$(git grep -I -l -i -F -f "$words" "$c" 2>/dev/null)
+    for at in . $(git submodule --quiet foreach 'echo $sm_path'); do
+      hits+=$(git -C "$at" log --all --format=%B | grep -i -F -f "$words" | sed "s|^|$at: message: |")
+      for c in $(git -C "$at" rev-list --all); do
+        hits+=$(git -C "$at" grep -I -l -i -F -f "$words" "$c" 2>/dev/null | sed "s|^|$at: |")
+      done
     done ;;
-  *) hits=$(git grep -I -n -i -F -f "$words") ;;
+  *) hits=$(git grep --recurse-submodules -I -n -i -F -f "$words") ;;
 esac
 if [ -n "$hits" ]; then
   echo "private words found (the list is $list):"
