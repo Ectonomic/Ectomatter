@@ -123,11 +123,20 @@ impl Caps {
 
 /// A key's light, as the core's light description has it: all keys' values
 /// with the key's own (its entry in "keys", by its control's id) over them,
-/// a section's values one by one.
+/// a section's values one by one. A key whose caps are `"fixed": true` has a
+/// cap that can't be swapped (a button molded into the case, or a spacebar
+/// that comes only with the keyboard): what all keys' caps are made of and
+/// how they're colored doesn't reach it (FIXED_CAP), only how high caps
+/// stand and how much light they give back.
 pub fn key_light(light: &Value, own: &Value) -> Value {
     let mut out = light.clone();
     if let Some(o) = out.as_object_mut() {
         o.remove("keys");
+    }
+    if own["caps"]["fixed"] == true {
+        if let Some(caps) = out["caps"].as_object_mut() {
+            caps.retain(|k, _| !FIXED_CAP.contains(&k.as_str()));
+        }
     }
     for (a, v) in own.as_object().into_iter().flatten() {
         match (v.as_object(), out[a.as_str()].is_object()) {
@@ -141,6 +150,14 @@ pub fn key_light(light: &Value, own: &Value) -> Value {
     }
     out
 }
+
+/// The least share of the light on its back a legend lets through, however
+/// opaque its ink (see Physics::from).
+pub const LEGEND_LEAST: f32 = 0.01;
+
+/// What all keys' caps say that a fixed cap (see key_light) keeps its own of:
+/// its plastic, its colors and its homing bump.
+pub const FIXED_CAP: [&str; 7] = ["kind", "color", "sides", "opacity", "black", "milky", "bump"];
 
 /// How every key is lit: all keys' physics, and the keys with physics of
 /// their own (another cap, a switch moved, a beam of its own), each by its
@@ -305,8 +322,11 @@ impl Physics {
             sides: f(&sw["sides"], 0.25).clamp(0.0, 1.0),
             gap: f(&cp["foot"], 5.0).clamp(0.0, top - 0.1),
             top,
-            // (the legends' opacity: what they let through is the rest)
-            legends: (1.0 - f(&light["legends"]["opacity"], 0.7)).clamp(0.0, 1.0),
+            // (the legends' opacity: what they let through is the rest, a
+            // hundredth at least: a translucent top's glow is drawn from the
+            // light its legend lets through, so a legend letting none would
+            // leave the whole top dark)
+            legends: (1.0 - f(&light["legends"]["opacity"], 0.7)).clamp(LEGEND_LEAST, 1.0),
             caps,
             skirts,
             tops,
@@ -2135,6 +2155,35 @@ fn bounce(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), into: &mut
 mod tests {
     use super::*;
     use resvg::usvg::{self, Tree};
+
+    /// A translucent cap printed in opaque ink still glows beside its legend,
+    /// its legend dark: the top's glow doesn't go out with the legend's light.
+    #[test]
+    fn an_opaque_legend_on_a_clear_cap_leaves_its_top_glowing() {
+        let p = Physics::from(&serde_json::json!({ "caps": { "kind": "translucent", "opacity": 0.6 }, "legends": { "opacity": 1 } }));
+        assert!(p.legends > 0.0 && p.legends <= LEGEND_LEAST, "an opaque legend lets the least through: {}", p.legends);
+        assert!(p.tops > 0.3, "its top lets through what its plastic does");
+    }
+
+    /// docs/core-protocol.md, section 4, the device's light: a cap that can't
+    /// be swapped keeps its own plastic and colors whatever all keys' caps
+    /// are made into, and still stands and gives back light as they do; a
+    /// cap that can be swapped takes them.
+    #[test]
+    fn a_fixed_cap_keeps_its_own_plastic_and_colors() {
+        let light = serde_json::json!({
+            "caps": { "kind": "translucent", "color": "#E6E4DF", "sides": "#E6E4DF", "opacity": 0.3, "black": 0.2, "milky": 0.5, "bump": "dot", "top": 12, "inside": 0.3 },
+            "keys": { "space": { "caps": { "fixed": true, "kind": "shine-through" } }, "a": { "caps": { "top": 13 } } }
+        });
+        let space = key_light(&light, &light["keys"]["space"])["caps"].clone();
+        assert_eq!(space["kind"], "shine-through", "its own plastic");
+        for k in ["color", "sides", "opacity", "black", "milky", "bump"] {
+            assert!(space[k].is_null(), "all keys' {k} doesn't reach it: {space}");
+        }
+        assert_eq!((space["top"].clone(), space["inside"].clone()), (serde_json::json!(12), serde_json::json!(0.3)), "it stands and gives back light as all caps do");
+        let a = key_light(&light, &light["keys"]["a"])["caps"].clone();
+        assert_eq!((a["kind"].clone(), a["color"].clone(), a["top"].clone()), (serde_json::json!("translucent"), serde_json::json!("#E6E4DF"), serde_json::json!(13)), "a cap that can be swapped takes them");
+    }
 
     fn scene() -> (Board, Scene, Physics) {
         let tree = Tree::from_str(&crate::fixture::svg(), &usvg::Options::default()).unwrap();

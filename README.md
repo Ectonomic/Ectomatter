@@ -103,12 +103,17 @@ light follows it as you drag. Save the result as a setup of your own.
 ### Custom keycaps
 
 Put your own caps on the keyboard, the ones you have or the ones you want:
-shine-through, pudding or translucent plastic, any color on their tops and
-sides, legends in another typeface, weight, size and place, homing bumps on
-any key. Any one key can be set apart, with words or a picture of its own in
-place of its letter. Ectomatter lights each cap as its plastic would.
+shine-through, pudding or clear plastic, any color on their tops and sides,
+legends in another typeface, weight, size and place, homing bumps on any
+key. Mix them across the board, with an accent here and another color
+there, and set any one key apart with words or a picture of its own in place
+of its letter, like this owl. Caps the keyboard can't swap, like this one's
+buttons and spacebar, stay as they are. Ectomatter lights each cap as its
+plastic would.
 
-<img src="docs/pictures/readme-keycaps.webp" width="100%" alt="The keyboard's page, its orange and teal wave running on while its caps change: black shine-through caps as it comes, pudding caps glowing through their clear sides, translucent caps lit all over, then white caps">
+<img src="docs/pictures/readme-keycap-lab.png" width="100%" alt="The Keyboard Lab on the Escape key alone: a light gray cap printed with an owl in place of its letters, the owl lit orange, with its placement, typeface, size and place">
+
+<img src="docs/pictures/readme-keycaps.webp" width="100%" alt="The keyboard's page, its orange and teal wave running on while its caps change every few seconds: black shine-through caps as it comes; pudding caps with their legends at the top, the owl on a light gray Escape key and light gray arrows; white caps with orange Escape and Enter; clear caps lit all over, their legends dark. The buttons and the spacebar stay black throughout">
 
 ### Remap keys and buttons, record macros
 

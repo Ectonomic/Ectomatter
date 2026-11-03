@@ -138,6 +138,7 @@ const SHOWCASE: &[Case] = &[
     Case { name: "readme-game", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_LIBRARY_PAGE", "steam_app_1091500"), ("ECTOMATTER_LIBRARY", SHOWN_LIBRARY), ("ECTOMATTER_WAIT", "1500")] },
     Case { name: "readme-plugins", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "plugins")] },
     Case { name: "readme-keyboard-lab.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1"), ("ECTOMATTER_CLICKS", KEYBOARD_LAB_SECTION)] },
+    Case { name: "readme-keycap-lab.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1"), ("ECTOMATTER_LIGHT_SETUP", "owl"), ("ECTOMATTER_CLICKS", "850,71;133,197")] },
 ];
 
 /// How a showcase desk's Home is laid out (`Desk::showcase_laid`).
@@ -557,6 +558,8 @@ impl Desk {
             let setup = serde_json::json!({ "name": name, "light": serde_json::from_str::<serde_json::Value>(caps).unwrap() });
             put(&d.join(format!("data/com.ectonomic.ectomatter/light/evga-z10/{id}.json")), &setup.to_string());
         }
+        let owl = std::fs::read_to_string(repo().join("apps/ectomatter/tests/renders/showcase/owl-face.svg")).unwrap();
+        put(&d.join("data/com.ectonomic.ectomatter/light/evga-z10/images/owl-face.svg"), &owl);
         desk.steam = at.join("home/.local/share/Steam");
         desk.states = Some((at.join("states/keyboard.json"), at.join("states/mouse.json")));
         desk
@@ -742,34 +745,51 @@ fn the_readmes_pictures_are_the_app_as_it_is() {
 /// keyboard's Lighting and Keys pages, the Keyboard lab with a slider moved
 /// through its run, and the keyboard's caps made over.
 const MOVING: &[Moving] = &[
-    Moving { name: "readme-hero-mine", laid: Laid::Mine, size: WIDE, set: &[("ECTOMATTER_PLACE", "home")], at: |ms| pressed(TYPED_MINE, ms) },
-    Moving { name: "readme-hero-mat", laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_SCENE", "wave")], at: |_| Vec::new() },
-    Moving { name: "readme-hero-pad", laid: Laid::Pad, size: WIDE, set: &[("ECTOMATTER_PLACE", "home")], at: |ms| pressed(TYPED_PAD, ms) },
-    Moving { name: "readme-lighting", laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")], at: |_| Vec::new() },
-    Moving { name: "readme-keys", laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416")], at: |_| Vec::new() },
-    Moving { name: "readme-keyboard-lab.window", laid: Laid::Mat, size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1"), ("ECTOMATTER_CLICKS", KEYBOARD_LAB_SECTION)], at: |ms| slid(&KEYBOARD_LAB_SLIDER, ms) },
-    Moving { name: "readme-keycaps", laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")], at: |ms| vec![("ECTOMATTER_LIGHT_SETUP", KEYCAPS[(ms * KEYCAPS.len() as u32 / TURN) as usize].0.to_string())] },
+    Moving { name: "readme-hero-mine", turns: 1, laid: Laid::Mine, size: WIDE, set: &[("ECTOMATTER_PLACE", "home")], at: |ms| pressed(TYPED_MINE, ms) },
+    Moving { name: "readme-hero-mat", turns: 1, laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_SCENE", "wave")], at: |_| Vec::new() },
+    Moving { name: "readme-hero-pad", turns: 1, laid: Laid::Pad, size: WIDE, set: &[("ECTOMATTER_PLACE", "home")], at: |ms| pressed(TYPED_PAD, ms) },
+    Moving { name: "readme-lighting", turns: 1, laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")], at: |_| Vec::new() },
+    Moving { name: "readme-keys", turns: 1, laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416")], at: |_| Vec::new() },
+    Moving { name: "readme-keyboard-lab.window", turns: 1, laid: Laid::Mat, size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1"), ("ECTOMATTER_CLICKS", KEYBOARD_LAB_SECTION)], at: |ms| slid(&KEYBOARD_LAB_SLIDER, ms) },
+    Moving { name: "readme-keycaps", turns: 3, laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")], at: |ms| vec![("ECTOMATTER_LIGHT_SETUP", KEYCAPS[(ms * KEYCAPS.len() as u32 / (3 * TURN)) as usize].0.to_string())] },
 ];
 
-/// The keyboard's caps as its moving picture shows them, a quarter of the
-/// turn each, the keys' wave running on through them: as the keyboard comes
-/// (black shine-through caps), then made over in the Keyboard lab, each a
-/// setup of the person's own (its id, its name, and what it changes of the
-/// light): pudding caps, black tops over clear sides; translucent caps, clear
-/// all over; white shine-through caps.
+/// The keyboard's caps as its moving picture shows them, three seconds
+/// each over three turns, the keys' wave running on through them: as the
+/// keyboard comes (black shine-through caps), then made over in the Keyboard
+/// lab, each a setup of the person's own (its id, its name, and what it
+/// changes of the light). Pudding caps with legends at the top in another
+/// typeface, and light gray accents: the Esc key printed with an owl (a
+/// picture of the person's own, tests/renders/showcase/owl-face.svg) and the
+/// arrows; white caps with orange accents; clear caps, their legends
+/// printed in near-opaque ink, as clear caps print them. The buttons and the
+/// spacebar keep their own, as the keyboard's can't be swapped.
 const KEYCAPS: &[(&str, &str, &str)] = &[
     ("", "", ""),
-    ("pudding", "Pudding", r#"{ "caps": { "kind": "pudding", "opacity": 0.3, "black": 0.35, "milky": 0.55 } }"#),
-    ("translucent", "Translucent", r#"{ "caps": { "kind": "translucent", "opacity": 0.6, "milky": 0.3 } }"#),
-    ("white", "White", r##"{ "caps": { "kind": "shine-through", "color": "#E6E4DF" } }"##),
+    (
+        "owl",
+        "Owl",
+        r##"{ "caps": { "kind": "pudding", "milky": 1, "opacity": 0.8, "black": 0.4 }, "legends": { "place": "top", "typeface": "Adwaita Sans", "weight": 400 },
+              "keys": { "esc": { "legends": { "main": "", "place": "middle", "main_image": "owl-face.svg", "letters": 4.7, "down": 0.7 }, "caps": { "color": "#CCCCCC" } },
+                        "up": { "caps": { "color": "#CCCCCC" } }, "down": { "caps": { "color": "#CCCCCC" } }, "left": { "caps": { "color": "#CCCCCC" } }, "right": { "caps": { "color": "#CCCCCC" } } } }"##,
+    ),
+    (
+        "white",
+        "White",
+        r##"{ "caps": { "kind": "shine-through", "color": "#E6E4DF" },
+              "keys": { "esc": { "caps": { "color": "#E8652A" } }, "enter": { "caps": { "color": "#E8652A" } } } }"##,
+    ),
+    ("clear", "Clear", r#"{ "caps": { "kind": "translucent", "opacity": 0.85, "milky": 0.2 }, "legends": { "opacity": 0.95 } }"#),
 ];
 
 /// One of the README's moving pictures: its name (`.window` for one of
-/// Ectomatter's other windows), the desk it's drawn on, its size, what's set
+/// Ectomatter's other windows), how many turns it runs, the desk it's drawn on, its size, what's set
 /// for every frame, and what for the frame at each moment of its turn (in
 /// milliseconds).
 struct Moving {
     name: &'static str,
+    /// how many turns it runs before it loops
+    turns: u32,
     laid: Laid,
     size: (u32, u32),
     set: &'static [(&'static str, &'static str)],
@@ -859,11 +879,10 @@ fn the_readmes_moving_pictures() {
     }
     // (ECTOMATTER_MOVING_AT=ms,ms: only the frames at those moments, to look at one)
     let at: Vec<u32> = std::env::var("ECTOMATTER_MOVING_AT").unwrap_or_default().split(',').filter_map(|v| v.trim().parse().ok()).collect();
-    let moments: Vec<u32> = if at.is_empty() { (0..frames).map(|n| n * TURN / frames).collect() } else { at.clone() };
     let jobs: Vec<(&Moving, u32)> = MOVING
         .iter()
         .filter(|m| only.is_empty() || only.split(',').any(|o| o == named(m)))
-        .flat_map(|m| moments.iter().map(move |ms| (m, *ms)))
+        .flat_map(|m| if at.is_empty() { (0..frames * m.turns).map(|n| n * TURN / frames).collect() } else { at.clone() }.into_iter().map(move |ms| (m, ms)))
         .collect();
     if at.is_empty() {
         for (m, _) in &jobs {

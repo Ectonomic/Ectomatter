@@ -566,6 +566,11 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   simulated again for the readout,
   `main.rs`, `snap_lab`); the window, through a drag, reads out the light
   while its simulation is still clearing.
+- The Keyboard lab still offers a fixed cap's plastic and colors when it's
+  chosen as One key (`apps/ectomatter/src/lab.rs`, its Keycaps section): a
+  cap that can't be swapped (`"fixed": true`, docs/core-protocol.md,
+  section 4) should offer none, as all keys' caps changes don't reach it
+  (`crates/ectomatter-draw/src/sim.rs`, `key_light`).
 - `no_page_is_found_by_a_devices_name` (`apps/ectomatter/src/boundaries.rs:281`)
   holds the app to a list of the two cores' names typed into the check,
   not names taken from the cores' manifests and descriptions, as Grant's

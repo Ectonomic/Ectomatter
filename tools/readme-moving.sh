@@ -14,8 +14,8 @@
 #   pages
 # - readme-keyboard-lab.webp: the Keyboard lab, the LEDs' Beam dragged
 #   through its run and the light following it
-# - readme-keycaps.webp: the keyboard's caps made over, a quarter of the
-#   turn each (renders.rs, KEYCAPS), its wave running on through them
+# - readme-keycaps.webp: the keyboard's caps made over, three seconds each
+#   (renders.rs, KEYCAPS), its wave running on through them
 #
 # Animated WebP, not GIF: a GIF's 256 colors band the lights' glow. The
 # README's still pictures are held to the app by
@@ -41,8 +41,11 @@ def save(name, seq, quality=82):
     print(out, out.stat().st_size, 'bytes,', len(seq), 'frames')
 def fade(a, b):
     return [Image.blend(x, y, (k + 0.5) / len(a)) for k, (x, y) in enumerate(zip(a, b))]
-for name in ('readme-lighting', 'readme-keys', 'readme-keyboard-lab', 'readme-keycaps'):
+for name in ('readme-lighting', 'readme-keys', 'readme-keyboard-lab'):
     save(name, frames(name))
+# (twelve seconds, the wave over all of it: a little less quality keeps it
+# near 5 MB)
+save('readme-keycaps', frames('readme-keycaps'), quality=70)
 # (the hero: the first desk from its ninth frame, then the second and the third,
 # each fading into the next over half a second, and the third into the first
 # desk's first eight frames, so the end fades into where it starts)

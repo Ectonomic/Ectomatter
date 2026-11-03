@@ -362,13 +362,17 @@ fn settled(tree: &usvg::Tree, device: &serde_json::Value, ground: [u8; 3], w: u3
 /// (the core's own, with none of the person's own in use).
 fn device_in_use(core: &cores::Core, settings: &settings::Settings) -> serde_json::Value {
     let mut device = core.device_now();
-    // (ECTOMATTER_LIGHT_SETUP=id: a snapshot of the keyboard lit by that setup of
-    // the person's own, as if chosen, without changing their choice)
-    let chosen = std::env::var("ECTOMATTER_LIGHT_SETUP").ok().and_then(|id| setups::read(&core.id, &id));
-    if let Some(s) = chosen.or_else(|| setups::in_use(settings, &core.id)) {
+    if let Some(s) = setup_in_use(settings, &core.id) {
         device["light"] = setups::merged(&device["light"], &s.changes);
     }
     device
+}
+
+/// The light setup of the person's own a snapshot shows a core's device in:
+/// the one chosen, or ECTOMATTER_LIGHT_SETUP=id's, as if chosen, without
+/// changing their choice.
+fn setup_in_use(settings: &settings::Settings, core: &str) -> Option<setups::Setup> {
+    std::env::var("ECTOMATTER_LIGHT_SETUP").ok().and_then(|id| setups::read(core, &id)).or_else(|| setups::in_use(settings, core))
 }
 
 /// The devices' records given what their cores, started, describe, which
@@ -1427,7 +1431,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         let setup = setups::in_use(&front.settings, &mouse::shape().core).map(|s| s.id);
         lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), front.mouse_light_model(), mouse_lab_device(&front).expect("the mouse's picture"), setup)
     } else {
-        let setup = setups::in_use(&front.settings, &core.id).map(|s| s.id);
+        let setup = setup_in_use(&front.settings, &core.id).map(|s| s.id);
         lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone(), lab_device(core, Some(&board)), setup)
     };
     let lights = front.lights().unwrap_or_default();
