@@ -68,6 +68,10 @@ This is where they live in this repository.
   (`cores/<id>/pictures/<id>.png`, from `CORE_PICTURES`, drawn denser with
   `ECTOMATTER_SCALE`; never on Ectomatter's README);
   `every_core_shows_its_device_in_its_readme` fails for a core without one.
+  Each plugin's README shows its icon as its logo, in its own repository
+  (`plugins/<name>/pictures/logo-light.svg` and `logo-dark.svg`, made by
+  `tools/plugin-logos.py`); `every_plugin_shows_its_icon_in_its_readme` holds
+  them to the icon.
   `ECTOMATTER_RENDERS=name,name` runs only those; `ECTOMATTER_RENDERS_LOG=1`
   keeps every page's log.
   `a_main_menu_item_opens_its_place_at_its_first_page` leaves each place

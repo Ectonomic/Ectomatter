@@ -571,6 +571,11 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   new scale (`front/models.rs`, `mouse_shown`;
   `the_mouse_shows_on_a_denser_screen` holds a snapshot at twice the
   density). Not yet seen in a window on a screen scaled past 1.
+- The plugins' released packages (each at its version in
+  `registry/packages.json`) carry their icon, Phosphor's under MIT, with no
+  notice of it: each plugin's `REUSE.toml` named every file Ectonomic's until
+  November 3, 2026. Its table is there now, so each plugin's next release
+  (`tools/release-package.py`) writes Phosphor's notice into the package.
 - The Keyboard lab's moving picture shows each frame settled (the keyboard
   simulated again for the readout,
   `main.rs`, `snap_lab`); the window, through a drag, reads out the light

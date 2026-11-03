@@ -977,6 +977,35 @@ fn the_mouse_shows_on_a_denser_screen() {
     }
 }
 
+/// Every plugin in `plugins/` shows its icon as the logo at the top of its
+/// own README: `pictures/logo-light.svg` and `logo-dark.svg` in its own
+/// repository, the icon its manifest names in GitHub's text colors for its
+/// light and dark themes (`tools/plugin-logos.py` makes them).
+#[test]
+fn every_plugin_shows_its_icon_in_its_readme() {
+    let mut wrong = Vec::new();
+    for e in std::fs::read_dir(repo().join("plugins")).unwrap().flatten() {
+        let Ok(manifest) = std::fs::read_to_string(e.path().join("core.json")) else { continue };
+        let manifest = ectomatter_draw::jsonc::parse(&manifest).unwrap();
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(icon) = manifest["glyph"].as_str().and_then(|g| std::fs::read_to_string(e.path().join(g)).ok()) else {
+            wrong.push(format!("{name}: no icon"));
+            continue;
+        };
+        for (theme, ink) in [("light", "#1f2328"), ("dark", "#f0f6fc")] {
+            let logo = std::fs::read_to_string(e.path().join(format!("pictures/logo-{theme}.svg"))).unwrap_or_default();
+            if logo != icon.replace("currentColor", ink) {
+                wrong.push(format!("{name}: pictures/logo-{theme}.svg isn't its icon (tools/plugin-logos.py)"));
+            }
+        }
+        let readme = std::fs::read_to_string(e.path().join("README.md")).unwrap_or_default();
+        if !readme.contains("srcset=\"pictures/logo-dark.svg\"") || !readme.contains("src=\"pictures/logo-light.svg\"") {
+            wrong.push(format!("{name}: its README doesn't show its logo"));
+        }
+    }
+    assert!(wrong.is_empty(), "plugins without their icon as their README's logo:\n  {}", wrong.join("\n  "));
+}
+
 /// Every core in `cores/` shows its device at the top of its own README:
 /// `pictures/<id>.png` in its own repository, there and shown.
 #[test]
