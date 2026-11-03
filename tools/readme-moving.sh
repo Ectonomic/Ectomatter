@@ -6,11 +6,16 @@
 #
 # - readme-hero.webp: Home on three desks one after another, each fading
 #   into the next and the last into the first, so it loops without a seam:
-#   laid out as Grant has his, orange on everything; on a full mat, a wave
-#   of color across the desk; and the mouse at the right on a mousepad with
-#   art on it
+#   laid out as Grant has his, orange on everything, a word typed and the
+#   mouse clicked, each press sending its ripple across the desk; on a full
+#   mat, a wave of color across the desk; and the mouse at the right on a
+#   mousepad with art on it, clicked, then a word typed
 # - readme-lighting.webp, readme-keys.webp: the keyboard's Lighting and Keys
 #   pages
+# - readme-keyboard-lab.webp: the Keyboard lab, the LEDs' Beam dragged
+#   through its run and the light following it
+# - readme-keycaps.webp: the keyboard's caps made over, a quarter of the
+#   turn each (renders.rs, KEYCAPS), its wave running on through them
 #
 # Animated WebP, not GIF: a GIF's 256 colors band the lights' glow. The
 # README's still pictures are held to the app by
@@ -29,14 +34,14 @@ from PIL import Image
 at = Path('target/readme-moving')
 def frames(name):
     return [Image.open(f).convert('RGB') for f in sorted((at / name).glob('frame-*.png'))]
-def save(name, seq):
+def save(name, seq, quality=82):
     out = Path('docs/pictures') / f'{name}.webp'
     # (64 frames over the light's 4 seconds: 16 a second, 62.5 ms each)
-    seq[0].save(out, save_all=True, append_images=seq[1:], duration=[62 + i % 2 for i in range(len(seq))], loop=0, quality=82, method=6)
+    seq[0].save(out, save_all=True, append_images=seq[1:], duration=[62 + i % 2 for i in range(len(seq))], loop=0, quality=quality, method=6)
     print(out, out.stat().st_size, 'bytes,', len(seq), 'frames')
 def fade(a, b):
     return [Image.blend(x, y, (k + 0.5) / len(a)) for k, (x, y) in enumerate(zip(a, b))]
-for name in ('readme-lighting', 'readme-keys'):
+for name in ('readme-lighting', 'readme-keys', 'readme-keyboard-lab', 'readme-keycaps'):
     save(name, frames(name))
 # (the hero: the first desk from its ninth frame, then the second and the third,
 # each fading into the next over half a second, and the third into the first
@@ -44,5 +49,7 @@ for name in ('readme-lighting', 'readme-keys'):
 mine, mat, pad = frames('readme-hero-mine'), frames('readme-hero-mat'), frames('readme-hero-pad')
 a, d = mine[8:], mine[:8]
 seq = a[:-8] + fade(a[-8:], mat[:8]) + mat[8:-8] + fade(mat[-8:], pad[:8]) + pad[8:-8] + fade(pad[-8:], d)
-save('readme-hero', seq)
+# (the ripples change much of each frame: a little less quality keeps the
+# README's top picture under 5 MB, the glow unbanded)
+save('readme-hero', seq, quality=70)
 PY

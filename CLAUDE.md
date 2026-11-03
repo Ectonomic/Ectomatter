@@ -58,8 +58,12 @@ This is where they live in this repository.
   fetches into `target/readme-art/` and checks against its pinned
   checksums; the art is the publishers', shown under fair use, never
   committed), held the same way (`the_readmes_pictures_are_the_app_as_it_is`);
-  its moving pictures (Home, Lighting, Keys) are made again with
-  `tools/readme-moving.sh` when those pages change.
+  its moving pictures (Home, with keys typed and the mouse clicked;
+  Lighting; Keys; the Keyboard lab, a slider dragged; the keycaps made
+  over) are made again with
+  `tools/readme-moving.sh` when those pages change (`MOVING` in
+  `renders.rs`; `ECTOMATTER_MOVING=name` and `ECTOMATTER_MOVING_AT=ms,ms`
+  draw only those frames, to look at one).
   `ECTOMATTER_RENDERS=name,name` runs only those; `ECTOMATTER_RENDERS_LOG=1`
   keeps every page's log.
   `a_main_menu_item_opens_its_place_at_its_first_page` leaves each place

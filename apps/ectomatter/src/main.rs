@@ -362,7 +362,10 @@ fn settled(tree: &usvg::Tree, device: &serde_json::Value, ground: [u8; 3], w: u3
 /// (the core's own, with none of the person's own in use).
 fn device_in_use(core: &cores::Core, settings: &settings::Settings) -> serde_json::Value {
     let mut device = core.device_now();
-    if let Some(s) = setups::in_use(settings, &core.id) {
+    // (ECTOMATTER_LIGHT_SETUP=id: a snapshot of the keyboard lit by that setup of
+    // the person's own, as if chosen, without changing their choice)
+    let chosen = std::env::var("ECTOMATTER_LIGHT_SETUP").ok().and_then(|id| setups::read(&core.id, &id));
+    if let Some(s) = chosen.or_else(|| setups::in_use(settings, &core.id)) {
         device["light"] = setups::merged(&device["light"], &s.changes);
     }
     device
@@ -1137,9 +1140,10 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     // ECTOMATTER_HOLD="j;mouse/right": those keys (by the core's ids) and mouse
     // buttons (by the core's) held down, as the devices' presses hold them
+    // (the ripples their presses sent are ECTOMATTER_RIPPLE's)
     for id in std::env::var("ECTOMATTER_HOLD").unwrap_or_default().split(';').map(str::trim).filter(|p| !p.is_empty()) {
         if let Some(button) = id.strip_prefix("mouse/") {
-            front.mouse_heard(mouse::Heard::Input(button.to_string(), true));
+            front.mouse_button_held(button, true);
         } else if let Some(pos) = front.page.layout.iter().find(|k| k.id == id).map(|k| k.pos) {
             front.page.pressed.insert(pos);
             front.refresh();
@@ -1149,18 +1153,37 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if pic.mouse_rect().2 > 0 {
         eprintln!("the mouse laid at {:?}", pic.mouse_rect());
     }
-    // ECTOMATTER_RIPPLE="f,400;enter,900;mouse/left,600": ripples from those
+    // ECTOMATTER_RIPPLE="f,400;enter,900;mouse/right,600": ripples from those
     // keys and mouse buttons (by their cores' ids), each that
     // many milliseconds into its run, as pressing them sends across Home's
-    // desk, in the devices' light as they're drawn
+    // desk, in the devices' light as they showed when each was pressed: with
+    // ECTOMATTER_LIGHT_AT, at that moment less its age (so a moving picture's
+    // ripple keeps the light it started in, as the window's does)
+    let pinned = front.light_at;
+    let mut rings = Vec::new();
     for part in std::env::var("ECTOMATTER_RIPPLE").unwrap_or_default().split(';').filter(|p| !p.is_empty()) {
         let (id, ms) = part.split_once(',').unwrap_or((part, "0"));
         let age = Duration::from_millis(ms.trim().parse().unwrap_or(0));
-        if let Some(button) = id.trim().strip_prefix("mouse/") {
-            front.ripple_from_button(button, age);
-        } else if let Some(pos) = front.page.layout.iter().find(|k| k.id == id.trim()).map(|k| k.pos) {
-            front.ripple_from_key(pos, age);
+        let from = match id.trim().strip_prefix("mouse/") {
+            Some(button) => front.button_ripple_from(button),
+            None => front.page.layout.iter().find(|k| k.id == id.trim()).and_then(|k| front.key_ripple_from(k.pos)),
+        };
+        let Some(at) = from else { continue };
+        if let Some(t) = pinned {
+            front.light_at = Some(t - age.as_millis() as f64);
+            front.scene_now();
+            let _ = front.lights();
         }
+        rings.push((at, front.ripple_light(at), age));
+    }
+    if let Some(t) = pinned.filter(|_| !rings.is_empty()) {
+        front.light_at = Some(t);
+        front.scene_now();
+        let _ = front.lights();
+    }
+    // (sent together, each its age into its run at the same moment)
+    for (at, color, age) in rings {
+        front.desk.ripple(at, color, age);
         pic.set_decor(front.desk_decor(1.0));
     }
     window.request_redraw();
@@ -1409,21 +1432,25 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     };
     let lights = front.lights().unwrap_or_default();
     let gain = front.light_gain(reference);
-    let p = board.peaks(&lights, reference as f32, gain);
-    let (photons, settled) = board.sim_progress().unwrap_or((0, false));
-    lab.set_readout(lab::Readout {
-        legend: (p.legend as f64).round(),
-        reach: (p.clean as f64).round(),
-        deck: tenth(p.deck),
-        skirt: tenth(p.skirt),
-        chassis: tenth(p.chassis),
-        lcd: (board.lcd_nits() as f64).min(gain as f64 * reference),
-        peak: gain as f64 * reference,
-        white: reference,
-        photons,
-        settled,
-        lights: if mouse { front.mouse_brightest() } else { [0.0; 2] },
-    });
+    let readout = |board: &Board, front: &Front| {
+        let p = board.peaks(&lights, reference as f32, gain);
+        let (photons, settled) = board.sim_progress().unwrap_or((0, false));
+        lab::Readout {
+            legend: (p.legend as f64).round(),
+            reach: (p.clean as f64).round(),
+            deck: tenth(p.deck),
+            skirt: tenth(p.skirt),
+            chassis: tenth(p.chassis),
+            lcd: (board.lcd_nits() as f64).min(gain as f64 * reference),
+            peak: gain as f64 * reference,
+            white: reference,
+            photons,
+            settled,
+            lights: if mouse { front.mouse_brightest() } else { [0.0; 2] },
+        }
+    };
+    lab.set_readout(readout(&board, &front));
+    let rev = lab.rev;
     let mut px = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
     let draw = |px: &mut Vec<PremultipliedRgbaColor>| {
         window.draw_if_needed(|r| {
@@ -1510,6 +1537,22 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         lab.act();
     }
     lab.act();
+    // the tuning changed: the readout as the window gives it once the device
+    // has taken the tuning and its light has settled (the keyboard simulated
+    // again with it, the mouse's lamps made again with it)
+    if lab.rev != rev {
+        let tuned = lab.shown().clone();
+        let r = if mouse {
+            front.set_mouse_light(tuned);
+            readout(&board, &front)
+        } else {
+            let mut d = device.clone();
+            d["light"] = tuned;
+            readout(&settled(&core.tree(), &d, ink_env::rgb("stage", STAGE), 1264, 506), &front)
+        };
+        eprintln!("the lab's tuning changed: legend {:.0} nits, lights {:?} nits", r.legend, r.lights);
+        lab.set_readout(r);
+    }
     window.request_redraw();
     draw(&mut px);
     // ECTOMATTER_LIGHT=file: the light the lab has tuned, written there

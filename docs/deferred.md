@@ -552,12 +552,26 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   until `--pin` takes the new one and the pictures are drawn again.
 - The README's moving pictures (`docs/pictures/readme-hero.webp`, Home on
   three desks one after another, one of them laid out and lit as Grant has
-  his, `readme-lighting.webp`, `readme-keys.webp`)
+  his, `readme-lighting.webp`, `readme-keys.webp`, `readme-keyboard-lab.webp`,
+  `readme-keycaps.webp`)
   aren't held to the app:
   `tools/readme-moving.sh` makes them again, by hand. Their stills
-  (`readme-home.png`, `readme-lighting.png`, `readme-keys.png`) are held
+  (`readme-home.png`, `readme-lighting.png`, `readme-keys.png`,
+  `readme-keyboard-lab.png`) are held
   (`the_readmes_pictures_are_the_app_as_it_is`), so a change to those pages
-  fails there first.
+  fails there first. The presses on Home, the lab's slider and the
+  keycaps aren't in the stills: a change to the ripples or to how a slider is drawn while
+  held shows only when the moving pictures are made again.
+- The Keyboard lab's moving picture shows each frame settled (the keyboard
+  simulated again for the readout,
+  `main.rs`, `snap_lab`); the window, through a drag, reads out the light
+  while its simulation is still clearing.
+- `no_page_is_found_by_a_devices_name` (`apps/ectomatter/src/boundaries.rs:281`)
+  holds the app to a list of the two cores' names typed into the check,
+  not names taken from the cores' manifests and descriptions, as Grant's
+  rule for checks asks (`no_plugin_is_reached_by_its_name` takes the
+  plugins' from theirs): a third core's names aren't checked until they're
+  typed in.
 - The mouse's lights don't move in the README: a snapshot can't hold the
   mouse's effects at a moment, as `ECTOMATTER_LIGHT_AT` holds the keyboard's
   (`front/mod.rs`, `light_at`).

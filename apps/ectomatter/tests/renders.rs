@@ -137,8 +137,7 @@ const SHOWCASE: &[Case] = &[
     Case { name: "readme-library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "296,63"), ("ECTOMATTER_LIBRARY", SHOWN_LIBRARY)] },
     Case { name: "readme-game", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_LIBRARY_PAGE", "steam_app_1091500"), ("ECTOMATTER_LIBRARY", SHOWN_LIBRARY), ("ECTOMATTER_WAIT", "1500")] },
     Case { name: "readme-plugins", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "plugins")] },
-    Case { name: "readme-keyboard-lab.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1")] },
-    Case { name: "readme-mouse-lab.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "mouse")] },
+    Case { name: "readme-keyboard-lab.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1"), ("ECTOMATTER_CLICKS", KEYBOARD_LAB_SECTION)] },
 ];
 
 /// How a showcase desk's Home is laid out (`Desk::showcase_laid`).
@@ -552,6 +551,12 @@ impl Desk {
         }
         put(&d.join("config/com.ectonomic.ectomatter/window.json"), &window.to_string());
         put(&d.join("states/mouse.json"), &mouse.to_string());
+        // (the keyboard's caps made over in the Keyboard lab, each a setup of
+        // the person's own, none of them chosen: KEYCAPS shows them)
+        for (id, name, caps) in KEYCAPS.iter().skip(1) {
+            let setup = serde_json::json!({ "name": name, "light": serde_json::from_str::<serde_json::Value>(caps).unwrap() });
+            put(&d.join(format!("data/com.ectonomic.ectomatter/light/evga-z10/{id}.json")), &setup.to_string());
+        }
         desk.steam = at.join("home/.local/share/Steam");
         desk.states = Some((at.join("states/keyboard.json"), at.join("states/mouse.json")));
         desk
@@ -727,20 +732,118 @@ fn the_readmes_pictures_are_the_app_as_it_is() {
 }
 
 /// The README's moving pictures (`tools/readme-moving.sh` makes each one
-/// from its frames), each at every moment of one turn of the light
-/// (ECTOMATTER_LIGHT_AT, which scenes follow too), into
+/// from its frames), each at every moment of one turn (ECTOMATTER_LIGHT_AT,
+/// which the lights' effects and scenes follow), into
 /// target/readme-moving/<name>/: Home on three desks, which the README's top
 /// picture plays one after another (laid out as Grant has his, orange on
-/// everything; a full mat, lit by the wave of color across the desk; the
-/// mouse at the right on a mousepad with art on it, the keyboard's own wave),
-/// and the keyboard's Lighting and Keys pages.
-const MOVING: &[(&str, Laid, &[(&str, &str)])] = &[
-    ("readme-hero-mine", Laid::Mine, &[("ECTOMATTER_PLACE", "home")]),
-    ("readme-hero-mat", Laid::Mat, &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_SCENE", "wave")]),
-    ("readme-hero-pad", Laid::Pad, &[("ECTOMATTER_PLACE", "home")]),
-    ("readme-lighting", Laid::Mat, &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")]),
-    ("readme-keys", Laid::Mat, &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416")]),
+/// everything, a word typed and the mouse clicked; a full mat, lit by the
+/// wave of color across the desk; the mouse at the right on a mousepad with
+/// art on it, clicked, then a word typed, the keyboard's own wave), the
+/// keyboard's Lighting and Keys pages, the Keyboard lab with a slider moved
+/// through its run, and the keyboard's caps made over.
+const MOVING: &[Moving] = &[
+    Moving { name: "readme-hero-mine", laid: Laid::Mine, size: WIDE, set: &[("ECTOMATTER_PLACE", "home")], at: |ms| pressed(TYPED_MINE, ms) },
+    Moving { name: "readme-hero-mat", laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_SCENE", "wave")], at: |_| Vec::new() },
+    Moving { name: "readme-hero-pad", laid: Laid::Pad, size: WIDE, set: &[("ECTOMATTER_PLACE", "home")], at: |ms| pressed(TYPED_PAD, ms) },
+    Moving { name: "readme-lighting", laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")], at: |_| Vec::new() },
+    Moving { name: "readme-keys", laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416")], at: |_| Vec::new() },
+    Moving { name: "readme-keyboard-lab.window", laid: Laid::Mat, size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1"), ("ECTOMATTER_CLICKS", KEYBOARD_LAB_SECTION)], at: |ms| slid(&KEYBOARD_LAB_SLIDER, ms) },
+    Moving { name: "readme-keycaps", laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")], at: |ms| vec![("ECTOMATTER_LIGHT_SETUP", KEYCAPS[(ms * KEYCAPS.len() as u32 / TURN) as usize].0.to_string())] },
 ];
+
+/// The keyboard's caps as its moving picture shows them, a quarter of the
+/// turn each, the keys' wave running on through them: as the keyboard comes
+/// (black shine-through caps), then made over in the Keyboard lab, each a
+/// setup of the person's own (its id, its name, and what it changes of the
+/// light): pudding caps, black tops over clear sides; translucent caps, clear
+/// all over; white shine-through caps.
+const KEYCAPS: &[(&str, &str, &str)] = &[
+    ("", "", ""),
+    ("pudding", "Pudding", r#"{ "caps": { "kind": "pudding", "opacity": 0.3, "black": 0.35, "milky": 0.55 } }"#),
+    ("translucent", "Translucent", r#"{ "caps": { "kind": "translucent", "opacity": 0.6, "milky": 0.3 } }"#),
+    ("white", "White", r##"{ "caps": { "kind": "shine-through", "color": "#E6E4DF" } }"##),
+];
+
+/// One of the README's moving pictures: its name (`.window` for one of
+/// Ectomatter's other windows), the desk it's drawn on, its size, what's set
+/// for every frame, and what for the frame at each moment of its turn (in
+/// milliseconds).
+struct Moving {
+    name: &'static str,
+    laid: Laid,
+    size: (u32, u32),
+    set: &'static [(&'static str, &'static str)],
+    at: fn(u32) -> Vec<(&'static str, String)>,
+}
+
+/// One turn of a moving picture, in milliseconds: the wave's and the
+/// scene's (showcase_laid), so each picture loops.
+const TURN: u32 = 4000;
+
+/// What's pressed on a desk as its moving picture plays: a key (by the
+/// keyboard's core's id) or a mouse button ("mouse/" and the mouse's core's
+/// id), when it goes down and when it's let go, in milliseconds into the
+/// turn. (A desk shows alone from half a second into its turn to half a
+/// second before its end, and the README's top picture fades between them
+/// there: so each press is in that time, and early enough for its ripple to
+/// have run out across the desk before it.)
+type Presses = &'static [(&'static str, u32, u32)];
+
+/// Grant's desk: "ecto" typed, left to right across the keyboard, then the
+/// mouse clicked (its right button: the left one is the pointer's, whose
+/// ripple comes from where it clicks Home's desk).
+const TYPED_MINE: Presses = &[("e", 700, 790), ("c", 850, 930), ("t", 1000, 1085), ("o", 1160, 1250), ("mouse/right", 1900, 2010)];
+
+/// The mousepad's desk: the mouse clicked, then "nice" typed, right to left.
+const TYPED_PAD: Presses = &[("mouse/right", 700, 800), ("n", 1350, 1440), ("i", 1500, 1580), ("c", 1640, 1725), ("e", 1790, 1880)];
+
+/// A desk's presses at a moment: those held down (ECTOMATTER_HOLD), and the
+/// ripple each one pressed so far sent, how far into its run
+/// (ECTOMATTER_RIPPLE; one run out shows nothing).
+fn pressed(presses: Presses, ms: u32) -> Vec<(&'static str, String)> {
+    let held: Vec<&str> = presses.iter().filter(|(_, down, up)| (*down..*up).contains(&ms)).map(|(id, ..)| *id).collect();
+    let sent: Vec<String> = presses.iter().filter(|(_, down, _)| ms >= *down).map(|(id, down, _)| format!("{id},{}", ms - down)).collect();
+    vec![("ECTOMATTER_HOLD", held.join(";")), ("ECTOMATTER_RIPPLE", sent.join(";"))]
+}
+
+/// The Keyboard lab's LEDs section, by its tab, and its Beam: how tight
+/// the LED's beam is, its cone and the light it puts on the cap's top
+/// following it, from a pencil of light to a wash.
+const KEYBOARD_LAB_SECTION: &str = "1099,71";
+const KEYBOARD_LAB_SLIDER: Slider = Slider { run: (51.0, 291.0), y: 397.0, rest: 0.206, reach: (0.0, 1.0) };
+
+/// A lab's slider, as its moving picture moves it: where its run starts and
+/// ends across the window and its height down it (the knob's middle at each
+/// end, logical pixels), where it rests (0 to 1 along the run), and how far
+/// each way the picture takes it.
+struct Slider {
+    run: (f32, f32),
+    y: f32,
+    rest: f32,
+    reach: (f32, f32),
+}
+
+/// A lab's slider held at a moment of its turn (ECTOMATTER_PRESS: the
+/// knob held where the pointer is, as a drag holds it), each frame drawn
+/// once the light has settled: taken from where it rests (a hair along, so
+/// the tuning shows changed from the first frame to the last, as it does
+/// through a drag) to one end of its reach, across to the other, and back,
+/// eased at each turn.
+fn slid(s: &Slider, ms: u32) -> Vec<(&'static str, String)> {
+    let (lo, hi) = s.reach;
+    let rest = s.rest + 0.004;
+    let t = ms as f32 / TURN as f32;
+    let ease = |k: f32| 0.5 - 0.5 * (std::f32::consts::PI * k).cos();
+    // (a quarter of the turn to the near end, half across, a quarter back)
+    let f = if t < 0.25 {
+        rest + (hi - rest) * ease(t / 0.25)
+    } else if t < 0.75 {
+        hi + (lo - hi) * ease((t - 0.25) / 0.5)
+    } else {
+        lo + (rest - lo) * ease((t - 0.75) / 0.25)
+    };
+    vec![("ECTOMATTER_PRESS", format!("{:.1},{}", s.run.0 + (s.run.1 - s.run.0) * f, s.y))]
+}
 
 #[test]
 #[ignore = "makes the README's moving pictures' frames: tools/readme-moving.sh runs it"]
@@ -749,29 +852,41 @@ fn the_readmes_moving_pictures() {
     let desks: Vec<(Laid, Desk)> = [Laid::Mat, Laid::Mine, Laid::Pad].into_iter().map(|l| (l, Desk::showcase_laid(l))).collect();
     let frames: u32 = std::env::var("ECTOMATTER_MOVING_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(64);
     let only = std::env::var("ECTOMATTER_MOVING").unwrap_or_default();
-    let turn = 4000;
     let out = repo().join("target/readme-moving");
-    let jobs: Vec<(&str, Laid, &[(&str, &str)], u32)> = MOVING
+    let named = |m: &Moving| m.name.trim_end_matches(".window").to_string();
+    for o in only.split(',').filter(|o| !o.is_empty()) {
+        assert!(MOVING.iter().any(|m| named(m) == o), "ECTOMATTER_MOVING names {o}, which is no moving picture here");
+    }
+    // (ECTOMATTER_MOVING_AT=ms,ms: only the frames at those moments, to look at one)
+    let at: Vec<u32> = std::env::var("ECTOMATTER_MOVING_AT").unwrap_or_default().split(',').filter_map(|v| v.trim().parse().ok()).collect();
+    let moments: Vec<u32> = if at.is_empty() { (0..frames).map(|n| n * TURN / frames).collect() } else { at.clone() };
+    let jobs: Vec<(&Moving, u32)> = MOVING
         .iter()
-        .filter(|(name, _, _)| only.is_empty() || only.split(',').any(|o| o == *name))
-        .flat_map(|(name, laid, set)| (0..frames).map(move |n| (*name, *laid, *set, n * turn / frames)))
+        .filter(|m| only.is_empty() || only.split(',').any(|o| o == named(m)))
+        .flat_map(|m| moments.iter().map(move |ms| (m, *ms)))
         .collect();
-    for (name, _, _, _) in &jobs {
-        let _ = std::fs::remove_dir_all(out.join(name));
+    if at.is_empty() {
+        for (m, _) in &jobs {
+            let _ = std::fs::remove_dir_all(out.join(named(m)));
+        }
     }
     std::thread::scope(|s| {
         for group in jobs.chunks(4) {
             let handles: Vec<_> = group
                 .iter()
-                .map(|(name, laid, set, ms)| {
-                    let (desk, out) = (&desks.iter().find(|(l, _)| l == laid).unwrap().1, &out);
+                .map(|(m, ms)| {
+                    let (desk, out, named) = (&desks.iter().find(|(l, _)| *l == m.laid).unwrap().1, &out, &named);
                     s.spawn(move || {
-                        let at: &'static str = Box::leak(ms.to_string().into_boxed_str());
-                        let mut all: Vec<(&'static str, &'static str)> = set.iter().map(|(k, v)| (*k, *v)).collect();
-                        all.push(("ECTOMATTER_LIGHT_AT", at));
-                        let case = Case { name: Box::leak(name.to_string().into_boxed_str()), size: WIDE, set: Box::leak(all.into_boxed_slice()) };
-                        let (picture, _) = desk.draw(&case, &format!("-{ms}")).unwrap();
-                        picture.write_png(&out.join(name).join(format!("frame-{ms:05}.png")));
+                        let mut all: Vec<(&'static str, &'static str)> = m.set.to_vec();
+                        let leak = |v: String| -> &'static str { Box::leak(v.into_boxed_str()) };
+                        all.push(("ECTOMATTER_LIGHT_AT", leak(ms.to_string())));
+                        all.extend((m.at)(*ms).into_iter().map(|(k, v)| (k, leak(v))));
+                        let case = Case { name: m.name, size: m.size, set: Box::leak(all.into_boxed_slice()) };
+                        let (picture, said) = desk.draw(&case, &format!("-{ms}")).unwrap();
+                        picture.write_png(&out.join(named(m)).join(format!("frame-{ms:05}.png")));
+                        if std::env::var_os("ECTOMATTER_RENDERS_LOG").is_some() {
+                            put(&out.join(named(m)).join(format!("frame-{ms:05}.log")), &said);
+                        }
                     })
                 })
                 .collect();

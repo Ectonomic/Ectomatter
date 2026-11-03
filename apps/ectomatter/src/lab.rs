@@ -3492,17 +3492,16 @@ impl LabPage {
     /// of photons, then without its heading (both still told under the
     /// pointer), then without the desktop's white, then without the display.
     /// What was last done takes no more than the room left beside the
-    /// shortest, its words wrapping past it.
+    /// shortest, its words wrapping past it. While the tuning differs from
+    /// what's saved (as through a drag, its numbers changing), how much it
+    /// says is fitted with each number as wide as numbers get, so it says the
+    /// same throughout, its heading not coming and going with their digits.
     fn readout_line(&self) -> Vec<Cell> {
         let status = self.status_shown();
         let room = self.foot_room() - if status.is_empty() { 0.0 } else { (text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, status) + 16.0).min(self.status_room() + 16.0) };
-        for level in 0..5 {
-            let (cells, end) = self.readout_at(level);
-            if end - 24.0 <= room || level == 4 {
-                return cells;
-            }
-        }
-        unreachable!()
+        let widest = self.light != self.saved;
+        let level = (0..4).find(|l| self.readout_at(*l, widest).1 - 24.0 <= room).unwrap_or(4);
+        self.readout_at(level, false).0
     }
 
     /// What the foot says was last done: "Changed, not saved." if nothing else.
@@ -3522,13 +3521,21 @@ impl LabPage {
 
     /// The most room what was last done takes: what the shortest readout leaves.
     fn status_room(&self) -> f32 {
-        self.foot_room() - (self.readout_at(4).1 - crate::tokens::space::MARGIN) - crate::tokens::space::PAD
+        self.foot_room() - (self.readout_at(4, false).1 - crate::tokens::space::MARGIN) - crate::tokens::space::PAD
     }
 
     /// The readout laid out, saying less as `level` rises; and where it ends.
-    fn readout_at(&self, level: u8) -> (Vec<Cell>, f32) {
+    /// With `widest`, each number as wide as numbers get (five figures for
+    /// the legend, six for the photons, three for the rest, each the widest
+    /// figure), and the simulation in its longest words, clearing.
+    fn readout_at(&self, level: u8, widest: bool) -> (Vec<Cell>, f32) {
         use crate::tokens::{color, font, ink, line, size, space, stroke};
-        let r = self.readout;
+        let r = if widest {
+            let most = 888.0;
+            Readout { legend: 88_888.0, deck: most, skirt: most, chassis: most, lcd: most, white: most, photons: 888_888, settled: false, lights: [most; 2], ..self.readout }
+        } else {
+            self.readout
+        };
         // (each reading on the foot's line, in the middle of the foot; its zone round it)
         let ly = (size::FOOT - line::NOTE) / 2.0;
         let zy = (size::FOOT - ZONE_H) / 2.0;

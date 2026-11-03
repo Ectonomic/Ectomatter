@@ -734,14 +734,7 @@ impl Front {
             // comes from where it clicks the desk); one given one of Ectomatter's
             // macros plays it (let go ends one that plays while it's held)
             Heard::Input(control, down) => {
-                // (held down on its pictures as it is on the mouse)
-                if let Some(b) = crate::mouse::shape().buttons.iter().position(|b| b.id == control) {
-                    let held = if down { self.mouse_down | 1 << b } else { self.mouse_down & !(1 << b) };
-                    if held != self.mouse_down {
-                        self.mouse_down = held;
-                        self.show_mouse_held();
-                    }
-                }
+                self.mouse_button_held(&control, down);
                 if down {
                     self.ripple_from_button(&control, Duration::ZERO);
                     // (a light that flashes as a button is pressed, flashing on the picture as on the mouse)
@@ -884,6 +877,18 @@ impl Front {
         }
     }
 
+    /// A mouse button (by the core's name for it) held down or let go: held
+    /// down on its pictures as it is on the mouse.
+    pub fn mouse_button_held(&mut self, control: &str, down: bool) {
+        if let Some(b) = crate::mouse::shape().buttons.iter().position(|b| b.id == control) {
+            let held = if down { self.mouse_down | 1 << b } else { self.mouse_down & !(1 << b) };
+            if held != self.mouse_down {
+                self.mouse_down = held;
+                self.show_mouse_held();
+            }
+        }
+    }
+
     /// The mouse's buttons held down, as they are now, on the picture of it
     /// that shows (drawn again now), and on the other when it next shows;
     /// neither drawn while the window is closed into the tray.
@@ -973,12 +978,16 @@ impl Front {
 
     /// Each of the mouse's lights at its brightest now, in nits: its window
     /// over its LED in the light's color of the moment, no brighter than the
-    /// screen shows (Peak nits); 0 for a light that's off.
+    /// screen shows (Peak nits); 0 for a light that's off. In the order the
+    /// core lists its lights, as the lab names them (mouse_lab_parts), not
+    /// the order they're set in.
     pub fn mouse_brightest(&self) -> [f64; 2] {
         let Some((_, hdr)) = &self.mouse_hdr else { return [0.0; 2] };
         let now = Instant::now();
         let most = self.light_gain(self.levels.0) as f64 * self.levels.0;
-        std::array::from_fn(|i| {
+        let order = self.mouse.light_order();
+        std::array::from_fn(|k| {
+            let Some(&(i, ..)) = order.get(k) else { return 0.0 };
             let Some(c) = self.mouse_color(i, now) else { return 0.0 };
             let lin = |v: u8| (v as f64 / 255.0).powf(2.2);
             let y = 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);

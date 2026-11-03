@@ -390,9 +390,16 @@ impl Front {
     /// A key pressed on the keyboard Home shows: a ripple runs out across the
     /// desk from the key, `age` into its run.
     pub fn ripple_from_key(&mut self, pos: u32, age: Duration) {
-        let Some(k) = self.page.key(pos) else { return };
-        let Some(at) = self.on_desk_keyboard(k.cx, k.cy) else { return };
-        self.ripple_at(at, age);
+        if let Some(at) = self.key_ripple_from(pos) {
+            self.ripple_at(at, age);
+        }
+    }
+
+    /// Where a key's ripple starts on Home's desk (its logical pixels): the
+    /// key's middle, where the keyboard sits; none off Home.
+    pub fn key_ripple_from(&self, pos: u32) -> Option<(f32, f32)> {
+        let k = self.page.key(pos)?;
+        self.on_desk_keyboard(k.cx, k.cy)
     }
 
     /// A mouse button pressed (by the core's name for it, see mouse::BUTTONS):
@@ -401,14 +408,21 @@ impl Front {
     /// ripple comes from where the pointer clicks the desk, and from nowhere
     /// when the click is elsewhere.
     pub fn ripple_from_button(&mut self, control: &str, age: Duration) {
-        let Some(b) = crate::mouse::shape().buttons.iter().position(|b| b.id == control) else { return };
-        if self.mouse.job(b)["mouse"].as_u64() == Some(1) {
-            return;
+        if let Some(at) = self.button_ripple_from(control) {
+            self.ripple_at(at, age);
         }
-        let Some((dw, layers)) = self.desk_layers() else { return };
-        let Some(&(x, y)) = crate::mouse_art::button_middles(layers, dw).get(b) else { return };
-        let Some(at) = self.on_desk_mouse(x, y) else { return };
-        self.ripple_at(at, age);
+    }
+
+    /// Where a mouse button's ripple starts on Home's desk: the button's
+    /// middle, where the mouse sits; none for the pointer's click.
+    pub fn button_ripple_from(&self, control: &str) -> Option<(f32, f32)> {
+        let b = crate::mouse::shape().buttons.iter().position(|b| b.id == control)?;
+        if self.mouse.job(b)["mouse"].as_u64() == Some(1) {
+            return None;
+        }
+        let (dw, layers) = self.desk_layers()?;
+        let &(x, y) = crate::mouse_art::button_middles(layers, dw).get(b)?;
+        self.on_desk_mouse(x, y)
     }
 
     /// A ripple from a point of Home's desk (its logical pixels), `age` into
@@ -419,9 +433,15 @@ impl Front {
         if self.hidden || self.ui.get_place() != "home" {
             return;
         }
-        let color = crate::desk::ripple_light(at, &self.lights_on_desk());
+        let color = self.ripple_light(at);
         self.desk.ripple(at, color, age);
         self.desk_frames_run();
+    }
+
+    /// The light a ripple from a point of Home's desk runs in, as the devices
+    /// show now (see desk::ripple_light).
+    pub fn ripple_light(&self, at: (f32, f32)) -> [u8; 3] {
+        crate::desk::ripple_light(at, &self.lights_on_desk())
     }
 
     /// Each light on Home's desk as it shows now: where it sits (the desk's

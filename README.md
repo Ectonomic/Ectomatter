@@ -13,14 +13,15 @@
 <p align="center">
   <a href="#the-desk">The desk</a> &nbsp;·&nbsp;
   <a href="#what-a-device-gets">What a device gets</a> &nbsp;·&nbsp;
-  <a href="#cores-and-plugins">Cores and plugins</a> &nbsp;·&nbsp;
+  <a href="#device-cores">Device cores</a> &nbsp;·&nbsp;
+  <a href="#plugins">Plugins</a> &nbsp;·&nbsp;
   <a href="#getting-it">Getting it</a>
 </p>
 
 <br>
 
 <p align="center">
-  <img src="docs/pictures/readme-hero.webp" width="100%" alt="Ectomatter's Home on three desks in turn: the mouse left of the keyboard on an orange pad, everything glowing orange; both on a full mat printed with a mountain road at night, one rainbow wave crossing the keyboard and then the mouse; the mouse right of the keyboard on a mousepad printed with Hokusai's Great Wave">
+  <img src="docs/pictures/readme-hero.webp" width="100%" alt="Ectomatter's Home on three desks in turn: the mouse left of the keyboard on an orange pad, everything glowing orange, a word typed and the mouse clicked, each press sending a ripple of its light across the desk; both on a full mat printed with a mountain road at night, one rainbow wave crossing the keyboard and then the mouse; the mouse right of the keyboard on a mousepad printed with Hokusai's Great Wave, clicked, then a word typed, the ripples in the colors of the keys">
 </p>
 
 Keyboards, mice and the rest of a desk usually each come with their maker's
@@ -40,8 +41,9 @@ weather.
 
 Home draws every device to scale, lit as it's lit right now, and **Arrange**
 puts each one where it sits on your real desk, on the pads and mats it sits
-on, each a color of its own or a photo you choose. Select a device to change
-it.
+on, each a color of its own or a photo you choose. Keys and mouse buttons
+send a ripple of their light across the desk as you press them. Select a
+device to change it.
 
 ### Scenes across every device
 
@@ -68,7 +70,7 @@ Ectomatter puts everything back.
 ## What a device gets
 
 Every device Ectomatter drives gets pages like these, built from what its
-core describes. They're shown with the first two cores: an EVGA Z10 RGB
+[core](#device-cores) describes. They're shown with the first two cores: an EVGA Z10 RGB
 keyboard and a SteelSeries Sensei 310 mouse.
 
 ### Lighting
@@ -88,13 +90,21 @@ screen a lit key glows brighter than the white of the page, as an LED does.
 
 The **Keyboard Lab** and the **Mouse Lab** tune that light to match the device
 on your desk: its keycaps and their plastic, its legends' typeface, size and
-place, its LEDs, its wells, its screen, its windows. Save the result as a
-setup of your own.
+place, its LEDs, its wells, its screen, its windows. Each slider sets
+something physical, in millimeters, lumens or a share of the light, and the
+light follows it as you drag. Save the result as a setup of your own.
 
-<p>
-  <img src="docs/pictures/readme-keyboard-lab.png" width="49%" alt="The Keyboard Lab: one key's legends lit, with their typeface, weight, size and place, and a readout of the brightest legend in nits, well above the desktop's white">
-  <img src="docs/pictures/readme-mouse-lab.png" width="49%" alt="The Mouse Lab: a light's LED under its window, with its depth, output, how much passes through the window and the halo round it">
-</p>
+<img src="docs/pictures/readme-keyboard-lab.webp" width="100%" alt="The Keyboard Lab's LEDs: the Beam slider dragged from tight to wide, the cone of light out of the switch and the light on the cap's top following it, the brightest legend read out in nits">
+
+### Keycaps of your own
+
+Put your own caps on the keyboard, the ones you have or the ones you want:
+shine-through, pudding or translucent plastic, any color on their tops and
+sides, legends in another typeface, weight, size and place, homing bumps on
+any key. Any one key can be set apart, with words or a picture of its own in
+place of its letter. Ectomatter lights each cap as its plastic would.
+
+<img src="docs/pictures/readme-keycaps.webp" width="100%" alt="The keyboard's page, its orange and teal wave running on while its caps change: black shine-through caps as it comes, pudding caps glowing through their clear sides, translucent caps lit all over, then white caps">
 
 ### Keys, buttons and macros
 
@@ -128,34 +138,84 @@ by Ectomatter.
 
 <img src="docs/pictures/readme-mouse.png" width="100%" alt="A mouse's Lighting page: the mouse with its logo lit teal and its wheel orange, and the effects to choose from">
 
-## Cores and plugins
+## Device cores
 
-Every core and plugin runs inside Ectomatter as a WebAssembly module and
-reaches only what its manifest names: a core, the USB devices it lists; a
-plugin, the folders, programs and addresses it lists. In Settings, **Add a
-device core** and **Add a plugin** show what a package can reach before you
-add it, and take it only if it matches the checksum pinned in
-[Ectonomic's list of reviewed packages](https://github.com/Ectonomic/ectomatter-packages).
-Ectomatter checks each package's releases once a day, and a version that can
-reach more than the one you have waits for you to review it.
+Ectomatter works the way RetroArch does for emulators: one app, and a
+**core** for each device. The core knows its device: how to find it, what it
+can do and how to talk to it. Ectomatter does everything you see, and
+everything that spans more than one device.
 
-These are the packages so far, each in a repository of its own, linked here
-under `cores/` and `plugins/`:
+A core never draws a page. It describes its device in data:
 
-| | Package | What it does |
-|---|---|---|
-| Core | [EVGA Z10 RGB](https://github.com/Ectonomic/ectomatter-evga-z10) | Keys, lighting and the screen of the EVGA Z10 RGB |
-| Core | [SteelSeries Sensei 310](https://github.com/Ectonomic/ectomatter-steelseries-sensei-310) | Buttons, lighting and sensitivity of the SteelSeries Sensei 310 |
-| Plugin | [Game Configurator](https://github.com/Ectonomic/ectomatter-game-configurator) | Proton, prefixes, gamescope, GameMode and MangoHud for each game |
-| Plugin | [Monitor Switcher](https://github.com/Ectonomic/ectomatter-monitor-switcher) | Brightness, resolution, HDR and more, set for each game |
-| Plugin | [OpenRGB Link](https://github.com/Ectonomic/ectomatter-openrgb-link) | Lighting that OpenRGB controls, such as your RAM, in scenes and switched for each game |
-| Plugin | [Sensor Feed](https://github.com/Ectonomic/ectomatter-sensor-feed) | Your computer's temperatures, loads and fans, for screens that show them |
-| Plugin | [Weather Feed](https://github.com/Ectonomic/ectomatter-weather-feed) | The weather and warnings where you are, for screens that show them |
+- its drawing, one SVG in numbered pieces, so Ectomatter can find each key,
+  button and screen on it
+- its controls: every key, button, dial and slider, by name
+- what's printed on each key, so the legends can be set again in another
+  typeface, size or place
+- its light: where each LED sits and how its light gets out, in millimeters
+  and lumens, which Ectomatter simulates and the labs tune
+- what it can do (its keys' jobs, macros, lighting effects, screens, profiles
+  and settings), and only what the device really has
+
+Ectomatter has one page for each thing a device can do, built from the
+description, so every device that does it is set up the same way, whoever
+made it. Nothing in the app is written for one device. Tests hold it to that:
+a keyboard and a mouse it has never seen get their pages from their
+descriptions alone, and no package is named anywhere in the app's own code.
+
+How a core treats its device:
+
+- **The device is the truth.** A device that keeps its settings in its own
+  memory, as the keyboard does, is read each time, so there's no second copy
+  to drift out of step. For a device that can't tell back what it's set to,
+  as the mouse can't, Ectomatter keeps the record.
+- **Changes are careful.** A preview plays on the device without storing
+  anything. A save to the keyboard is read back to check it took, and before
+  its first write each time it starts, the keyboard's core keeps a copy of
+  every profile and macro on it. A command that could harm a device is never
+  offered: the keyboard's core has no way into its firmware updater.
+- **Each core is sealed off.** It runs inside Ectomatter as a WebAssembly
+  module, on a thread of its own, and reaches only the USB devices its
+  manifest lists. One that crashes, hangs or takes too much memory is stopped
+  and started again, and nothing else goes down with it.
+
+| Core | What it does |
+|---|---|
+| [EVGA Z10 RGB](https://github.com/Ectonomic/ectomatter-evga-z10) | Keys, lighting and the screen of the EVGA Z10 RGB |
+| [SteelSeries Sensei 310](https://github.com/Ectonomic/ectomatter-steelseries-sensei-310) | Buttons, lighting and sensitivity of the SteelSeries Sensei 310 |
+
+These two were worked out from the software that already drives them and
+from open projects: the keyboard's from EVGA's Unleash RGB and AIDA64, the
+mouse's with rivalcfg and libratbag as references. Is your device missing?
+Anyone can write its core: [Making a core or a plugin](docs/making-a-package.md).
+
+## Plugins
+
+A plugin brings in what isn't a device: your games, your monitors, other
+programs, the weather. It's sealed off as a core is, and reaches only what
+its manifest lists: the folders it reads, the programs it starts, the
+addresses it talks to. A plugin can add a section to each game's page in the
+Library, give screens readings to show, or bring another program's lights
+into scenes.
+
+| Plugin | What it does |
+|---|---|
+| [Game Configurator](https://github.com/Ectonomic/ectomatter-game-configurator) | Proton, prefixes, gamescope, GameMode and MangoHud for each game |
+| [Monitor Switcher](https://github.com/Ectonomic/ectomatter-monitor-switcher) | Brightness, resolution, HDR and more, set for each game |
+| [OpenRGB Link](https://github.com/Ectonomic/ectomatter-openrgb-link) | Lighting that OpenRGB controls, such as your RAM, in scenes and switched for each game |
+| [Sensor Feed](https://github.com/Ectonomic/ectomatter-sensor-feed) | Your computer's temperatures, loads and fans, for screens that show them |
+| [Weather Feed](https://github.com/Ectonomic/ectomatter-weather-feed) | The weather and warnings where you are, for screens that show them |
 
 <img src="docs/pictures/readme-plugins.png" width="100%" alt="Settings, Plugins: the five plugins, what each reaches, and On and Off for each">
 
-Is your device missing? A core is how it gets here, and anyone can write one:
-[Making a core or a plugin](docs/making-a-package.md).
+## Adding a core or a plugin
+
+In Settings, **Add a device core** and **Add a plugin** show what a package
+can reach before you add it, and take it only if it matches the checksum
+pinned in [Ectonomic's list of reviewed packages](https://github.com/Ectonomic/ectomatter-packages).
+Ectomatter checks each package's releases once a day, and a version that can
+reach more than the one you have waits for you to review it. Each core and
+plugin is a repository of its own, linked here under `cores/` and `plugins/`.
 
 ## Getting it
 
