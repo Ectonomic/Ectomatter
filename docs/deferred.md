@@ -550,8 +550,9 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   the render tests need it fetched once, so they need the network the
   first time, and Steam changing a game's art fails the fetch's checksum
   until `--pin` takes the new one and the pictures are drawn again.
-- The README's moving pictures (`docs/pictures/readme-hero.webp`,
-  `readme-lighting.webp`, `readme-keys.webp`) aren't held to the app:
+- The README's moving pictures (`docs/pictures/readme-hero.webp`, Home on
+  three desks one after another, `readme-lighting.webp`, `readme-keys.webp`)
+  aren't held to the app:
   `tools/readme-moving.sh` makes them again, by hand. Their stills
   (`readme-home.png`, `readme-lighting.png`, `readme-keys.png`) are held
   (`the_readmes_pictures_are_the_app_as_it_is`), so a change to those pages

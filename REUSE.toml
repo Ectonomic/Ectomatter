@@ -194,10 +194,10 @@ path = ["docs/pictures/readme-library.png", "docs/pictures/readme-game.png"]
 SPDX-FileCopyrightText = ["2026 Ectonomic LLC", "Each game's publisher (its cover, banner and logo)"]
 SPDX-License-Identifier = "GPL-3.0-only AND LicenseRef-Fair-Use"
 
-# the photo on the showcase desk's mat: the McDowell Mountains at sunset, by
-# Harald Nagel (Wikimedia Commons, File:McDowell_Mountains_at_sunset.jpg),
+# the photo on the showcase desk's mat: Drive Mountains Night, its author
+# unnamed (PikWizard; Wikimedia Commons, File:Drive_Mountains_Night.jpg),
 # cropped to the mat
 [[annotations]]
 path = ["apps/ectomatter/tests/renders/showcase/pad.jpg"]
-SPDX-FileCopyrightText = "Harald Nagel (Wikimedia Commons)"
+SPDX-FileCopyrightText = "Unknown author (PikWizard, via Wikimedia Commons)"
 SPDX-License-Identifier = "CC0-1.0"

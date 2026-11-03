@@ -141,6 +141,17 @@ const SHOWCASE: &[Case] = &[
     Case { name: "readme-mouse-lab.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "mouse")] },
 ];
 
+/// How a showcase desk's Home is laid out (`Desk::showcase_laid`).
+#[derive(Clone, Copy, PartialEq)]
+enum Laid {
+    /// a full mat under the keyboard and the mouse, the mouse at the right
+    Mat,
+    /// as Grant has his desk: the mouse at the left, on a pad of its own
+    Mine,
+    /// the mouse well away from the keyboard, no pad
+    Apart,
+}
+
 /// Where the showcase's Library is in the sandbox (`Desk::showcase` writes it;
 /// a snapshot reads it, and writes nothing back).
 const SHOWN_LIBRARY: &str = "/tmp/ectomatter-renders/showcase/library.json";
@@ -456,8 +467,6 @@ struct Desk {
     /// The keyboard's and the mouse's states in the sandbox, when they aren't
     /// the fixtures' (`desk/keyboard.json`, `desk/mouse.json`).
     states: Option<(PathBuf, PathBuf)>,
-    /// The pads on Home's desk, as window.json keeps them, in the sandbox.
-    pads: Option<PathBuf>,
 }
 
 impl Desk {
@@ -479,37 +488,56 @@ impl Desk {
             set_up(&d.join("config"));
         }
         let steam = at.join("steam");
-        Desk { scratch, at, plugged, steam, states: None, pads: None }
+        Desk { scratch, at, plugged, steam, states: None }
     }
 
     /// The desk the README's pictures are drawn on: one that's set up, its
     /// Steam in the person's own folder (`~/.local/share/Steam`) with real
     /// games and their art, its keyboard and mouse lit for showing, and a mat
-    /// under them.
+    /// with a photo under them.
     fn showcase() -> Desk {
-        let mut desk = Desk::new("showcase", true, true);
+        Desk::showcase_laid(Laid::Mat)
+    }
+
+    /// The showcase desk, its Home laid out as `laid` says (window.json's
+    /// "desk" places and "desk_pads", as Arrange keeps them).
+    fn showcase_laid(laid: Laid) -> Desk {
+        let name = match laid {
+            Laid::Mat => "showcase",
+            Laid::Mine => "showcase-mine",
+            Laid::Apart => "showcase-apart",
+        };
+        let mut desk = Desk::new(name, true, true);
         let (d, at) = (desk.scratch.0.clone(), desk.at.clone());
         shown_steam(&d.join("home/.local/share/Steam"), &at.join("home/.local/share/Steam"));
         put(&d.join("states/keyboard.json"), &shown_keyboard().to_string());
         // (the first game set up: its scene and the keyboard's profile while it
         // plays, and a Proton build of its own)
-        assert_eq!(at.join("library.json"), Path::new(SHOWN_LIBRARY));
+        assert!(name != "showcase" || at.join("library.json") == Path::new(SHOWN_LIBRARY));
         let library = serde_json::json!({
             "choices": { "steam_app_1091500": { "scene": "scene-1", "z10": "2" } },
             "plugins": { "game-configurator": { "steam_app_1091500": { "version": "GE-Proton10-25" } } }
         });
         put(&d.join("library.json"), &library.to_string());
-        // (the mouse's wheel lit its own color, so the logo's page doesn't say
-        // the wheel copies it)
-        put(&d.join("config/com.ectonomic.ectomatter/window.json"), &serde_json::json!({ "mouse_same_wheel": false }).to_string());
+        // (Home as `laid` lays it out; and the mouse's wheel lit its own color,
+        // so the logo's page doesn't say the wheel copies it)
+        let photo = Path::new(SOURCE).join("apps/ectomatter/tests/renders/showcase/pad.jpg");
+        let (places, pads) = match laid {
+            // (a full mat under both, its photo: tests/renders/showcase/pad.jpg, CC0, REUSE.toml)
+            Laid::Mat => (serde_json::Value::Null, serde_json::json!([{ "x": -120.0, "y": -96.0, "w": 1392.0, "h": 576.0, "color": "#272A31", "picture": photo }])),
+            // (as Grant has his: the mouse to the left of the keyboard, on a pad of its own)
+            Laid::Mine => (serde_json::json!({ "sensei310": [-996.0, 144.0], "z10": [-708.0, 60.0] }), serde_json::json!([{ "x": -1140.0, "y": 72.0, "w": 404.0, "h": 340.0, "color": "#A74E15" }])),
+            // (the mouse well away from the keyboard, on the desk itself)
+            Laid::Apart => (serde_json::json!({ "z10": [0.0, 60.0], "sensei310": [1272.0, 144.0] }), serde_json::json!([])),
+        };
+        let mut window = serde_json::json!({ "mouse_same_wheel": false, "desk_pads": pads });
+        if !places.is_null() {
+            window["desk"] = places;
+        }
+        put(&d.join("config/com.ectonomic.ectomatter/window.json"), &window.to_string());
         put(&d.join("states/mouse.json"), &shown_mouse().to_string());
         desk.steam = at.join("home/.local/share/Steam");
         desk.states = Some((at.join("states/keyboard.json"), at.join("states/mouse.json")));
-        // (a desk mat under the keyboard and the mouse, as most desks have, with
-        // a photo on it: tests/renders/showcase/pad.jpg, CC0, REUSE.toml)
-        let photo = Path::new(SOURCE).join("apps/ectomatter/tests/renders/showcase/pad.jpg");
-        put(&d.join("pads.json"), &serde_json::json!([{ "x": -72.0, "y": -48.0, "w": 1200.0, "h": 456.0, "color": "#272A31", "picture": photo }]).to_string());
-        desk.pads = Some(at.join("pads.json"));
         desk
     }
 
@@ -566,9 +594,6 @@ impl Desk {
             (None, true) => c.env("ECTOMATTER_STATE", fixture("keyboard.json")).env("ECTOMATTER_MOUSE", fixture("mouse.json")),
             _ => &mut c,
         };
-        if let Some(pads) = &self.pads {
-            c.env("ECTOMATTER_PADS", pads);
-        }
         for (k, v) in case.set {
             c.env(k, v);
         }
@@ -686,31 +711,44 @@ fn the_readmes_pictures_are_the_app_as_it_is() {
 }
 
 /// The README's moving pictures (`tools/readme-moving.sh` makes each one
-/// from its frames): the showcase desk's Home, the keyboard's Lighting page
-/// and its Keys page, each at every moment of one turn of the keyboard's wave
-/// (ECTOMATTER_LIGHT_AT), into target/readme-moving/<name>/.
-const MOVING: &[(&str, &[(&str, &str)])] = &[
-    ("readme-hero", &[("ECTOMATTER_PLACE", "home")]),
-    ("readme-lighting", &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")]),
-    ("readme-keys", &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416")]),
+/// from its frames), each at every moment of one turn of the light
+/// (ECTOMATTER_LIGHT_AT, which scenes follow too), into
+/// target/readme-moving/<name>/: Home on three desks, which the README's top
+/// picture plays one after another (laid out as Grant has his, lit by the
+/// keyboard's own wave; a full mat, lit by the wave across the desk; the
+/// mouse away from the keyboard, both shifting color together), and the
+/// keyboard's Lighting and Keys pages.
+const MOVING: &[(&str, Laid, &[(&str, &str)])] = &[
+    ("readme-hero-mine", Laid::Mine, &[("ECTOMATTER_PLACE", "home")]),
+    ("readme-hero-mat", Laid::Mat, &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_SCENE", "wave")]),
+    ("readme-hero-apart", Laid::Apart, &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_SCENE", "shift")]),
+    ("readme-lighting", Laid::Mat, &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")]),
+    ("readme-keys", Laid::Mat, &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416")]),
 ];
 
 #[test]
 #[ignore = "makes the README's moving pictures' frames: tools/readme-moving.sh runs it"]
 fn the_readmes_moving_pictures() {
     built();
-    let desk = Desk::showcase();
+    let desks: Vec<(Laid, Desk)> = [Laid::Mat, Laid::Mine, Laid::Apart].into_iter().map(|l| (l, Desk::showcase_laid(l))).collect();
     let frames: u32 = std::env::var("ECTOMATTER_MOVING_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(64);
+    let only = std::env::var("ECTOMATTER_MOVING").unwrap_or_default();
     let turn = 4000;
     let out = repo().join("target/readme-moving");
-    let _ = std::fs::remove_dir_all(&out);
-    let jobs: Vec<(&str, &[(&str, &str)], u32)> = MOVING.iter().flat_map(|(name, set)| (0..frames).map(move |n| (*name, *set, n * turn / frames))).collect();
+    let jobs: Vec<(&str, Laid, &[(&str, &str)], u32)> = MOVING
+        .iter()
+        .filter(|(name, _, _)| only.is_empty() || only.split(',').any(|o| o == *name))
+        .flat_map(|(name, laid, set)| (0..frames).map(move |n| (*name, *laid, *set, n * turn / frames)))
+        .collect();
+    for (name, _, _, _) in &jobs {
+        let _ = std::fs::remove_dir_all(out.join(name));
+    }
     std::thread::scope(|s| {
         for group in jobs.chunks(4) {
             let handles: Vec<_> = group
                 .iter()
-                .map(|(name, set, ms)| {
-                    let (desk, out) = (&desk, &out);
+                .map(|(name, laid, set, ms)| {
+                    let (desk, out) = (&desks.iter().find(|(l, _)| l == laid).unwrap().1, &out);
                     s.spawn(move || {
                         let at: &'static str = Box::leak(ms.to_string().into_boxed_str());
                         let mut all: Vec<(&'static str, &'static str)> = set.iter().map(|(k, v)| (*k, *v)).collect();

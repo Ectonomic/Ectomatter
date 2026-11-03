@@ -51,7 +51,9 @@ This is where they live in this repository.
   A third desk has met the keyboard (`desk/window.json`), which isn't
   plugged in now (`kb-unplugged`). Nothing of Grant's goes into the desk or
   the pictures. The README's pictures (`docs/pictures/readme-*.png`) are a
-  showcase desk's (`Desk::showcase`: the devices lit, a mat under them, and
+  showcase desk's (`Desk::showcase`: the devices lit, a mat with a photo under
+  them (`Desk::showcase_laid` lays Home out two more ways for the top
+  picture), and
   real games, `docs/pictures/games.json`, whose art `tools/readme-art.py`
   fetches into `target/readme-art/` and checks against its pinned
   checksums; the art is the publishers', shown under fair use, never

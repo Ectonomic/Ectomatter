@@ -20,7 +20,7 @@
 <br>
 
 <p align="center">
-  <img src="docs/pictures/readme-hero.webp" width="100%" alt="Ectomatter's Home: a keyboard with a wave of orange and teal rolling across its keys and a mouse with its logo lit teal, on a desk mat printed with mountains at sunset">
+  <img src="docs/pictures/readme-hero.webp" width="100%" alt="Ectomatter's Home on three desks in turn: the mouse left of the keyboard on a pad of its own; both on a full mat printed with a mountain road at night, one wave of color crossing the keyboard and then the mouse; the mouse far from the keyboard, both shifting color together">
 </p>
 
 Keyboards, mice and the rest of a desk usually each come with their maker's
@@ -39,8 +39,9 @@ weather.
 ### Everything you have, in one place
 
 Home draws every device to scale, lit as it's lit right now, and **Arrange**
-puts each one where it sits on your real desk, on a mat if it sits on one.
-Select a device to change it.
+puts each one where it sits on your real desk, on the pads and mats it sits
+on, each a color of its own or a photo you choose. Select a device to change
+it.
 
 ### Scenes across every device
 
