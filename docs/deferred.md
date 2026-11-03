@@ -551,7 +551,8 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   first time, and Steam changing a game's art fails the fetch's checksum
   until `--pin` takes the new one and the pictures are drawn again.
 - The README's moving pictures (`docs/pictures/readme-hero.webp`, Home on
-  three desks one after another, `readme-lighting.webp`, `readme-keys.webp`)
+  three desks one after another, one of them laid out and lit as Grant has
+  his, `readme-lighting.webp`, `readme-keys.webp`)
   aren't held to the app:
   `tools/readme-moving.sh` makes them again, by hand. Their stills
   (`readme-home.png`, `readme-lighting.png`, `readme-keys.png`) are held

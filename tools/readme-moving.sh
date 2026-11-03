@@ -6,8 +6,9 @@
 #
 # - readme-hero.webp: Home on three desks one after another, each fading
 #   into the next and the last into the first, so it loops without a seam:
-#   laid out as Grant has his, on a full mat, and with the mouse away from
-#   the keyboard
+#   laid out as Grant has his, orange on everything; on a full mat, a wave
+#   of color across the desk; and the mouse at the right on a mousepad with
+#   art on it
 # - readme-lighting.webp, readme-keys.webp: the keyboard's Lighting and Keys
 #   pages
 #
@@ -40,8 +41,8 @@ for name in ('readme-lighting', 'readme-keys'):
 # (the hero: the first desk from its ninth frame, then the second and the third,
 # each fading into the next over half a second, and the third into the first
 # desk's first eight frames, so the end fades into where it starts)
-mine, mat, apart = frames('readme-hero-mine'), frames('readme-hero-mat'), frames('readme-hero-apart')
+mine, mat, pad = frames('readme-hero-mine'), frames('readme-hero-mat'), frames('readme-hero-pad')
 a, d = mine[8:], mine[:8]
-seq = a[:-8] + fade(a[-8:], mat[:8]) + mat[8:-8] + fade(mat[-8:], apart[:8]) + apart[8:-8] + fade(apart[-8:], d)
+seq = a[:-8] + fade(a[-8:], mat[:8]) + mat[8:-8] + fade(mat[-8:], pad[:8]) + pad[8:-8] + fade(pad[-8:], d)
 save('readme-hero', seq)
 PY

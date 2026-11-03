@@ -148,8 +148,8 @@ enum Laid {
     Mat,
     /// as Grant has his desk: the mouse at the left, on a pad of its own
     Mine,
-    /// the mouse well away from the keyboard, no pad
-    Apart,
+    /// the mouse to the right of the keyboard, on a mousepad with art on it
+    Pad,
 }
 
 /// Where the showcase's Library is in the sandbox (`Desk::showcase` writes it;
@@ -505,12 +505,24 @@ impl Desk {
         let name = match laid {
             Laid::Mat => "showcase",
             Laid::Mine => "showcase-mine",
-            Laid::Apart => "showcase-apart",
+            Laid::Pad => "showcase-pad",
         };
         let mut desk = Desk::new(name, true, true);
         let (d, at) = (desk.scratch.0.clone(), desk.at.clone());
         shown_steam(&d.join("home/.local/share/Steam"), &at.join("home/.local/share/Steam"));
-        put(&d.join("states/keyboard.json"), &shown_keyboard().to_string());
+        let (mut keyboard, mut mouse) = (shown_keyboard(), shown_mouse());
+        if laid == Laid::Mine {
+            // (orange on everything, as Grant has his: the keys, the screen's light, the mouse's two lights)
+            let l = &mut keyboard["profiles"]["1"]["lighting"];
+            l["keys"]["effect"] = serde_json::json!("static");
+            l["keys"]["effects"]["static"]["color"] = rgb(0xFF4000);
+            l["keys"]["effects"]["static"]["brightness"] = serde_json::json!(255);
+            l["screen"]["color"]["color"] = rgb(0xFF4000);
+            for light in ["logo", "wheel"] {
+                mouse["lighting"][light] = serde_json::json!({ "effect": "static", "params": { "color": "#FF4000" } });
+            }
+        }
+        put(&d.join("states/keyboard.json"), &keyboard.to_string());
         // (the first game set up: its scene and the keyboard's profile while it
         // plays, and a Proton build of its own)
         assert!(name != "showcase" || at.join("library.json") == Path::new(SHOWN_LIBRARY));
@@ -527,15 +539,19 @@ impl Desk {
             Laid::Mat => (serde_json::Value::Null, serde_json::json!([{ "x": -120.0, "y": -96.0, "w": 1392.0, "h": 576.0, "color": "#272A31", "picture": photo }])),
             // (as Grant has his: the mouse to the left of the keyboard, on a pad of its own)
             Laid::Mine => (serde_json::json!({ "sensei310": [-996.0, 144.0], "z10": [-708.0, 60.0] }), serde_json::json!([{ "x": -1140.0, "y": 72.0, "w": 404.0, "h": 340.0, "color": "#A74E15" }])),
-            // (the mouse well away from the keyboard, on the desk itself)
-            Laid::Apart => (serde_json::json!({ "z10": [0.0, 60.0], "sensei310": [1272.0, 144.0] }), serde_json::json!([])),
+            // (the mouse to the right, on a mousepad printed with the Great Wave:
+            // tests/renders/showcase/mousepad.jpg, CC0, REUSE.toml)
+            Laid::Pad => (
+                serde_json::json!({ "z10": [0.0, 60.0], "sensei310": [1056.0, 144.0] }),
+                serde_json::json!([{ "x": 888.0, "y": 72.0, "w": 432.0, "h": 360.0, "color": "#272A31", "picture": Path::new(SOURCE).join("apps/ectomatter/tests/renders/showcase/mousepad.jpg") }]),
+            ),
         };
         let mut window = serde_json::json!({ "mouse_same_wheel": false, "desk_pads": pads });
         if !places.is_null() {
             window["desk"] = places;
         }
         put(&d.join("config/com.ectonomic.ectomatter/window.json"), &window.to_string());
-        put(&d.join("states/mouse.json"), &shown_mouse().to_string());
+        put(&d.join("states/mouse.json"), &mouse.to_string());
         desk.steam = at.join("home/.local/share/Steam");
         desk.states = Some((at.join("states/keyboard.json"), at.join("states/mouse.json")));
         desk
@@ -714,14 +730,14 @@ fn the_readmes_pictures_are_the_app_as_it_is() {
 /// from its frames), each at every moment of one turn of the light
 /// (ECTOMATTER_LIGHT_AT, which scenes follow too), into
 /// target/readme-moving/<name>/: Home on three desks, which the README's top
-/// picture plays one after another (laid out as Grant has his, lit by the
-/// keyboard's own wave; a full mat, lit by the wave across the desk; the
-/// mouse away from the keyboard, both shifting color together), and the
-/// keyboard's Lighting and Keys pages.
+/// picture plays one after another (laid out as Grant has his, orange on
+/// everything; a full mat, lit by the wave of color across the desk; the
+/// mouse at the right on a mousepad with art on it, the keyboard's own wave),
+/// and the keyboard's Lighting and Keys pages.
 const MOVING: &[(&str, Laid, &[(&str, &str)])] = &[
     ("readme-hero-mine", Laid::Mine, &[("ECTOMATTER_PLACE", "home")]),
     ("readme-hero-mat", Laid::Mat, &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_SCENE", "wave")]),
-    ("readme-hero-apart", Laid::Apart, &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_SCENE", "shift")]),
+    ("readme-hero-pad", Laid::Pad, &[("ECTOMATTER_PLACE", "home")]),
     ("readme-lighting", Laid::Mat, &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")]),
     ("readme-keys", Laid::Mat, &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416")]),
 ];
@@ -730,7 +746,7 @@ const MOVING: &[(&str, Laid, &[(&str, &str)])] = &[
 #[ignore = "makes the README's moving pictures' frames: tools/readme-moving.sh runs it"]
 fn the_readmes_moving_pictures() {
     built();
-    let desks: Vec<(Laid, Desk)> = [Laid::Mat, Laid::Mine, Laid::Apart].into_iter().map(|l| (l, Desk::showcase_laid(l))).collect();
+    let desks: Vec<(Laid, Desk)> = [Laid::Mat, Laid::Mine, Laid::Pad].into_iter().map(|l| (l, Desk::showcase_laid(l))).collect();
     let frames: u32 = std::env::var("ECTOMATTER_MOVING_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(64);
     let only = std::env::var("ECTOMATTER_MOVING").unwrap_or_default();
     let turn = 4000;

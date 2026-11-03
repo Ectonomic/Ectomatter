@@ -20,7 +20,7 @@
 <br>
 
 <p align="center">
-  <img src="docs/pictures/readme-hero.webp" width="100%" alt="Ectomatter's Home on three desks in turn: the mouse left of the keyboard on a pad of its own; both on a full mat printed with a mountain road at night, one wave of color crossing the keyboard and then the mouse; the mouse far from the keyboard, both shifting color together">
+  <img src="docs/pictures/readme-hero.webp" width="100%" alt="Ectomatter's Home on three desks in turn: the mouse left of the keyboard on an orange pad, everything glowing orange; both on a full mat printed with a mountain road at night, one rainbow wave crossing the keyboard and then the mouse; the mouse right of the keyboard on a mousepad printed with Hokusai's Great Wave">
 </p>
 
 Keyboards, mice and the rest of a desk usually each come with their maker's

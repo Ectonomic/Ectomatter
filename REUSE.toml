@@ -201,3 +201,11 @@ SPDX-License-Identifier = "GPL-3.0-only AND LicenseRef-Fair-Use"
 path = ["apps/ectomatter/tests/renders/showcase/pad.jpg"]
 SPDX-FileCopyrightText = "Unknown author (PikWizard, via Wikimedia Commons)"
 SPDX-License-Identifier = "CC0-1.0"
+
+# the art on the showcase desk's mousepad: Under the Wave off Kanagawa (the
+# Great Wave), Katsushika Hokusai, c. 1830-33, the Art Institute of
+# Chicago's print 1952.343 (CC0, through Wikimedia Commons), cropped to the pad
+[[annotations]]
+path = ["apps/ectomatter/tests/renders/showcase/mousepad.jpg"]
+SPDX-FileCopyrightText = ["Katsushika Hokusai (the print)", "The Art Institute of Chicago (the photograph)"]
+SPDX-License-Identifier = "CC0-1.0"
