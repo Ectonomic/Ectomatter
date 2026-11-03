@@ -542,3 +542,19 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   presses it heard, didn't flash on the real mouse, and why was never
   found (the core logged neither presses nor flashes). It was taken out
   for the mouse's own.
+
+## The README's pictures (2026-11-02)
+
+- The README's moving picture (`docs/pictures/readme-hero.webp`) isn't held
+  to the app: `tools/readme-hero.sh` makes it again, by hand. Its still,
+  `docs/pictures/readme-home.png`, is held
+  (`the_readmes_pictures_are_the_app_as_it_is`), so a change to Home fails
+  there first.
+- A game with no Proton build of its own shows an empty Version menu
+  (`plugins/game-configurator/module/src/lib.rs:233`, `menu(options, ...)`:
+  the empty value has no option to label it), not the build it will start
+  with. The README's game has one chosen.
+- The mouse's Same on the wheel shows what Ectomatter remembers choosing
+  (`apps/ectomatter/src/mouse.rs:621`, `mouse_same_wheel`), not what the
+  mouse holds: with the wheel lit another color than the logo, the box can
+  still say the wheel copies the logo. The README's desk turns it off.

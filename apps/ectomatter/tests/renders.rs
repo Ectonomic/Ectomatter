@@ -123,6 +123,26 @@ const FIRST_RUN: &[Case] = &[
 /// failed, as its core says when nothing is there.
 const UNPLUGGED: &[Case] = &[Case { name: "kb-unplugged", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_UNREAD", "the keyboard isn't connected")] }];
 
+/// The README's pictures (`docs/pictures/`), on a desk made up for showing
+/// Ectomatter (`Desk::showcase`): the same pages, lit and filled in.
+const SHOWCASE: &[Case] = &[
+    Case { name: "readme-home", size: WIDE, set: &[("ECTOMATTER_PLACE", "home")] },
+    Case { name: "readme-scene", size: WIDE, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_SCENE_FORM", "new")] },
+    Case { name: "readme-lighting", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")] },
+    Case { name: "readme-keys", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416")] },
+    Case { name: "readme-screen", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "440,63")] },
+    Case { name: "readme-screen-editor.window", size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAYOUTS", "0")] },
+    Case { name: "readme-macros.window", size: (1080, 620), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_MACROS", "1"), ("ECTOMATTER_CLICKS", "120,175")] },
+    Case { name: "readme-mouse", size: WIDE, set: &[("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_MOUSE_TAB", "1")] },
+    Case { name: "readme-library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "296,63"), ("ECTOMATTER_LIBRARY", SHOWN_LIBRARY)] },
+    Case { name: "readme-game", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_LIBRARY_PAGE", "steam_app_4000010"), ("ECTOMATTER_LIBRARY", SHOWN_LIBRARY), ("ECTOMATTER_WAIT", "1500")] },
+    Case { name: "readme-plugins", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "plugins")] },
+];
+
+/// Where the showcase's Library is in the sandbox (`Desk::showcase` writes it;
+/// a snapshot reads it, and writes nothing back).
+const SHOWN_LIBRARY: &str = "/tmp/ectomatter-renders/showcase/library.json";
+
 /// A folder of the test's own, empty, gone after it.
 struct Scratch(PathBuf);
 
@@ -270,6 +290,144 @@ fn set_up(config: &Path) {
     put(&config.join("com.ectonomic.ectomatter/settings.json"), &serde_json::to_string_pretty(&settings).unwrap());
 }
 
+/// A number from 0 to 1 from `n`, the same on every computer (an integer hash).
+fn unit(n: u32) -> f32 {
+    let mut x = n.wrapping_mul(0x9E37_79B9) ^ 0x85EB_CA6B;
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2C1B_3C6D);
+    x ^= x >> 12;
+    (x % 10_000) as f32 / 10_000.0
+}
+
+/// A smooth hump from 0 up to 1 and back over each whole of `t`: hills drawn
+/// with sums and products alone, so every computer draws them alike.
+fn hump(t: f32) -> f32 {
+    let f = t - t.floor();
+    let x = f * 2.0 - 1.0;
+    let y = 1.0 - x * x;
+    y * y
+}
+
+/// A made-up game's picture, drawn: a sky from `top` down to `low`, a sun
+/// with its glow, and three rows of hills in front of it, darker toward the
+/// front. A cover (tall) or a banner (wide), by the size asked for.
+fn poster(path: &Path, (w, h): (u32, u32), [top, low, sun, hills]: [[u8; 3]; 4], seed: u32) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let (wf, hf) = (w as f32, h as f32);
+    let horizon = hf * 0.64;
+    let sr = wf.min(hf) * 0.19;
+    let (sx, sy) = (wf * (0.3 + 0.4 * unit(seed)), horizon - sr * 0.55);
+    let lerp = |a: [f32; 3], b: [u8; 3], k: f32| -> [f32; 3] { [0, 1, 2].map(|i| a[i] + (b[i] as f32 - a[i]) * k.clamp(0.0, 1.0)) };
+    let f = |c: [u8; 3]| c.map(|v| v as f32);
+    let mut px = Vec::with_capacity((w * h * 3) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (xf, yf) = (x as f32 + 0.5, y as f32 + 0.5);
+            let mut c = lerp(f(top), low, yf / horizon);
+            let d = ((xf - sx) * (xf - sx) + (yf - sy) * (yf - sy)).sqrt();
+            let g = (1.0 - d / (sr * 3.0)).max(0.0);
+            c = lerp(c, sun, g * g * 0.45);
+            c = lerp(c, sun, (sr - d + 0.75) / 1.5);
+            for k in 0..3u32 {
+                let kf = k as f32;
+                let base = horizon + hf * 0.085 * kf;
+                let rise = hump(xf / wf * (1.3 + kf * 0.6) + unit(seed * 7 + k)) * 0.65 + hump(xf / wf * (3.1 + kf) + unit(seed * 13 + k)) * 0.35;
+                let ridge = base - hf * (0.07 + 0.025 * kf) * rise;
+                let shade = lerp(f(hills), [6, 7, 10], kf * 0.36);
+                c = lerp(c, shade.map(|v| v as u8), yf - ridge + 0.5);
+            }
+            px.extend(c.map(|v| v.round().clamp(0.0, 255.0) as u8));
+        }
+    }
+    let mut e = png::Encoder::new(std::fs::File::create(path).unwrap(), w, h);
+    e.set_color(png::ColorType::Rgb);
+    e.set_depth(png::BitDepth::Eight);
+    e.write_header().unwrap().write_image_data(&px).unwrap();
+}
+
+/// The showcase's made-up games, by Steam number: their names, their
+/// pictures' colors (sky top, sky low, sun, hills), and the minutes played
+/// and hours since, as Steam keeps them.
+const SHOWN_GAMES: &[(u32, &str, [[u8; 3]; 4], u64, u64)] = &[
+    (4000010, "Lantern Road", [[24, 30, 66], [214, 120, 72], [255, 214, 140], [44, 30, 52]], 1310, 2),
+    (4000020, "Tidewater", [[10, 52, 70], [86, 182, 186], [236, 250, 240], [12, 46, 60]], 845, 26),
+    (4000030, "Copper Sky", [[70, 22, 18], [232, 112, 50], [255, 220, 150], [58, 20, 16]], 2244, 50),
+    (4000040, "Saltglass", [[120, 104, 170], [246, 186, 196], [255, 246, 236], [92, 70, 120]], 410, 75),
+    (4000050, "Velvet Circuit", [[16, 8, 40], [150, 30, 140], [255, 92, 190], [24, 10, 44]], 3120, 98),
+    (4000060, "Kitefall", [[70, 150, 220], [236, 228, 196], [255, 236, 120], [70, 120, 92]], 96, 140),
+    (4000070, "Quiet Engines", [[28, 32, 38], [110, 124, 136], [236, 76, 60], [30, 34, 40]], 1785, 200),
+    (4000080, "Ember Coast", [[36, 12, 30], [196, 70, 44], [255, 170, 80], [40, 14, 28]], 655, 320),
+];
+
+/// The showcase's Steam: its made-up games installed in the person's own
+/// Steam folder, each with a cover and a banner, the minutes played and when,
+/// and a Proton build of its own.
+fn shown_steam(root: &Path, seen_at: &Path) {
+    put(&root.join("steamapps/libraryfolders.vdf"), &format!("\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n}}\n", seen_at.display()));
+    put(&root.join("config/loginusers.vdf"), "\"users\"\n{\n\t\"76561198000000001\"\n\t{\n\t\t\"AccountName\"\t\t\"stranger\"\n\t\t\"MostRecent\"\t\t\"1\"\n\t\t\"Timestamp\"\t\t\"1792600000\"\n\t}\n}\n");
+    let grid = root.join("userdata/39734273/config/grid");
+    let mut played = String::new();
+    for (n, (id, name, colors, minutes, hours)) in SHOWN_GAMES.iter().enumerate() {
+        put(&root.join(format!("steamapps/appmanifest_{id}.acf")), &format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{id}\"\n\t\"name\"\t\t\"{name}\"\n\t\"StateFlags\"\t\t\"4\"\n\t\"installdir\"\t\t\"{name}\"\n}}\n"));
+        std::fs::create_dir_all(root.join(format!("steamapps/common/{name}"))).unwrap();
+        poster(&grid.join(format!("{id}p.png")), (300, 450), *colors, n as u32 + 1);
+        poster(&grid.join(format!("{id}_hero.png")), (1920, 620), *colors, n as u32 + 1);
+        played += &format!("\t\t\t\t\t\"{id}\"\n\t\t\t\t\t{{\n\t\t\t\t\t\t\"Playtime\"\t\t\"{minutes}\"\n\t\t\t\t\t\t\"LastPlayed\"\t\t\"{}\"\n\t\t\t\t\t}}\n", NOW - hours * 3600);
+    }
+    put(&root.join("userdata/39734273/config/localconfig.vdf"), &format!("\"UserLocalConfigStore\"\n{{\n\t\"Software\"\n\t{{\n\t\t\"Valve\"\n\t\t{{\n\t\t\t\"Steam\"\n\t\t\t{{\n\t\t\t\t\"apps\"\n\t\t\t\t{{\n{played}\t\t\t\t}}\n\t\t\t}}\n\t\t}}\n\t}}\n}}\n"));
+    let ge = root.join("compatibilitytools.d/GE-Proton10-25");
+    put(&ge.join("proton"), "");
+    put(&ge.join("compatibilitytool.vdf"), "\"compatibilitytools\"\n{\n\t\"compat_tools\"\n\t{\n\t\t\"GE-Proton10-25\"\n\t\t{\n\t\t\t\"install_path\"\t\".\"\n\t\t\t\"display_name\"\t\"GE-Proton10-25\"\n\t\t\t\"from_oslist\"\t\"windows\"\n\t\t\t\"to_oslist\"\t\"linux\"\n\t\t}\n\t}\n}\n");
+}
+
+/// A color as the keyboard's state writes it.
+fn rgb(c: u32) -> serde_json::Value {
+    serde_json::json!([(c >> 16) & 255, (c >> 8) & 255, c & 255])
+}
+
+/// The showcase's keyboard: the made-up desk's, its profiles named and lit
+/// for showing, a wave of color on the one in use and the screen's light to
+/// go with it, and its macros named for what they'd do.
+fn shown_keyboard() -> serde_json::Value {
+    let mut k: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(here().join("tests/renders/desk/keyboard.json")).unwrap()).unwrap();
+    let tones = |cs: &[u32]| serde_json::Value::Array(cs.iter().map(|c| serde_json::json!({ "brightness": 255, "color": rgb(*c) })).collect());
+    let lit: [(&str, &str, u32, u32); 5] = [("Everyday", "wave", 0x00D4B4, 255), ("Games", "static", 0xFF5A00, 255), ("Late night", "breathing", 0xFF8A1E, 255), ("Movies", "static", 0x2E4BFF, 110), ("Focus", "static", 0xFFFFFF, 140)];
+    for (n, (name, effect, color, brightness)) in lit.iter().enumerate() {
+        let p = &mut k["profiles"][(n + 1).to_string()];
+        p["name"] = serde_json::json!(name);
+        let keys = &mut p["lighting"]["keys"];
+        keys["effect"] = serde_json::json!(effect);
+        keys["effects"]["static"]["color"] = rgb(*color);
+        keys["effects"]["static"]["brightness"] = serde_json::json!(brightness);
+        keys["effects"]["breathing"]["colors"] = tones(&[*color, 0x7A2400]);
+        keys["effects"]["breathing"]["cycle"] = serde_json::json!(4000);
+    }
+    // (warm to cool and back: the colors the keys' LEDs keep whole, as
+    // keyboard.rs's bleed draws them; violet and magenta wash out to white)
+    let wave = &mut k["profiles"]["1"]["lighting"]["keys"]["effects"]["wave"];
+    wave["colors"] = tones(&[0xFF2A00, 0xFF8A00, 0x00D4B4, 0x00A8FF, 0x00D4B4, 0xFF8A00]);
+    wave["cycle"] = serde_json::json!(4000);
+    k["profiles"]["1"]["lighting"]["screen"]["color"]["color"] = rgb(0x00D4B4);
+    let names = ["Screenshot", "Mute the mic", "Copy the line", "Lock the screen", "New tab", "Paste as text", "Push to talk", "Sign-off", "Build and run"];
+    for (n, name) in names.iter().enumerate() {
+        if let Some(m) = k["macros"].get_mut((n + 2).to_string()) {
+            m["name"] = serde_json::json!(name);
+        }
+    }
+    k
+}
+
+/// The showcase's mouse: the made-up desk's, both lights set by Ectomatter
+/// (so known) in the keyboard's colors.
+fn shown_mouse() -> serde_json::Value {
+    let mut m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(here().join("tests/renders/desk/mouse.json")).unwrap()).unwrap();
+    m["lighting"]["logo"] = serde_json::json!({ "effect": "static", "params": { "color": "#00D4B4" } });
+    m["lighting"]["wheel"] = serde_json::json!({ "effect": "static", "params": { "color": "#FF5A00" } });
+    m["lighting"]["known"] = serde_json::json!({ "logo": true, "wheel": true });
+    m["settings"]["known"]["polling"] = serde_json::json!(true);
+    m
+}
+
 /// A picture as the eye sees it: 8-bit sRGB, red, green, blue and alpha.
 struct Picture {
     w: u32,
@@ -351,6 +509,11 @@ struct Desk {
     scratch: Scratch,
     at: PathBuf,
     plugged: bool,
+    /// Its Steam's folder in the sandbox.
+    steam: PathBuf,
+    /// The keyboard's and the mouse's states in the sandbox, when they aren't
+    /// the fixtures' (`desk/keyboard.json`, `desk/mouse.json`).
+    states: Option<(PathBuf, PathBuf)>,
 }
 
 impl Desk {
@@ -371,7 +534,33 @@ impl Desk {
         if settings {
             set_up(&d.join("config"));
         }
-        Desk { scratch, at, plugged }
+        let steam = at.join("steam");
+        Desk { scratch, at, plugged, steam, states: None }
+    }
+
+    /// The desk the README's pictures are drawn on: one that's set up, its
+    /// Steam in the person's own folder (`~/.local/share/Steam`) with more
+    /// made-up games and their art, and its keyboard and mouse lit for showing.
+    fn showcase() -> Desk {
+        let mut desk = Desk::new("showcase", true, true);
+        let (d, at) = (desk.scratch.0.clone(), desk.at.clone());
+        shown_steam(&d.join("home/.local/share/Steam"), &at.join("home/.local/share/Steam"));
+        put(&d.join("states/keyboard.json"), &shown_keyboard().to_string());
+        // (the first game set up: its scene and the keyboard's profile while it
+        // plays, and a Proton build of its own)
+        assert_eq!(at.join("library.json"), Path::new(SHOWN_LIBRARY));
+        let library = serde_json::json!({
+            "choices": { "steam_app_4000010": { "scene": "scene-1", "z10": "2" } },
+            "plugins": { "game-configurator": { "steam_app_4000010": { "version": "GE-Proton10-25" } } }
+        });
+        put(&d.join("library.json"), &library.to_string());
+        // (the mouse's wheel lit its own color, so the logo's page doesn't say
+        // the wheel copies it)
+        put(&d.join("config/com.ectonomic.ectomatter/window.json"), &serde_json::json!({ "mouse_same_wheel": false }).to_string());
+        put(&d.join("states/mouse.json"), &shown_mouse().to_string());
+        desk.steam = at.join("home/.local/share/Steam");
+        desk.states = Some((at.join("states/keyboard.json"), at.join("states/mouse.json")));
+        desk
     }
 
     /// One page drawn (to a file named for it and `tag`): its picture and
@@ -410,7 +599,7 @@ impl Desk {
             .env("LANG", "C.UTF-8")
             .env("ECTOMATTER_PACKAGES", SOURCE)
             .env("ECTOMATTER_COMPUTER", d.join("computer"))
-            .env("ECTOMATTER_STEAM", d.join("steam"))
+            .env("ECTOMATTER_STEAM", &self.steam)
             .env("ECTOMATTER_NOW", NOW.to_string())
             .env("ECTOMATTER_SIZE", format!("{}x{}", case.size.0, case.size.1))
             // (the packages' first answers in and the animations run out
@@ -422,9 +611,11 @@ impl Desk {
             // (About's credits made up, as a history the desk has)
             .env("ECTOMATTER_CREDITS", fixture("credits.json"));
         // (the devices as their cores last read them, where they're plugged in)
-        if self.plugged {
-            c.env("ECTOMATTER_STATE", fixture("keyboard.json")).env("ECTOMATTER_MOUSE", fixture("mouse.json"));
-        }
+        match (&self.states, self.plugged) {
+            (Some((keyboard, mouse)), true) => c.env("ECTOMATTER_STATE", keyboard).env("ECTOMATTER_MOUSE", mouse),
+            (None, true) => c.env("ECTOMATTER_STATE", fixture("keyboard.json")).env("ECTOMATTER_MOUSE", fixture("mouse.json")),
+            _ => &mut c,
+        };
         for (k, v) in case.set {
             c.env(k, v);
         }
@@ -449,7 +640,11 @@ impl Desk {
 /// Each case drawn (four at a time) and held to its approved picture; the
 /// pages that came out otherwise, and why.
 fn check(desk: &Desk, cases: &[Case]) -> Vec<String> {
-    let approved = here().join("tests/renders/approved");
+    check_in(desk, cases, &here().join("tests/renders/approved"))
+}
+
+/// `check`, held to the pictures in `approved`.
+fn check_in(desk: &Desk, cases: &[Case], approved: &Path) -> Vec<String> {
     let changed = repo().join("target/renders");
     let approve = std::env::var_os("ECTOMATTER_APPROVE").is_some();
     let cases = chosen(cases);
@@ -511,7 +706,7 @@ fn check(desk: &Desk, cases: &[Case]) -> Vec<String> {
 fn chosen(cases: &[Case]) -> Vec<&Case> {
     let only: Vec<String> = std::env::var("ECTOMATTER_RENDERS").unwrap_or_default().split(',').filter(|n| !n.is_empty()).map(String::from).collect();
     for o in &only {
-        assert!(SET_UP.iter().chain(FIRST_RUN).chain(UNPLUGGED).any(|c| c.name.trim_end_matches(".window") == o), "ECTOMATTER_RENDERS names {o}, which is no page here");
+        assert!(SET_UP.iter().chain(FIRST_RUN).chain(UNPLUGGED).chain(SHOWCASE).any(|c| c.name.trim_end_matches(".window") == o), "ECTOMATTER_RENDERS names {o}, which is no page here");
     }
     cases.iter().filter(|c| only.is_empty() || only.iter().any(|o| o == c.name.trim_end_matches(".window"))).collect()
 }
@@ -524,6 +719,51 @@ fn built() {
             }
         }
     }
+}
+
+/// The README's pictures (docs/pictures/) are the app as it draws now, on a
+/// desk made up for showing it: a change to a page they show fails here
+/// until they're drawn again (ECTOMATTER_APPROVE=1, as the others).
+#[test]
+fn the_readmes_pictures_are_the_app_as_it_is() {
+    built();
+    let desk = Desk::showcase();
+    let wrong = check_in(&desk, SHOWCASE, &repo().join("docs/pictures"));
+    assert!(wrong.is_empty(), "pictures that came out otherwise:\n  {}", wrong.join("\n  "));
+}
+
+/// The frames of the README's moving picture (`tools/readme-hero.sh` makes
+/// it from them): the showcase's desk at Home, the keyboard's wave at each
+/// moment of one turn (ECTOMATTER_LIGHT_AT), into target/readme-hero/.
+#[test]
+#[ignore = "makes the README's moving picture's frames: tools/readme-hero.sh runs it"]
+fn the_readmes_moving_picture() {
+    built();
+    let desk = Desk::showcase();
+    let frames: u32 = std::env::var("ECTOMATTER_HERO_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+    let turn = 4000;
+    let out = repo().join("target/readme-hero");
+    let _ = std::fs::remove_dir_all(&out);
+    let times: Vec<String> = (0..frames).map(|n| (n * turn / frames).to_string()).collect();
+    std::thread::scope(|s| {
+        for group in times.chunks(4) {
+            let handles: Vec<_> = group
+                .iter()
+                .map(|ms| {
+                    let (desk, out) = (&desk, &out);
+                    s.spawn(move || {
+                        let set: &'static [(&'static str, &'static str)] = Box::leak(vec![("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_LIGHT_AT", Box::leak(ms.clone().into_boxed_str()) as &str)].into_boxed_slice());
+                        let case = Case { name: "hero", size: WIDE, set };
+                        let (picture, _) = desk.draw(&case, &format!("-{ms}")).unwrap();
+                        picture.write_png(&out.join(format!("frame-{:05}.png", ms.parse::<u32>().unwrap())));
+                    })
+                })
+                .collect();
+            for h in handles {
+                h.join().unwrap();
+            }
+        }
+    });
 }
 
 /// Every page of a desk that's set up looks as approved.
