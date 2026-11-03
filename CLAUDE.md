@@ -51,10 +51,13 @@ This is where they live in this repository.
   A third desk has met the keyboard (`desk/window.json`), which isn't
   plugged in now (`kb-unplugged`). Nothing of Grant's goes into the desk or
   the pictures. The README's pictures (`docs/pictures/readme-*.png`) are a
-  showcase desk's (`Desk::showcase`: more made-up games and their art, the
-  devices lit), held the same way
-  (`the_readmes_pictures_are_the_app_as_it_is`); its moving picture is
-  made again with `tools/readme-hero.sh` when Home changes.
+  showcase desk's (`Desk::showcase`: the devices lit, a mat under them, and
+  real games, `docs/pictures/games.json`, whose art `tools/readme-art.py`
+  fetches into `target/readme-art/` and checks against its pinned
+  checksums; the art is the publishers', shown under fair use, never
+  committed), held the same way (`the_readmes_pictures_are_the_app_as_it_is`);
+  its moving picture is made again with `tools/readme-hero.sh` when Home
+  changes.
   `ECTOMATTER_RENDERS=name,name` runs only those; `ECTOMATTER_RENDERS_LOG=1`
   keeps every page's log.
   `a_main_menu_item_opens_its_place_at_its_first_page` leaves each place

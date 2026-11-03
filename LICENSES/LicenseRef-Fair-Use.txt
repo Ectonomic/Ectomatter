@@ -1,0 +1,10 @@
+Fair use
+
+The pictures this applies to (REUSE.toml names them) are screenshots of
+Ectomatter's Library and of a game's page in it. They show games' covers,
+banners and logos, as Steam serves them, the way a person's own library
+shows them in Ectomatter. That art belongs to each game's publisher. It is
+not under Ectomatter's license, and no license to it is given here: it is
+shown in these pictures, to show what Ectomatter does, as fair use (17 U.S.C.
+107). The art itself isn't kept in this repository; tools/readme-art.py
+fetches it from Steam to draw the pictures again.

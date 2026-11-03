@@ -1,0 +1,285 @@
+{
+  "about": "The games the README's Library and game pictures show, and where their art comes from (tools/readme-art.py fetches it). The art is each game's publisher's, shown in those pictures under fair use; it isn't kept here.",
+  "games": [
+    {
+      "id": 1091500,
+      "name": "Cyberpunk 2077",
+      "minutes": 4210,
+      "hours_since": 1,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1091500/library_600x900_2x.jpg",
+          "sha256": "7927e006bf7aaee4b96a5bd85890488b9d28f15e9f422522d98354a9b1a1a3a7"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1091500/library_hero.jpg",
+          "sha256": "44c73149490ecf4e211e1d7698e457a9694999d5f9b6ffec136a87c2b720b98b"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1091500/logo.png",
+          "sha256": "4e37537b920d1d777b4182aa1814f729f170e04de49e4d62652046a34b4dce98"
+        }
+      }
+    },
+    {
+      "id": 1245620,
+      "name": "ELDEN RING",
+      "minutes": 6380,
+      "hours_since": 20,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1245620/library_600x900_2x.jpg",
+          "sha256": "972acf771c64d094a6c5da3fcee9cfb18c7699bff2cc16adbdb0f0736836865c"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1245620/library_hero.jpg",
+          "sha256": "45cb3b1f7a0542b494466dac2b40f05250ec4ce633c26752d3f4ef0b9ec2ce03"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1245620/logo.png",
+          "sha256": "5a289d0179106e0887be0b11f8c08cf8c706aef506b67dec2ee1db9ec439a340"
+        }
+      }
+    },
+    {
+      "id": 1086940,
+      "name": "Baldur's Gate 3",
+      "minutes": 9150,
+      "hours_since": 44,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1086940/library_600x900_2x.jpg",
+          "sha256": "a6b1bb4467f77607d363a7d37220c7b5d818ecfb01fc250317f552c7914ef6f7"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1086940/library_hero.jpg",
+          "sha256": "6418dba310c79992fbde924a54319effb3a8890db0c75bfa353a45a203867dc7"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1086940/logo.png",
+          "sha256": "b9e651597eed8c36d0546fd1bc9b6f84e9ddd6ce08dff990f7d298b7de8594d8"
+        }
+      }
+    },
+    {
+      "id": 1145350,
+      "name": "Hades II",
+      "minutes": 2980,
+      "hours_since": 70,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1145350/library_600x900_2x.jpg",
+          "sha256": "f06c7fd174587572f98d3a21a7846407656310b0416f61aa8359062a21e2e61e"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1145350/library_hero.jpg",
+          "sha256": "537598d9247e2fa6a86e76bc18f8e01ee4d3bb0455a13f38d9a7d659f6f2e623"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1145350/logo.png",
+          "sha256": "e91b0ec2cff12fdcc89a65ceeab990139ee163cf2a0b68aa73813e4f91d6eb5d"
+        }
+      }
+    },
+    {
+      "id": 367520,
+      "name": "Hollow Knight",
+      "minutes": 2240,
+      "hours_since": 95,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/367520/library_600x900_2x.jpg",
+          "sha256": "d0042eff965155da14fbf222b908ae2cdce28dcc6f14c96ae0a0cf8b918e53cf"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/367520/library_hero.jpg",
+          "sha256": "67b04275ba0a8db47a27d0caad2bcf40693c4041b8a53841934e94d8d7bb8b87"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/367520/logo.png",
+          "sha256": "7704292de9a6ef4be40e4602e89ce91954d1ee755c23461e1892f187b63c95ea"
+        }
+      }
+    },
+    {
+      "id": 2379780,
+      "name": "Balatro",
+      "minutes": 1630,
+      "hours_since": 120,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/2379780/library_600x900_2x.jpg",
+          "sha256": "619891a631121cc5aeb1be2b09ab3323efee556df5492d1d9af4a5557e7d3553"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/2379780/library_hero.jpg",
+          "sha256": "99b8cc219592281cbe131bb40ef37b7ab1dbc8ea0fbba8e3b3c616b759b74319"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/2379780/logo.png",
+          "sha256": "608464ce0211f3d8751b124a0b4aadef2abfef4d4f70c7a440af3d6bcfd29fca"
+        }
+      }
+    },
+    {
+      "id": 413150,
+      "name": "Stardew Valley",
+      "minutes": 5400,
+      "hours_since": 160,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/413150/library_600x900_2x.jpg",
+          "sha256": "69a9212d13438eaad8b2a8a35e1e875c56592c2fb6fcd86f6d03d9179d3a45ab"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/413150/library_hero.jpg",
+          "sha256": "a2fbe21c4563660f29db2120c3f96b13aaf84ecfa056af1f8812169b035be23e"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/413150/logo.png",
+          "sha256": "eedc1998546e0c7442bcd7ac32c452283d4dcb8d14a8d47bfacba1d224f67f9d"
+        }
+      }
+    },
+    {
+      "id": 1174180,
+      "name": "Red Dead Redemption 2",
+      "minutes": 3870,
+      "hours_since": 210,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1174180/library_600x900_2x.jpg",
+          "sha256": "c09c7d4e2042be7bea7f729f30653c2a923b0d985297991a4498d5ac2dc1e166"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1174180/library_hero.jpg",
+          "sha256": "793aafda602e23169b1c8a20fed00c803af1ab0be8f6f7a9e0743a14a469f02b"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1174180/logo.png",
+          "sha256": "d35231dd831ed86713c4b6a2015cd76336f873ed55115ab14db8652526586892"
+        }
+      }
+    },
+    {
+      "id": 504230,
+      "name": "Celeste",
+      "minutes": 940,
+      "hours_since": 260,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/504230/library_600x900_2x.jpg",
+          "sha256": "83ab5702c1e1babff92ed23859c8ea9490e959dd03d9c476da4592f6483534a1"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/504230/library_hero.jpg",
+          "sha256": "fe311399362063f82b157fc66b0ed1816b57b91c667fb05af5fa41b6bfa60da3"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/504230/logo.png",
+          "sha256": "7ca239e4290a6c58c777ff8a97e2d28142a838a65e83922a434ce8059cc0aa0d"
+        }
+      }
+    },
+    {
+      "id": 632470,
+      "name": "Disco Elysium - The Final Cut",
+      "minutes": 2110,
+      "hours_since": 330,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/632470/library_600x900_2x.jpg",
+          "sha256": "71041ce81990bee43c0cddf18988adbfe19d576c4c886b92e334b1aac5b6cb35"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/632470/library_hero.jpg",
+          "sha256": "0b09f7a452755efb4f3d4852c8bfa494e82a337947ad665fe3aec4ee89621578"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/632470/logo.png",
+          "sha256": "9ce5b73b77aa569e6b6d90c6d7faaed2e6fae129dde198cb1820e569b35c98e0"
+        }
+      }
+    },
+    {
+      "id": 620,
+      "name": "Portal 2",
+      "minutes": 760,
+      "hours_since": 400,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/620/library_600x900_2x.jpg",
+          "sha256": "716b26a850c5d9dff6645ffd1934fcb458dac262e4b9e2c9725054c0b057bea5"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/620/library_hero.jpg",
+          "sha256": "553cfc3ae693fb971c4e355890347697c535274bb232e1d72126a97a202aa9b4"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/620/logo.png",
+          "sha256": "f8bf75478c9c2731c8ede1dce2408b7ea57922f0ad49161ef02f517708d53dd7"
+        }
+      }
+    },
+    {
+      "id": 2358720,
+      "name": "Black Myth: Wukong",
+      "minutes": 3320,
+      "hours_since": 480,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/2358720/library_600x900_2x.jpg",
+          "sha256": "2595cf270eaeb2754851b6bcf859dc06992a782111cacaa5d394e2e32af24c7b"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/2358720/library_hero.jpg",
+          "sha256": "f0f09ee81ac50c6c00adcca15dde88241e844e30a87bcad1ac222d8e219f8db6"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/2358720/logo.png",
+          "sha256": "b5c77c787543e456ea7519f44d1b7d8cad42aef9f800240ccfc6625f108c0977"
+        }
+      }
+    },
+    {
+      "id": 1888930,
+      "name": "The Last of Us™ Part I",
+      "minutes": 1250,
+      "hours_since": 560,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1888930/library_600x900_2x.jpg",
+          "sha256": "ec9860418f98a69797feb95424954207e3865f7c7d8ead470de413648e1b086e"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1888930/library_hero.jpg",
+          "sha256": "db2d66bfec23e37a12b5de08837845ced9dcade36431bd6a95157119eb9052f5"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1888930/logo.png",
+          "sha256": "ddc8d20b812377f5bc93641d9e29f745ce4086504ce7d47c31f0408dc7f4b088"
+        }
+      }
+    },
+    {
+      "id": 1716740,
+      "name": "Starfield",
+      "minutes": 870,
+      "hours_since": 700,
+      "art": {
+        "cover": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1716740/library_600x900_2x.jpg",
+          "sha256": "ee1b84061a4004f3d8bc75b6ed375fd4c6f7592c30972913d0ab34fdc34bd1c2"
+        },
+        "hero": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1716740/library_hero.jpg",
+          "sha256": "f1bd63fe0b2e9a3ff870e4e531fecbc533bcce4cc1bead790b3662f1b5065440"
+        },
+        "logo": {
+          "url": "https://cdn.akamai.steamstatic.com/steam/apps/1716740/logo.png",
+          "sha256": "d84b60e657d9ceee15ef4cad75f1304f07ed1b277d11798269e2772f187db21d"
+        }
+      }
+    }
+  ]
+}

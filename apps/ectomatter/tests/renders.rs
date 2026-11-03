@@ -135,7 +135,7 @@ const SHOWCASE: &[Case] = &[
     Case { name: "readme-macros.window", size: (1080, 620), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_MACROS", "1"), ("ECTOMATTER_CLICKS", "120,175")] },
     Case { name: "readme-mouse", size: WIDE, set: &[("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_MOUSE_TAB", "1")] },
     Case { name: "readme-library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_CLICKS", "296,63"), ("ECTOMATTER_LIBRARY", SHOWN_LIBRARY)] },
-    Case { name: "readme-game", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_LIBRARY_PAGE", "steam_app_4000010"), ("ECTOMATTER_LIBRARY", SHOWN_LIBRARY), ("ECTOMATTER_WAIT", "1500")] },
+    Case { name: "readme-game", size: WIDE, set: &[("ECTOMATTER_PLACE", "library"), ("ECTOMATTER_LIBRARY_PAGE", "steam_app_1091500"), ("ECTOMATTER_LIBRARY", SHOWN_LIBRARY), ("ECTOMATTER_WAIT", "1500")] },
     Case { name: "readme-plugins", size: WIDE, set: &[("ECTOMATTER_PLACE", "settings"), ("ECTOMATTER_SETTINGS_TAB", "plugins")] },
 ];
 
@@ -290,88 +290,28 @@ fn set_up(config: &Path) {
     put(&config.join("com.ectonomic.ectomatter/settings.json"), &serde_json::to_string_pretty(&settings).unwrap());
 }
 
-/// A number from 0 to 1 from `n`, the same on every computer (an integer hash).
-fn unit(n: u32) -> f32 {
-    let mut x = n.wrapping_mul(0x9E37_79B9) ^ 0x85EB_CA6B;
-    x ^= x >> 15;
-    x = x.wrapping_mul(0x2C1B_3C6D);
-    x ^= x >> 12;
-    (x % 10_000) as f32 / 10_000.0
-}
-
-/// A smooth hump from 0 up to 1 and back over each whole of `t`: hills drawn
-/// with sums and products alone, so every computer draws them alike.
-fn hump(t: f32) -> f32 {
-    let f = t - t.floor();
-    let x = f * 2.0 - 1.0;
-    let y = 1.0 - x * x;
-    y * y
-}
-
-/// A made-up game's picture, drawn: a sky from `top` down to `low`, a sun
-/// with its glow, and three rows of hills in front of it, darker toward the
-/// front. A cover (tall) or a banner (wide), by the size asked for.
-fn poster(path: &Path, (w, h): (u32, u32), [top, low, sun, hills]: [[u8; 3]; 4], seed: u32) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let (wf, hf) = (w as f32, h as f32);
-    let horizon = hf * 0.64;
-    let sr = wf.min(hf) * 0.19;
-    let (sx, sy) = (wf * (0.3 + 0.4 * unit(seed)), horizon - sr * 0.55);
-    let lerp = |a: [f32; 3], b: [u8; 3], k: f32| -> [f32; 3] { [0, 1, 2].map(|i| a[i] + (b[i] as f32 - a[i]) * k.clamp(0.0, 1.0)) };
-    let f = |c: [u8; 3]| c.map(|v| v as f32);
-    let mut px = Vec::with_capacity((w * h * 3) as usize);
-    for y in 0..h {
-        for x in 0..w {
-            let (xf, yf) = (x as f32 + 0.5, y as f32 + 0.5);
-            let mut c = lerp(f(top), low, yf / horizon);
-            let d = ((xf - sx) * (xf - sx) + (yf - sy) * (yf - sy)).sqrt();
-            let g = (1.0 - d / (sr * 3.0)).max(0.0);
-            c = lerp(c, sun, g * g * 0.45);
-            c = lerp(c, sun, (sr - d + 0.75) / 1.5);
-            for k in 0..3u32 {
-                let kf = k as f32;
-                let base = horizon + hf * 0.085 * kf;
-                let rise = hump(xf / wf * (1.3 + kf * 0.6) + unit(seed * 7 + k)) * 0.65 + hump(xf / wf * (3.1 + kf) + unit(seed * 13 + k)) * 0.35;
-                let ridge = base - hf * (0.07 + 0.025 * kf) * rise;
-                let shade = lerp(f(hills), [6, 7, 10], kf * 0.36);
-                c = lerp(c, shade.map(|v| v as u8), yf - ridge + 0.5);
-            }
-            px.extend(c.map(|v| v.round().clamp(0.0, 255.0) as u8));
-        }
-    }
-    let mut e = png::Encoder::new(std::fs::File::create(path).unwrap(), w, h);
-    e.set_color(png::ColorType::Rgb);
-    e.set_depth(png::BitDepth::Eight);
-    e.write_header().unwrap().write_image_data(&px).unwrap();
-}
-
-/// The showcase's made-up games, by Steam number: their names, their
-/// pictures' colors (sky top, sky low, sun, hills), and the minutes played
-/// and hours since, as Steam keeps them.
-const SHOWN_GAMES: &[(u32, &str, [[u8; 3]; 4], u64, u64)] = &[
-    (4000010, "Lantern Road", [[24, 30, 66], [214, 120, 72], [255, 214, 140], [44, 30, 52]], 1310, 2),
-    (4000020, "Tidewater", [[10, 52, 70], [86, 182, 186], [236, 250, 240], [12, 46, 60]], 845, 26),
-    (4000030, "Copper Sky", [[70, 22, 18], [232, 112, 50], [255, 220, 150], [58, 20, 16]], 2244, 50),
-    (4000040, "Saltglass", [[120, 104, 170], [246, 186, 196], [255, 246, 236], [92, 70, 120]], 410, 75),
-    (4000050, "Velvet Circuit", [[16, 8, 40], [150, 30, 140], [255, 92, 190], [24, 10, 44]], 3120, 98),
-    (4000060, "Kitefall", [[70, 150, 220], [236, 228, 196], [255, 236, 120], [70, 120, 92]], 96, 140),
-    (4000070, "Quiet Engines", [[28, 32, 38], [110, 124, 136], [236, 76, 60], [30, 34, 40]], 1785, 200),
-    (4000080, "Ember Coast", [[36, 12, 30], [196, 70, 44], [255, 170, 80], [40, 14, 28]], 655, 320),
-];
-
-/// The showcase's Steam: its made-up games installed in the person's own
-/// Steam folder, each with a cover and a banner, the minutes played and when,
-/// and a Proton build of its own.
+/// The showcase's Steam: real games (docs/pictures/games.json), installed in
+/// the person's own Steam folder, each with its cover, banner and logo as
+/// Steam's library cache keeps them (fetched into target/readme-art/ by
+/// tools/readme-art.py: the art is the games' publishers', shown under fair
+/// use, and isn't kept in the repository), the minutes played and when, and
+/// a Proton build of its own.
 fn shown_steam(root: &Path, seen_at: &Path) {
+    let list: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(repo().join("docs/pictures/games.json")).unwrap()).unwrap();
     put(&root.join("steamapps/libraryfolders.vdf"), &format!("\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n}}\n", seen_at.display()));
     put(&root.join("config/loginusers.vdf"), "\"users\"\n{\n\t\"76561198000000001\"\n\t{\n\t\t\"AccountName\"\t\t\"stranger\"\n\t\t\"MostRecent\"\t\t\"1\"\n\t\t\"Timestamp\"\t\t\"1792600000\"\n\t}\n}\n");
-    let grid = root.join("userdata/39734273/config/grid");
     let mut played = String::new();
-    for (n, (id, name, colors, minutes, hours)) in SHOWN_GAMES.iter().enumerate() {
-        put(&root.join(format!("steamapps/appmanifest_{id}.acf")), &format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{id}\"\n\t\"name\"\t\t\"{name}\"\n\t\"StateFlags\"\t\t\"4\"\n\t\"installdir\"\t\t\"{name}\"\n}}\n"));
-        std::fs::create_dir_all(root.join(format!("steamapps/common/{name}"))).unwrap();
-        poster(&grid.join(format!("{id}p.png")), (300, 450), *colors, n as u32 + 1);
-        poster(&grid.join(format!("{id}_hero.png")), (1920, 620), *colors, n as u32 + 1);
+    for g in list["games"].as_array().unwrap() {
+        let (id, name) = (g["id"].as_u64().unwrap(), g["name"].as_str().unwrap());
+        put(&root.join(format!("steamapps/appmanifest_{id}.acf")), &format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{id}\"\n\t\"name\"\t\t\"{name}\"\n\t\"StateFlags\"\t\t\"4\"\n\t\"installdir\"\t\t\"{id}\"\n}}\n"));
+        std::fs::create_dir_all(root.join(format!("steamapps/common/{id}"))).unwrap();
+        for file in ["library_600x900_2x.jpg", "library_hero.jpg", "logo.png"] {
+            let art = repo().join(format!("target/readme-art/{id}/{file}"));
+            assert!(art.is_file(), "{name}'s art isn't here ({}): run tools/readme-art.py", art.display());
+            std::fs::create_dir_all(root.join(format!("appcache/librarycache/{id}"))).unwrap();
+            std::fs::copy(&art, root.join(format!("appcache/librarycache/{id}/{file}"))).unwrap();
+        }
+        let (minutes, hours) = (g["minutes"].as_u64().unwrap(), g["hours_since"].as_u64().unwrap());
         played += &format!("\t\t\t\t\t\"{id}\"\n\t\t\t\t\t{{\n\t\t\t\t\t\t\"Playtime\"\t\t\"{minutes}\"\n\t\t\t\t\t\t\"LastPlayed\"\t\t\"{}\"\n\t\t\t\t\t}}\n", NOW - hours * 3600);
     }
     put(&root.join("userdata/39734273/config/localconfig.vdf"), &format!("\"UserLocalConfigStore\"\n{{\n\t\"Software\"\n\t{{\n\t\t\"Valve\"\n\t\t{{\n\t\t\t\"Steam\"\n\t\t\t{{\n\t\t\t\t\"apps\"\n\t\t\t\t{{\n{played}\t\t\t\t}}\n\t\t\t}}\n\t\t}}\n\t}}\n}}\n"));
@@ -514,6 +454,8 @@ struct Desk {
     /// The keyboard's and the mouse's states in the sandbox, when they aren't
     /// the fixtures' (`desk/keyboard.json`, `desk/mouse.json`).
     states: Option<(PathBuf, PathBuf)>,
+    /// The pads on Home's desk, as window.json keeps them, in the sandbox.
+    pads: Option<PathBuf>,
 }
 
 impl Desk {
@@ -535,12 +477,13 @@ impl Desk {
             set_up(&d.join("config"));
         }
         let steam = at.join("steam");
-        Desk { scratch, at, plugged, steam, states: None }
+        Desk { scratch, at, plugged, steam, states: None, pads: None }
     }
 
     /// The desk the README's pictures are drawn on: one that's set up, its
-    /// Steam in the person's own folder (`~/.local/share/Steam`) with more
-    /// made-up games and their art, and its keyboard and mouse lit for showing.
+    /// Steam in the person's own folder (`~/.local/share/Steam`) with real
+    /// games and their art, its keyboard and mouse lit for showing, and a mat
+    /// under them.
     fn showcase() -> Desk {
         let mut desk = Desk::new("showcase", true, true);
         let (d, at) = (desk.scratch.0.clone(), desk.at.clone());
@@ -550,8 +493,8 @@ impl Desk {
         // plays, and a Proton build of its own)
         assert_eq!(at.join("library.json"), Path::new(SHOWN_LIBRARY));
         let library = serde_json::json!({
-            "choices": { "steam_app_4000010": { "scene": "scene-1", "z10": "2" } },
-            "plugins": { "game-configurator": { "steam_app_4000010": { "version": "GE-Proton10-25" } } }
+            "choices": { "steam_app_1091500": { "scene": "scene-1", "z10": "2" } },
+            "plugins": { "game-configurator": { "steam_app_1091500": { "version": "GE-Proton10-25" } } }
         });
         put(&d.join("library.json"), &library.to_string());
         // (the mouse's wheel lit its own color, so the logo's page doesn't say
@@ -560,6 +503,9 @@ impl Desk {
         put(&d.join("states/mouse.json"), &shown_mouse().to_string());
         desk.steam = at.join("home/.local/share/Steam");
         desk.states = Some((at.join("states/keyboard.json"), at.join("states/mouse.json")));
+        // (a desk mat under the keyboard and the mouse, as most desks have)
+        put(&d.join("pads.json"), &serde_json::json!([{ "x": -72.0, "y": -48.0, "w": 1200.0, "h": 456.0, "color": "#272A31" }]).to_string());
+        desk.pads = Some(at.join("pads.json"));
         desk
     }
 
@@ -616,6 +562,9 @@ impl Desk {
             (None, true) => c.env("ECTOMATTER_STATE", fixture("keyboard.json")).env("ECTOMATTER_MOUSE", fixture("mouse.json")),
             _ => &mut c,
         };
+        if let Some(pads) = &self.pads {
+            c.env("ECTOMATTER_PADS", pads);
+        }
         for (k, v) in case.set {
             c.env(k, v);
         }

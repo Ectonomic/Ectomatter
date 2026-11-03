@@ -45,6 +45,9 @@ runs=(
   starting_at_login_is_written_where_the_desktop_reads_it
   every_package_is_added_from_its_release_on_github
 )
+# (the games' art the README's pictures show, which the render tests draw:
+# fetched once, and held to the checksums docs/pictures/games.json pins)
+art=$(python3 -I tools/readme-art.py) || { printf '%s\n' "$art"; echo "  FAILS      the README's games' art: not fetched, or not what docs/pictures/games.json pins (tools/readme-art.py)"; exit 1; }
 out=$(cargo test --release -p ectomatter --bin ectomatter -- --include-ignored boundar "${runs[@]}" 2>&1; cargo test --release -p ectomatter --test stranger -- --include-ignored 2>&1; cargo test --release -p ectomatter --test renders 2>&1; cargo test --release -p ectomatter --test install 2>&1; cargo test --release -p ectomatter --test rpm 2>&1; cargo test --release -p ectomatter --test compositor 2>&1; cargo test --release -p ectomatter --test once 2>&1)
 lines=$(printf '%s\n' "$out" | grep -E '^test .* \.\.\. (ok|FAILED)$' | sort)
 if [ -z "$lines" ]; then printf '%s\n' "$out" | tail -30; exit 2; fi

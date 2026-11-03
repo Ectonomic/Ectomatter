@@ -5,108 +5,124 @@
 <h1 align="center">Ectomatter</h1>
 
 <p align="center">
-  <strong>One app for the devices on your desk.</strong><br>
-  The keys, lights and screens of your keyboard and mouse in one place,<br>
-  and a desk that changes for each game you play.
+  <strong>One app for every device on your desk.</strong><br>
+  Keys, lights, screens and settings for whatever you plug in, whoever made it,<br>
+  and a desk that changes with the game you're playing.
 </p>
 
 <p align="center">
-  <a href="#whats-in-it">What's in it</a> &nbsp;·&nbsp;
+  <a href="#the-desk">The desk</a> &nbsp;·&nbsp;
+  <a href="#what-a-device-gets">What a device gets</a> &nbsp;·&nbsp;
   <a href="#cores-and-plugins">Cores and plugins</a> &nbsp;·&nbsp;
-  <a href="#getting-it">Getting it</a> &nbsp;·&nbsp;
-  <a href="#how-its-built">How it's built</a>
+  <a href="#getting-it">Getting it</a>
 </p>
 
 <br>
 
 <p align="center">
-  <img src="docs/pictures/readme-hero.webp" width="100%" alt="Ectomatter's Home: an EVGA Z10 RGB keyboard with a wave of orange and teal rolling across its keys, beside a SteelSeries Sensei 310 mouse with its logo lit teal">
+  <img src="docs/pictures/readme-hero.webp" width="100%" alt="Ectomatter's Home: a keyboard with a wave of orange and teal rolling across its keys, beside a mouse with its logo lit teal">
 </p>
 
-Ectomatter draws each device on your desk as it really looks, lit as it's lit
-right now, and gives everything it can do a place to be set: every key, every
-light, the screen on your keyboard. Pick a game and choose what changes while
-you play it. When you quit, Ectomatter puts it all back.
+Keyboards, mice and the rest of a desk usually each come with their maker's
+own app. Ectomatter is one app for all of them.
 
-Every device and plugin is a package of its own, a WebAssembly module that
-reaches only what its manifest names. Today Ectomatter drives the EVGA Z10 RGB
-keyboard and the SteelSeries Sensei 310 mouse, and a new core is how another
-device joins them.
+A device comes in as a **core**, a small package that knows how to talk to
+it. The core describes its device (its picture, its keys, its lights and
+effects, its screen, its settings), and Ectomatter does the rest: it draws the
+device's pages, keeps its profiles and macros, plays it in scenes with
+everything else on the desk, and switches it for each game. **Plugins** bring
+in what isn't a device: your games, your monitors, other programs, the
+weather.
 
-## What's in it
+## The desk
 
-### Your desk, as it is
+### Everything you have, in one place
 
-Home shows your devices to scale. **Arrange** puts each one where it sits on
-your real desk, so a **scene** can play one lighting effect across all of them:
-a wave crosses the keyboard, then the mouse, the way it would cross the desk
-itself.
+Home draws every device to scale, lit as it's lit right now, and **Arrange**
+puts each one where it sits on your real desk, on a mat if it sits on one.
+Select a device to change it.
+
+### Scenes across every device
+
+A scene lights the whole desk at once. Play one effect across all of it, and
+a wave crosses the keyboard, then the mouse, in the order they sit on Home; or
+give each device an effect of its own.
 
 <img src="docs/pictures/readme-scene.png" width="100%" alt="A new scene over Home: one wave of orange and blue crossing the keyboard and then the mouse, with its colors, direction and speed">
 
-### Every light on every key
-
-Static, breathing, pulse, spiral, wave, stars, reactive and per-key lighting
-for the Z10, each with its own colors, brightness and speed, across the whole
-keyboard or only the zones you pick: the F-keys, the number row, WASD, the
-arrows, the numpad. The keyboard keeps five profiles, and its picture on screen
-plays each effect as the keys play it.
-
-<img src="docs/pictures/readme-lighting.png" width="100%" alt="The keyboard's Lighting page: the Z10 lit by a wave of orange and teal, its five profiles, the effects, the wave's seven colors, and its zones">
-
-### Keys and macros
-
-Any key can type another, play media, click like a mouse button, run a macro,
-switch the profile or what the screen shows, or do nothing at all, with a
-second layer of its own under Fn. The Macro Editor records what you type on
-the Z10 and keeps the macro on the keyboard, so it plays even with Ectomatter
-closed.
-
-<img src="docs/pictures/readme-keys.png" width="100%" alt="The keyboard's Keys page with the E key chosen, its jobs (key, media, mouse, macro, profile, screen, keyboard, nothing) and the list of keys to give it">
-
-<img src="docs/pictures/readme-macros.png" width="100%" alt="The Macro Editor: the keyboard's macros listed by name, one open with its six steps">
-
-### The screen on your keyboard
-
-The Z10's screen plays a playlist of layouts: the computer's temperatures and
-loads, the time, the weather where you are, a heartbeat that races as the CPU
-works harder, rain, a starfield, a campfire, an aquarium, bars that rise and
-fall with the computer's sound. Make your own in the Screen Editor from text,
-readings, bars and effects, and choose what the screen shows while a game
-starts and as it quits.
-
-<p>
-  <img src="docs/pictures/readme-screen.png" width="49%" alt="The keyboard's Screen page: the screen showing the computer's temperatures, loads and memory, a playlist of three layouts, and the layouts to choose from">
-  <img src="docs/pictures/readme-screen-editor.png" width="49%" alt="The Screen Editor: every layout listed, the Stats layout open in blocks of text, readings and bars">
-</p>
-
-### The mouse, too
-
-The Sensei 310's eight buttons, its logo and wheel lights, its two sensitivity
-settings and its polling rate, on pages like the keyboard's, with as many
-profiles as you like, which Ectomatter keeps for it.
-
-<img src="docs/pictures/readme-mouse.png" width="100%" alt="The mouse's Lighting page: the Sensei 310 with its logo lit teal and its wheel orange, and the effects to choose from">
-
 ### A desk for every game
 
-The Library finds your Steam games and takes any you add by hand. Choose what
-changes while you play one: the scene, each device's profile, the Proton build
-and how it runs, gamescope, HDR, GameMode and MangoHud, and how your monitors
-are set. Quit, and Ectomatter puts everything back.
+The Library finds your Steam games and takes any you add by hand. For each
+one, choose what changes while you play: the scene, the profile of every
+device, how the game starts (its Proton build, gamescope, HDR, GameMode,
+MangoHud) and how your monitors are set. The devices switch when the game
+comes to the front and back when another app does, and when the game quits,
+Ectomatter puts everything back.
 
 <p>
-  <img src="docs/pictures/readme-library.png" width="49%" alt="The Library: eight games, each with its cover">
-  <img src="docs/pictures/readme-game.png" width="49%" alt="A game's page: its banner, the hours played, the scene and keyboard profile it switches to, and its Proton build">
+  <img src="docs/pictures/readme-library.png" width="49%" alt="The Library: fourteen games, each with its cover">
+  <img src="docs/pictures/readme-game.png" width="49%" alt="Cyberpunk 2077's page: its banner, the hours played, the scene and keyboard profile it switches to, and its Proton build">
 </p>
+
+## What a device gets
+
+Every device Ectomatter drives gets pages like these, built from what its
+core describes. They're shown with the first two cores: an EVGA Z10 RGB
+keyboard and a SteelSeries Sensei 310 mouse.
+
+### Lighting
+
+Every effect a device offers, each with its colors, brightness and speed,
+across the whole device or the zones you pick, played on the device's own
+picture as it plays on the device.
+
+<img src="docs/pictures/readme-lighting.png" width="100%" alt="A keyboard's Lighting page: the keyboard lit by a wave of orange and teal, its profiles, its effects, the wave's colors and its zones">
+
+### Keys, buttons and macros
+
+Give any key or button another job: another key, media, a mouse button, a
+macro, a profile, or nothing at all. The Macro Editor records what you type
+and keeps each macro on the device when the device can hold it, or in
+Ectomatter when it can't.
+
+<img src="docs/pictures/readme-keys.png" width="100%" alt="A keyboard's Keys page with one key chosen, the jobs it can have and the keys to give it">
+
+<img src="docs/pictures/readme-macros.png" width="100%" alt="The Macro Editor: a keyboard's macros listed by name, one open with its steps">
+
+### Screens
+
+A device with a screen gets a playlist of layouts: the computer's temperatures
+and loads, the time, the weather where you are, a heartbeat that races as the
+CPU works harder, rain, a starfield, a campfire, an aquarium. The Screen Editor
+makes your own from text, readings, bars and effects, and the screen can show
+a game starting and quitting.
+
+<p>
+  <img src="docs/pictures/readme-screen.png" width="49%" alt="A keyboard's Screen page: its screen showing the computer's temperatures, loads and memory, a playlist of three layouts, and the layouts to choose from">
+  <img src="docs/pictures/readme-screen-editor.png" width="49%" alt="The Screen Editor: every layout listed, one open in blocks of text, readings and bars">
+</p>
+
+### Profiles and settings
+
+Each device's settings on pages of their own, with profiles. A device that
+keeps no profiles of its own, like this mouse, gets as many as you like, kept
+by Ectomatter.
+
+<img src="docs/pictures/readme-mouse.png" width="100%" alt="A mouse's Lighting page: the mouse with its logo lit teal and its wheel orange, and the effects to choose from">
 
 ## Cores and plugins
 
-Ectomatter does the drawing and the keeping. What it can reach comes from
-packages: a **core** for each device, a **plugin** for everything else. Each
-runs inside Ectomatter as a WebAssembly module and reaches only what its
-manifest names: a core, the USB devices it lists; a plugin, the folders,
-programs and addresses it lists.
+Every core and plugin runs inside Ectomatter as a WebAssembly module and
+reaches only what its manifest names: a core, the USB devices it lists; a
+plugin, the folders, programs and addresses it lists. In Settings, **Add a
+device core** and **Add a plugin** show what a package can reach before you
+add it, and take it only if it matches the checksum pinned in
+[Ectonomic's list of reviewed packages](https://github.com/Ectonomic/ectomatter-packages).
+Ectomatter checks each package's releases once a day, and a version that can
+reach more than the one you have waits for you to review it.
+
+These are the packages so far, each in a repository of its own, linked here
+under `cores/` and `plugins/`:
 
 | | Package | What it does |
 |---|---|---|
@@ -114,20 +130,13 @@ programs and addresses it lists.
 | Core | [SteelSeries Sensei 310](https://github.com/Ectonomic/ectomatter-steelseries-sensei-310) | Buttons, lighting and sensitivity of the SteelSeries Sensei 310 |
 | Plugin | [Game Configurator](https://github.com/Ectonomic/ectomatter-game-configurator) | Proton, prefixes, gamescope, GameMode and MangoHud for each game |
 | Plugin | [Monitor Switcher](https://github.com/Ectonomic/ectomatter-monitor-switcher) | Brightness, resolution, HDR and more, set for each game |
-| Plugin | [OpenRGB Link](https://github.com/Ectonomic/ectomatter-openrgb-link) | Lighting that OpenRGB controls, such as your RAM |
+| Plugin | [OpenRGB Link](https://github.com/Ectonomic/ectomatter-openrgb-link) | Lighting that OpenRGB controls, such as your RAM, in scenes and switched for each game |
 | Plugin | [Sensor Feed](https://github.com/Ectonomic/ectomatter-sensor-feed) | Your computer's temperatures, loads and fans, for screens that show them |
 | Plugin | [Weather Feed](https://github.com/Ectonomic/ectomatter-weather-feed) | The weather and warnings where you are, for screens that show them |
 
-Each lives in a repository of its own, linked here under `cores/` and
-`plugins/`. In Settings, **Add a device core** and **Add a plugin** show what a
-package can reach before you add it, and take it only if it matches the
-checksum pinned in [Ectonomic's list of reviewed packages](https://github.com/Ectonomic/ectomatter-packages).
-Ectomatter checks each package's releases once a day, and a version that can
-reach more than the one you have waits for you to review it.
-
 <img src="docs/pictures/readme-plugins.png" width="100%" alt="Settings, Plugins: the five plugins, what each reaches, and On and Off for each">
 
-Want your device in Ectomatter? A core is how it gets there:
+Is your device missing? A core is how it gets here, and anyone can write one:
 [Making a core or a plugin](docs/making-a-package.md).
 
 ## Getting it
@@ -167,8 +176,8 @@ What it promises is tested from the outside:
 
 - **Boundaries.** Each boundary the app claims (what a package can reach, what
   it can't say about itself, what the app mustn't know about any one package)
-  has a test that tries to cross it with a made-up package.
-  `tools/boundaries.sh` runs them all.
+  has a test that tries to cross it with a made-up package, a keyboard core
+  Ectomatter has never seen among them. `tools/boundaries.sh` runs them all.
 - **Pictures.** Every page is drawn offscreen in a sandbox, on a made-up desk,
   and held pixel for pixel to its approved picture. The pictures in this README
   are drawn the same way, and a change to a page they show fails until they're

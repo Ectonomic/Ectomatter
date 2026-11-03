@@ -545,6 +545,11 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## The README's pictures (2026-11-02)
 
+- The README's Library and game pictures show real games' art, fetched
+  from Steam by `tools/readme-art.py` (`tools/boundaries.sh` runs it first):
+  the render tests need it fetched once, so they need the network the
+  first time, and Steam changing a game's art fails the fetch's checksum
+  until `--pin` takes the new one and the pictures are drawn again.
 - The README's moving picture (`docs/pictures/readme-hero.webp`) isn't held
   to the app: `tools/readme-hero.sh` makes it again, by hand. Its still,
   `docs/pictures/readme-home.png`, is held

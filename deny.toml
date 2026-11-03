@@ -44,6 +44,10 @@ allow = [
   "LicenseRef-Arev",
   "CC-BY-4.0",
   "CC0-1.0",
+  # the games' art in the README's Library and game pictures, shown under
+  # fair use (Grant, 2026-11-02: "the games example can show actual games...
+  # Fair use."); nothing that ships carries it
+  "LicenseRef-Fair-Use",
 ]
 
 

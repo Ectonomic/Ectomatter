@@ -185,3 +185,11 @@ SPDX-License-Identifier = "OFL-1.1"
 path = ["crates/ectomatter-draw/typefaces/OpenGorton-*"]
 SPDX-FileCopyrightText = "2020 dakotafelder (https://github.com/dakotafelder/open-gorton)"
 SPDX-License-Identifier = "MIT"
+
+# the README's pictures of the Library and a game's page: Ectomatter as it
+# draws them, with the games' covers, banners and logos in them, which are
+# their publishers' and shown under fair use (docs/pictures/games.json)
+[[annotations]]
+path = ["docs/pictures/readme-library.png", "docs/pictures/readme-game.png"]
+SPDX-FileCopyrightText = ["2026 Ectonomic LLC", "Each game's publisher (its cover, banner and logo)"]
+SPDX-License-Identifier = "GPL-3.0-only AND LicenseRef-Fair-Use"
