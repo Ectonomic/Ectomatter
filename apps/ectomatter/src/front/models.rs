@@ -1061,12 +1061,22 @@ impl Front {
         if !self.ui.get_mouse_hole_shown() {
             return none;
         }
-        let Some((scale, imgs)) = &self.mouse_layers else { return none };
-        if (*scale - s).abs() > 1e-3 {
-            // (drawn for another scale: the stage's shade fills the hole till this one's is)
-            self.ui.set_mouse_hdr_ready(false);
+        let other = |l: &Option<(f32, MouseImages)>| l.as_ref().is_none_or(|(scale, _)| (*scale - s).abs() > 1e-3);
+        if self.mouse_layers.is_none() {
             return none;
         }
+        if other(&self.mouse_layers) {
+            // (drawn for another scale: drawn again for this one, at once
+            // where the page has no thread to draw it on, a snapshot's; the
+            // stage's shade fills the hole till it is)
+            self.scale = s;
+            self.mouse_draw();
+            if other(&self.mouse_layers) {
+                self.ui.set_mouse_hdr_ready(false);
+                return none;
+            }
+        }
+        let Some((scale, imgs)) = &self.mouse_layers else { return none };
         let part = mouse_part(&self.ui, *scale, &imgs.layers);
         if part != self.mouse_part || self.mouse_lit.is_none() {
             self.mouse_light_up();

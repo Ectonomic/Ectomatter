@@ -916,6 +916,85 @@ fn the_readmes_moving_pictures() {
     });
 }
 
+/// The picture of each core's device in the README's Cores
+/// (`docs/pictures/core-<id>.png`): the device's page on the showcase's mat,
+/// drawn denser than the window so the device is drawn sharp (three times
+/// for the mouse, whose stage is small), the rebindings left off the keys.
+const CORE_PICTURES: &[(&str, (u32, u32), &[(&str, &str)])] = &[
+    ("evga-z10", (2880, 2056), &[("ECTOMATTER_SCALE", "2"), ("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63;1297,117")]),
+    ("steelseries-sensei-310", (4320, 3084), &[("ECTOMATTER_SCALE", "3"), ("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_MOUSE_TAB", "1")]),
+];
+
+/// Each core's device as CORE_PICTURES draws it, twice: on a black stage
+/// and on a white one, into target/core-pictures/<id>-on-black.png and
+/// -on-white.png. `tools/readme-moving.sh` cuts the device out of the two:
+/// where they differ, the stage shows through.
+#[test]
+#[ignore]
+fn the_cores_pictures() {
+    built();
+    let desk = Desk::showcase_laid(Laid::Mat);
+    let out = repo().join("target/core-pictures");
+    std::thread::scope(|s| {
+        let handles: Vec<_> = CORE_PICTURES
+            .iter()
+            .flat_map(|(id, size, set)| [("black", "#000000"), ("white", "#FFFFFF")].map(|(on, ink)| (*id, *size, *set, on, ink)))
+            .map(|(id, size, set, on, ink)| {
+                let (desk, out) = (&desk, &out);
+                s.spawn(move || {
+                    let mut all: Vec<(&'static str, &'static str)> = set.to_vec();
+                    all.push(("ECTOMATTER_INK", Box::leak(format!("stage={ink}").into_boxed_str())));
+                    let case = Case { name: Box::leak(format!("core-{id}").into_boxed_str()), size, set: Box::leak(all.into_boxed_slice()) };
+                    let (picture, _) = desk.draw(&case, &format!("-{on}")).unwrap();
+                    picture.write_png(&out.join(format!("{id}-on-{on}.png")));
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+    });
+}
+
+/// The mouse shows on its page on a screen of any density, drawn for it: on
+/// one twice as dense, at twice the pixels, where it is on the window's
+/// page. (Its picture was drawn for a density of 1 alone, and a denser
+/// screen's page showed the stage's shade in its place.)
+#[test]
+fn the_mouse_shows_on_a_denser_screen() {
+    built();
+    let desk = Desk::new("dense", true, true);
+    let laid = |case: &Case| -> [i64; 4] {
+        let (_, said) = desk.draw(case, "").unwrap();
+        let at = said.lines().find_map(|l| l.strip_prefix("the mouse laid at ")).unwrap_or_else(|| panic!("{}: the mouse wasn't laid on its page:\n{said}", case.name));
+        let n: Vec<i64> = at.trim_matches(|c| c == '(' || c == ')').split(',').map(|v| v.trim().parse().unwrap()).collect();
+        [n[0], n[1], n[2], n[3]]
+    };
+    let one = laid(&Case { name: "mouse-density-1", size: WIDE, set: &[("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_MOUSE_TAB", "1")] });
+    let two = laid(&Case { name: "mouse-density-2", size: (WIDE.0 * 2, WIDE.1 * 2), set: &[("ECTOMATTER_SCALE", "2"), ("ECTOMATTER_PLACE", "mouse"), ("ECTOMATTER_MOUSE_TAB", "1")] });
+    for (k, what) in ["left", "top", "width", "height"].iter().enumerate() {
+        assert!((two[k] - one[k] * 2).abs() <= 2, "on a screen twice as dense, the mouse's {what} is {} pixels, not twice {}: laid at {two:?}, not about {one:?} twice", two[k], one[k]);
+    }
+}
+
+/// Every core in `cores/` has its device's picture in the README's Cores:
+/// `docs/pictures/core-<id>.png`, there and shown.
+#[test]
+fn every_core_has_its_picture_in_the_readme() {
+    let readme = std::fs::read_to_string(repo().join("README.md")).unwrap();
+    let mut missing = Vec::new();
+    for e in std::fs::read_dir(repo().join("cores")).unwrap().flatten() {
+        let Ok(manifest) = std::fs::read_to_string(e.path().join("core.json")) else { continue };
+        let manifest = ectomatter_draw::jsonc::parse(&manifest).unwrap();
+        let id = manifest["id"].as_str().unwrap().to_string();
+        let picture = format!("docs/pictures/core-{id}.png");
+        if !repo().join(&picture).exists() || !readme.contains(&format!("src=\"{picture}\"")) {
+            missing.push(picture);
+        }
+    }
+    assert!(missing.is_empty(), "cores without their picture in the README (made by tools/readme-moving.sh, shown under the core's heading in Cores): {}", missing.join(", "));
+}
+
 /// Every page of a desk that's set up looks as approved.
 #[test]
 fn every_page_looks_as_approved() {

@@ -637,6 +637,11 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         .ok()
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
         .unwrap_or(SIZE);
+    // ECTOMATTER_SCALE=2: the frame's pixels to each of the page's, as on a
+    // screen that many times as dense: the page laid out at ECTOMATTER_SIZE
+    // over it, and drawn at ECTOMATTER_SIZE
+    let s = std::env::var("ECTOMATTER_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).filter(|s| *s > 0.0).unwrap_or(1.0);
+    window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: s });
     window.set_size(PhysicalSize::new(w, h));
     let settings = settings::Settings::load(config_dir().join("settings.json"));
     // ECTOMATTER_COMPUTER=FOLDER: the computer the packages reach is the one
@@ -652,6 +657,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     hosted.start_all(&settings);
     devices_described(&hosted);
     let mut front = Front::new(ui, hosted, None, true, settings);
+    // (its own pictures, the mouse's among them, drawn for the scale)
+    front.scale = s;
     front.ask_credits();
     front.levels.0 = reference;
     if let Some(state) = std::env::var_os("ECTOMATTER_STATE") {
@@ -1000,7 +1007,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             };
             window.dispatch_event(WindowEvent::PointerMoved { position: at(0.0) });
             window.dispatch_event(WindowEvent::PointerPressed { position: at(0.0), button });
-            let rect = board_rect(&front.ui, 1.0);
+            let rect = board_rect(&front.ui, s);
             let board = cores::keyboard().filter(|_| rect.2 > 0).map(|core| settled(&core.tree(), &device_in_use(core, &front.settings), ink_env::rgb("stage", STAGE), rect.2 as u32, rect.3 as u32));
             for k in 1..=30 {
                 let t0 = Instant::now();
@@ -1042,27 +1049,27 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     front.refresh();
     // (About's Blob, its frame at the moment the animations' clock has reached)
-    front.draw_blob(1.0);
+    front.draw_blob(s);
     window.request_redraw();
     window.draw_if_needed(|r| {
         r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
         r.render(&mut pic.ui, w as usize);
     });
-    let rect = board_rect(&front.ui, 1.0);
-    front.board_size(rect.2 as u32, rect.3 as u32, 1.0);
+    let rect = board_rect(&front.ui, s);
+    front.board_size(rect.2 as u32, rect.3 as u32, s);
     window.request_redraw();
     window.draw_if_needed(|r| {
         r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
         r.render(&mut pic.ui, w as usize);
     });
-    lay_ground(&mut pic, &front.ui, 1.0);
+    lay_ground(&mut pic, &front.ui, s);
     if let Some(core) = cores::keyboard().filter(|_| rect.2 > 0) {
         let tree = core.tree();
         let device = device_in_use(core, &front.settings);
         let t = Instant::now();
         let mut board = settled(&tree, &device, ink_env::rgb("stage", STAGE), rect.2 as u32, rect.3 as u32);
         // its shadow, as the window lays it
-        board.lay_shadow(&stage_shadow(1.0), STAGE_SHADOW_OPACITY);
+        board.lay_shadow(&stage_shadow(s), STAGE_SHADOW_OPACITY);
         if let Some(s) = &board.cast {
             front.ui.set_board_shadow(shadow_image(s, board.w, board.h));
             front.ui.set_board_shadow_margin(s.margin as f32);
@@ -1076,7 +1083,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             dim_around(&mut lit, board.w as usize, &rects, board.chassis());
         }
         let lit = Rc::new(Lit { px: lit, w: rect.2, h: rect.3 });
-        lay_keyboard(&mut pic, &front, false, Some(&lit), None, 1.0);
+        lay_keyboard(&mut pic, &front, false, Some(&lit), None, s);
         front.ui.set_board_ready(true);
         window.request_redraw();
         window.draw_if_needed(|r| {
@@ -1089,16 +1096,16 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         if let Some((nw, nh)) = std::env::var("ECTOMATTER_RESIZE").ok().and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))) {
             window.set_size(PhysicalSize::new(nw, nh));
             pic.resize(nw as usize, nh as usize);
-            let r2 = board_rect(&front.ui, 1.0);
-            front.board_size(r2.2 as u32, r2.3 as u32, 1.0);
+            let r2 = board_rect(&front.ui, s);
+            front.board_size(r2.2 as u32, r2.3 as u32, s);
             slint::platform::update_timers_and_animations();
             window.request_redraw();
             window.draw_if_needed(|r| {
                 r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
                 r.render(&mut pic.ui, nw as usize);
             });
-            lay_ground(&mut pic, &front.ui, 1.0);
-            lay_keyboard(&mut pic, &front, false, Some(&lit), None, 1.0);
+            lay_ground(&mut pic, &front.ui, s);
+            lay_keyboard(&mut pic, &front, false, Some(&lit), None, s);
             eprintln!("resized to {nw}x{nh}: keyboard now at {:?}, its picture still {}x{}", pic.keyboard_rect(), lit.w, lit.h);
             if std::env::var_os("ECTOMATTER_DEBUG").is_some() {
                 use slint::Model;
@@ -1114,28 +1121,28 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     // Home's desk: the keyboard on it drawn for its place there, on the app's
     // ground, and laid as the window lays it
     if let (Some([x, y, kw, kh]), Some(core)) = (front.desk_keyboard(), cores::keyboard()) {
-        let (bw, bh) = (kw.round().max(1.0) as u32, kh.round().max(1.0) as u32);
+        let (bw, bh) = ((kw * s).round().max(1.0) as u32, (kh * s).round().max(1.0) as u32);
         let tree = core.tree();
         let device = device_in_use(core, &front.settings);
         let mut board = settled(&tree, &device, ink_env::rgb("base", HOME_GROUND), bw, bh);
-        board.lay_shadow(&stage_shadow(1.0), STAGE_SHADOW_OPACITY);
+        board.lay_shadow(&stage_shadow(s), STAGE_SHADOW_OPACITY);
         if let Some(s) = &board.cast {
             front.ui.set_desk_kb_shadow(shadow_image(s, board.w, board.h));
             front.ui.set_desk_kb_shadow_m(s.margin as f32);
         }
-        front.board_size(bw, bh, 1.0);
+        front.board_size(bw, bh, s);
         front.ui.set_desk_kb_k(1.0);
         let on = front.desk_keyboard_on();
         let lights = if on { front.lights().unwrap_or_default() } else { Vec::new() };
         let gain = front.light_gain(reference).max(gain);
         let lit = light(&board, &lights, front.page.locks, gain, reference, front.overlays.panel_for(board.w, board.lcd().dot));
         let lit = Rc::new(Lit { px: lit, w: bw as usize, h: bh as usize });
-        lay_keyboard(&mut pic, &front, true, Some(&lit), Some(Rc::new(board.ground_share())), 1.0);
+        lay_keyboard(&mut pic, &front, true, Some(&lit), Some(Rc::new(board.ground_share())), s);
         front.ui.set_board_ready(true);
         eprintln!("Home's keyboard drawn at {bw}x{bh}, at {x},{y}; laid at {:?}", pic.keyboard_rect());
     } else {
         // (what the desk lays on the ground, with no keyboard on it)
-        pic.set_decor(front.desk_decor(1.0));
+        pic.set_decor(front.desk_decor(s));
     }
     // the mouse in its page's hole, or on Home's desk at its size there, lit as the window lights it
     front.levels.0 = reference;
@@ -1153,7 +1160,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             front.refresh();
         }
     }
-    lay_mouse(&mut pic, &mut front, 1.0);
+    lay_mouse(&mut pic, &mut front, s);
     if pic.mouse_rect().2 > 0 {
         eprintln!("the mouse laid at {:?}", pic.mouse_rect());
     }
@@ -1188,7 +1195,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     // (sent together, each its age into its run at the same moment)
     for (at, color, age) in rings {
         front.desk.ripple(at, color, age);
-        pic.set_decor(front.desk_decor(1.0));
+        pic.set_decor(front.desk_decor(s));
     }
     window.request_redraw();
     window.draw_if_needed(|r| {

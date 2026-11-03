@@ -553,7 +553,9 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - The README's moving pictures (`docs/pictures/readme-hero.webp`, Home on
   three desks one after another, one of them laid out and lit as Grant has
   his, `readme-lighting.webp`, `readme-keys.webp`, `readme-keyboard-lab.webp`,
-  `readme-keycaps.webp`)
+  `readme-keycaps.webp`) and the pictures of the cores' devices in Cores
+  (`core-evga-z10.png`, `core-steelseries-sensei-310.png`, which
+  `every_core_has_its_picture_in_the_readme` holds only to being there)
   aren't held to the app:
   `tools/readme-moving.sh` makes them again, by hand. Their stills
   (`readme-home.png`, `readme-lighting.png`, `readme-keys.png`,
@@ -562,6 +564,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   fails there first. The presses on Home, the lab's slider and the
   keycaps aren't in the stills: a change to the ripples or to how a slider is drawn while
   held shows only when the moving pictures are made again.
+- On a screen scaled past 1, Ectomatter drew the mouse's picture for a scale
+  of 1 alone (`Front::scale` was never set), so the mouse's page showed the
+  stage's shade where the mouse goes. The window now sets it each frame
+  (`shell/session.rs`, `compose`), and the page draws the mouse again for a
+  new scale (`front/models.rs`, `mouse_shown`;
+  `the_mouse_shows_on_a_denser_screen` holds a snapshot at twice the
+  density). Not yet seen in a window on a screen scaled past 1.
 - The Keyboard lab's moving picture shows each frame settled (the keyboard
   simulated again for the readout,
   `main.rs`, `snap_lab`); the window, through a drag, reads out the light

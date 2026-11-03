@@ -28,14 +28,14 @@
 Keyboards, mice and the rest of a desk usually each come with their maker's
 own app. Ectomatter is built to be one app for all of them.
 
-Ectomatter supports each device through a **core**: a small package that
-talks to the device's hardware. The core describes the device: its picture,
-its keys and buttons, its lights and effects, its screen and its settings.
-Ectomatter uses that description to build the device's pages in the app.
-Ectomatter also manages your profiles and macros, plays lighting scenes
-across every device on the desk, and switches each device's settings for each
-game. **Plugins** bring in things that aren't devices: your games, your
-monitors, other programs and the weather.
+Support for each device comes from a **core**: a small package that talks to
+the device's hardware. The core describes the device: its picture, its keys
+and buttons, its lights and effects, its screen and its settings. From that
+description, Ectomatter builds the device's pages. The app also manages your
+profiles and macros, plays lighting scenes across every device on the desk,
+and switches each device's settings for each game. **Plugins** bring in
+things that aren't devices: your games, your monitors, other programs and the
+weather.
 
 So far there are two cores, for the EVGA Z10 RGB keyboard and the SteelSeries
 Sensei 310 mouse, and five plugins. Anyone can write a core for another
@@ -98,10 +98,9 @@ just as the device does.
 Ectomatter simulates how light travels through each device, so the picture on
 screen looks like the device on your desk. The light rises through each
 switch and keycap, shines around each legend, fills the wells between the
-keys, and spreads through a mouse's diffusing logo. Ectomatter is also the
-only peripheral app that draws this light in high dynamic range: on an HDR
-monitor, a lit key glows brighter than the white of the page, the way a real
-LED does.
+keys, and spreads through a mouse's diffusing logo. On an HDR monitor,
+Ectomatter draws this light in high dynamic range, so a lit key glows brighter
+than the white of the page, the way a real LED does.
 
 The **Keyboard Lab** and the **Mouse Lab** tune the simulation to match your
 own device: the keycaps and their plastic, the typeface, size and position of
@@ -115,15 +114,16 @@ own.
 
 ### Custom keycaps
 
-You can give the keyboard your own keycaps, either the ones you have or the
-ones you want. Choose shine-through, pudding or clear plastic, any color for
-the tops and sides, a different typeface, weight, size and position for the
-legends, and homing bumps on any key. The caps can differ across the board,
-with an accent color on a few keys and another color elsewhere. Any single key
-can have its own words, or a picture in place of its letter, like the owl on
-the Escape key below. Caps that can't be swapped on a keyboard, such as the
-Z10's buttons and spacebar, keep their original look. Ectomatter lights each
-cap the way its plastic would.
+The Keyboard Lab changes the keycaps in Ectomatter's picture of your keyboard,
+to match the set you have on it or to try one you want. Choose shine-through,
+pudding or clear plastic, any color for the tops and sides, a different
+typeface, weight, size and position for the legends, and homing bumps on any
+key. The caps can differ across the board, with an accent color on a few keys
+and another color elsewhere. Any single key can have its own words, or a
+picture in place of its letter, like the owl on the Escape key below. Caps
+that can't be swapped on a keyboard, such as the Z10's buttons and spacebar,
+keep their original look. Ectomatter lights each cap the way its plastic
+would.
 
 <img src="docs/pictures/readme-keycap-lab.png" width="100%" alt="The Keyboard Lab on the Escape key alone: a light gray cap printed with an owl in place of its letters, the owl lit orange, with its placement, typeface, size and place">
 
@@ -204,8 +204,8 @@ How a core treats its device:
   anything. After a save, the Z10's core reads the profile back from the
   keyboard to confirm the save worked. Before its first write each time it
   starts, the Z10's core saves a copy of every profile and macro on the
-  keyboard. A core never offers a command that could damage the device: the
-  Z10's core has no way to reach the keyboard's firmware updater.
+  keyboard. The Z10's core also leaves out the commands of the keyboard's
+  firmware updater, so the core can't start a firmware update.
 - **Each core runs in isolation.** A core runs inside Ectomatter as a
   WebAssembly module on a thread of its own, and can reach only the USB
   devices its manifest lists. If a core crashes, hangs or uses too much
@@ -224,6 +224,8 @@ Is your device missing? Anyone can write a core for it:
 
 ### EVGA Z10 RGB
 
+<img src="docs/pictures/core-evga-z10.png" width="100%" alt="The EVGA Z10 RGB core's drawing of the keyboard, lit by Ectomatter: a wave of teal and yellow across the keys, and the screen above them showing the computer's temperatures and loads">
+
 A full-size keyboard with a small screen above the keys. Ectomatter reads and
 writes everything the keyboard stores: five profiles, the job of each key on
 the base layer and the Fn layer, the lighting (Static, Breathing, Pulse,
@@ -235,6 +237,10 @@ the screen, from AIDA64. The commands for the keyboard's firmware updater are
 left out on purpose.
 
 ### SteelSeries Sensei 310
+
+<p align="center">
+  <img src="docs/pictures/core-steelseries-sensei-310.png" width="260" alt="The SteelSeries Sensei 310 core's drawing of the mouse, lit by Ectomatter: its logo teal and its scroll wheel orange">
+</p>
 
 An ambidextrous mouse with eight buttons, a lit logo and a lit scroll wheel.
 Ectomatter sets each button's job, the effect on each light (Static,
@@ -267,14 +273,24 @@ show, or bring another program's lighting into scenes.
 
 ## Adding a core or a plugin
 
-In Settings, **Add a device core** and **Add a plugin** show what a package
-can reach before you add it. Ectomatter accepts a package only if the package
-matches the checksum pinned in
-[Ectonomic's list of reviewed packages](https://github.com/Ectonomic/ectomatter-packages).
-Ectomatter checks for new releases of each package once a day. If a new
-version can reach more than the version you have, the new version waits until
-you review it. Each core and each plugin has a repository of its own, linked
-into this repository under `cores/` and `plugins/`.
+In Settings, **Add a device core** and **Add a plugin** list the packages on
+[Ectonomic's list of reviewed packages](https://github.com/Ectonomic/ectomatter-packages)
+and show what each package can reach before you add it. A package from the
+list must match the checksum the list pins for it, so Ectomatter refuses a
+release that was changed after Ectonomic reviewed it.
+
+You can also add a package that isn't on the list, from its GitHub address or
+its file, with **From an address or a file…**. Nobody at Ectonomic has
+reviewed a package added this way, and the form says so. As with a listed
+package, Ectomatter shows what the package can reach before you add it, so you
+can decide for yourself.
+
+Once a day, Ectomatter looks for a new version of each package: the newest
+version on the list for a listed package, or the newest release in the
+package's GitHub repository for any other. If a new version can reach more
+than the version you have, the new version waits until you review it. Each
+core and each plugin has a repository of its own, linked into this repository
+under `cores/` and `plugins/`.
 
 ## Building and installing
 
@@ -331,12 +347,12 @@ Ectomatter's promises are tested from the outside:
 Copyright (C) 2026 Ectonomic LLC. Made by Grant Garrison and Claude.
 
 Ectomatter is free software under the GNU General Public License, version 3
-only ([LICENSE](LICENSE)): you can share and change Ectomatter under the
-license's terms. Ectomatter comes with no warranty. Ectomatter draws its
-windows with Slint, used under the same license. The libraries Ectomatter is
-built from, and the files it includes from others, are under their own
-licenses: [REUSE.toml](REUSE.toml) names them, [LICENSES/](LICENSES) holds
-their texts, and the `NOTICES` file written at install lists them.
+only ([LICENSE](LICENSE)): you can share and change it under the license's
+terms. It comes with no warranty. Ectomatter draws its windows with Slint,
+used under the same license. The libraries the app is built from, and the
+files it includes from others, are under their own licenses:
+[REUSE.toml](REUSE.toml) names them, [LICENSES/](LICENSES) holds their texts,
+and the `NOTICES` file written at install lists them.
 
 Ectomatter is an independent project. It isn't made, endorsed or supported by
 EVGA, SteelSeries or any other maker of the devices it drives.

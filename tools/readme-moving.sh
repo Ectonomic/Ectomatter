@@ -16,6 +16,9 @@
 #   through its run and the light following it
 # - readme-keycaps.webp: the keyboard's caps made over, three seconds each
 #   (renders.rs, KEYCAPS), its wave running on through them
+# - core-<id>.png: each core's device for the README's Cores, lit, cut out of
+#   its page along its own outline (the_cores_pictures draws it on a black
+#   stage and on a white one; where the two differ, the stage shows through)
 #
 # Animated WebP, not GIF: a GIF's 256 colors band the lights' glow. The
 # README's still pictures are held to the app by
@@ -26,6 +29,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 ECTOMATTER_MOVING_FRAMES=64 cargo test --release -p ectomatter --test renders the_readmes_moving_pictures -- --ignored --quiet
+cargo test --release -p ectomatter --test renders the_cores_pictures -- --ignored --quiet
 python3 -I - <<'PY'
 # (made with libwebp's own animation encoder, through Pillow: each frame keeps
 # only what changed, without leaving parts of earlier frames behind)
@@ -55,4 +59,24 @@ seq = a[:-8] + fade(a[-8:], mat[:8]) + mat[8:-8] + fade(mat[-8:], pad[:8]) + pad
 # (the ripples change much of each frame: a little less quality keeps the
 # README's top picture under 5 MB, the glow unbanded)
 save('readme-hero', seq, quality=70)
+# (each core's device: on the black stage a pixel is the device's color times
+# how much of the device covers it; the white stage shows through by the rest)
+from PIL import ImageChops, ImageMath
+for black in sorted(Path('target/core-pictures').glob('*-on-black.png')):
+    core = black.name[:-len('-on-black.png')]
+    b = Image.open(black).convert('RGB')
+    w = Image.open(black.with_name(f'{core}-on-white.png')).convert('RGB')
+    gap = [ImageChops.subtract(x, y) for x, y in zip(w.split(), b.split())]
+    cover = ImageMath.lambda_eval(lambda a: 255 - (a['r'] + a['g'] + a['b']) / 3, r=gap[0], g=gap[1], b=gap[2]).convert('L')
+    color = [ImageMath.lambda_eval(lambda a: a['c'] * 255 / a['k'], c=c, k=cover).convert('L') for c in b.split()]
+    # (the stage: where the two differ wholly, the stage alone showing; the
+    # device is whatever covers it, inside its rounded edge)
+    stage = ImageMath.lambda_eval(lambda a: (a['r'] + a['g'] + a['b']) / 3, r=gap[0], g=gap[1], b=gap[2]).convert('L')
+    x0, y0, x1, y1 = stage.point(lambda v: 255 if v > 250 else 0).getbbox()
+    inside = (x0 + 48, y0 + 48, x1 - 48, y1 - 48)
+    device = cover.crop(inside).point(lambda v: 255 if v > 2 else 0).getbbox()
+    cut = Image.merge('RGBA', (*color, cover)).crop(inside).crop(device)
+    out = Path('docs/pictures') / f'core-{core}.png'
+    cut.save(out, optimize=True)
+    print(out, out.stat().st_size, 'bytes,', cut.size)
 PY

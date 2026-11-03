@@ -378,6 +378,9 @@ impl Session {
                 t.scenes(scenes.0, scenes.1);
             }
         }
+        // (the pictures the front draws itself, the mouse's among them, drawn
+        // for this window's scale)
+        self.front.scale = scale;
         // (asked for whether or not this frame is drawn: a window out of sight
         // gets no frames, and the keyboard should be ready when Home opens)
         self.ask_home_board(scale);
