@@ -14,6 +14,7 @@
   <a href="#across-all-your-devices">Across all your devices</a> &nbsp;·&nbsp;
   <a href="#for-each-device">For each device</a> &nbsp;·&nbsp;
   <a href="#how-device-cores-work">How device cores work</a> &nbsp;·&nbsp;
+  <a href="#cores">Cores</a> &nbsp;·&nbsp;
   <a href="#plugins">Plugins</a> &nbsp;·&nbsp;
   <a href="#building-and-installing">Building and installing</a>
 </p>
@@ -30,8 +31,10 @@ own app. Ectomatter is one app for all of them.
 A device comes in as a **core**, a small package that knows how to talk to
 it. The core describes its device (its picture, its keys, its lights and
 effects, its screen, its settings), and Ectomatter does the rest: it draws the
-device's pages, its lights in HDR, keeps its profiles and macros, plays it in scenes with
-everything else on the desk, and switches it for each game. **Plugins** bring
+device's pages, keeps its profiles and macros, plays it in scenes with
+everything else on the desk, and switches it for each game. It's the only
+peripheral app that draws your devices' lighting in high dynamic range on an
+HDR monitor. **Plugins** bring
 in what isn't a device: your games, your monitors, other programs, the
 weather.
 
@@ -85,8 +88,9 @@ picture as it plays on the device.
 
 Ectomatter works out each device's light as it really falls: up through each
 switch and keycap, around each legend, into the wells between the keys,
-through a mouse's diffusing logo. It draws that light in HDR, so on an HDR
-screen a lit key glows brighter than the white of the page, as an LED does.
+through a mouse's diffusing logo. And it's the only peripheral app that draws
+that light in high dynamic range: on an HDR monitor, a lit key glows brighter
+than the white of the page, as a real LED does.
 
 The **Keyboard Lab** and the **Mouse Lab** tune that light to match the device
 on your desk: its keycaps and their plastic, its legends' typeface, size and
@@ -179,15 +183,37 @@ How a core treats its device:
   manifest lists. One that crashes, hangs or takes too much memory is stopped
   and started again, and nothing else goes down with it.
 
-| Core | What it does |
-|---|---|
-| [EVGA Z10 RGB](https://github.com/Ectonomic/ectomatter-evga-z10) | Keys, lighting and the screen of the EVGA Z10 RGB |
-| [SteelSeries Sensei 310](https://github.com/Ectonomic/ectomatter-steelseries-sensei-310) | Buttons, lighting and sensitivity of the SteelSeries Sensei 310 |
+Is your device missing? Anyone can write its core:
+[Making a core or a plugin](docs/making-a-package.md).
 
-These two were worked out from the software that already drives them and
-from open projects: the keyboard's from EVGA's Unleash RGB and AIDA64, the
-mouse's with rivalcfg and libratbag as references. Is your device missing?
-Anyone can write its core: [Making a core or a plugin](docs/making-a-package.md).
+## Cores
+
+| Core | Device | Keys and buttons | Lighting | Screen | Macros | Profiles |
+|---|---|---|---|---|---|---|
+| [EVGA Z10 RGB](https://github.com/Ectonomic/ectomatter-evga-z10) | Keyboard | 116 keys, each with a job on two layers | Every key, 8 effects, live in scenes | 20 by 4 characters, playing Ectomatter's layouts | 100, kept on the keyboard | 5, kept on the keyboard |
+| [SteelSeries Sensei 310](https://github.com/Ectonomic/ectomatter-steelseries-sensei-310) | Mouse | 8 buttons | Logo and wheel, 8 effects each, live in scenes | None | Played by Ectomatter | As many as you like, kept by Ectomatter |
+
+### EVGA Z10 RGB
+
+A full-size keyboard with a small screen above the keys. Ectomatter reads and
+writes everything the keyboard keeps: its five profiles, each key's job on
+the base and Fn layers, its lighting (Static, Breathing, Pulse, Spiral, Wave,
+Stars, Reactive and Per key), and up to 100 macros, which play even with
+Ectomatter closed. It plays Ectomatter's layouts on the screen and lights
+every key live in scenes. The keyboard's protocol was worked out from EVGA's
+Unleash RGB 1.0.11.0 and, for the screen, from AIDA64. The firmware updater's
+commands are left out on purpose.
+
+### SteelSeries Sensei 310
+
+An ambidextrous mouse with eight buttons, a lit logo and a lit wheel.
+Ectomatter sets each button's job, each light's effect (Static, Breathing,
+Color breathing, Color shift, Heartbeat, Strobe, Flicker and Reactive), its
+two sensitivities and its polling rate. The mouse holds one set of these at a
+time and can't tell all of them back, so Ectomatter keeps the profiles and
+puts one on the mouse, and a button can play one of Ectomatter's macros. Its
+commands were written with rivalcfg's profile of the mouse and libratbag's
+SteelSeries driver as references.
 
 ## Plugins
 
@@ -198,13 +224,13 @@ addresses it talks to. A plugin can add a section to each game's page in the
 Library, give screens readings to show, or bring another program's lights
 into scenes.
 
-| Plugin | What it does |
-|---|---|
-| [Game Configurator](https://github.com/Ectonomic/ectomatter-game-configurator) | Proton, prefixes, gamescope, GameMode and MangoHud for each game |
-| [Monitor Switcher](https://github.com/Ectonomic/ectomatter-monitor-switcher) | Brightness, resolution, HDR and more, set for each game |
-| [OpenRGB Link](https://github.com/Ectonomic/ectomatter-openrgb-link) | Lighting that OpenRGB controls, such as your RAM, in scenes and switched for each game |
-| [Sensor Feed](https://github.com/Ectonomic/ectomatter-sensor-feed) | Your computer's temperatures, loads and fans, for screens that show them |
-| [Weather Feed](https://github.com/Ectonomic/ectomatter-weather-feed) | The weather and warnings where you are, for screens that show them |
+| Plugin | What it does | Where it shows | What it reaches |
+|---|---|---|---|
+| [Game Configurator](https://github.com/Ectonomic/ectomatter-game-configurator) | Each game's Proton build, prefix, gamescope, GameMode and MangoHud, with backups of its prefix | Each game's page in the Library | The programs a game starts through (gamescope, GameMode, MangoHud), and Wine's configuration and Winetricks in a game's prefix |
+| [Monitor Switcher](https://github.com/Ectonomic/ectomatter-monitor-switcher) | Each monitor's brightness, resolution, refresh rate, HDR and variable refresh while a game plays, which monitor is the main one, and which are off | Each game's page in the Library | Your monitors |
+| [OpenRGB Link](https://github.com/Ectonomic/ectomatter-openrgb-link) | The lighting OpenRGB controls, such as your motherboard, RAM and LED strips, in scenes and switched for each game | Scenes, and each game's page in the Library | OpenRGB, running on this computer |
+| [Sensor Feed](https://github.com/Ectonomic/ectomatter-sensor-feed) | Your computer's temperatures, loads, fans and memory | Readings for device screens | Your system's sensor files and NVIDIA's driver |
+| [Weather Feed](https://github.com/Ectonomic/ectomatter-weather-feed) | The weather and its warnings where you are | Readings for device screens, and a section of Settings | Open-Meteo, Photon, the National Weather Service, Environment and Climate Change Canada, and MeteoAlarm |
 
 <img src="docs/pictures/readme-plugins.png" width="100%" alt="Settings, Plugins: the five plugins, what each reaches, and On and Off for each">
 
