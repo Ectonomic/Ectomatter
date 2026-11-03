@@ -155,6 +155,9 @@ enum Laid {
 /// Where the showcase's Library is in the sandbox (`Desk::showcase` writes it;
 /// a snapshot reads it, and writes nothing back).
 const SHOWN_LIBRARY: &str = "/tmp/ectomatter-renders/showcase/library.json";
+/// Where the showcase's music is in the sandbox (`Desk::showcase` writes it,
+/// `shown_music`), for the screen's Music layout to hear.
+const SHOWN_MUSIC: &str = "/tmp/ectomatter-renders/showcase/music.s16";
 
 /// A folder of the test's own, empty, gone after it.
 struct Scratch(PathBuf);
@@ -531,6 +534,10 @@ impl Desk {
             "plugins": { "game-configurator": { "steam_app_1091500": { "version": "GE-Proton10-25" } } }
         });
         put(&d.join("library.json"), &library.to_string());
+        if name == "showcase" {
+            assert!(at.join("music.s16") == Path::new(SHOWN_MUSIC));
+            std::fs::write(d.join("music.s16"), shown_music()).unwrap();
+        }
         // (Home as `laid` lays it out; and the mouse's wheel lit its own color,
         // so the logo's page doesn't say the wheel copies it)
         let photo = Path::new(SOURCE).join("apps/ectomatter/tests/renders/showcase/pad.jpg");
@@ -743,7 +750,9 @@ fn the_readmes_pictures_are_the_app_as_it_is() {
 /// wave of color across the desk; the mouse at the right on a mousepad with
 /// art on it, clicked, then a word typed, the keyboard's own wave), the
 /// keyboard's Lighting and Keys pages, the Keyboard lab with a slider moved
-/// through its run, and the keyboard's caps made over.
+/// through its run, the keyboard's caps made over, and the keyboard's screen
+/// playing Stats (its readings new each second) and Music (its bars with the
+/// showcase's music), each over two turns.
 const MOVING: &[Moving] = &[
     Moving { name: "readme-hero-mine", turns: 1, laid: Laid::Mine, size: WIDE, set: &[("ECTOMATTER_PLACE", "home")], at: |ms| pressed(TYPED_MINE, ms) },
     Moving { name: "readme-hero-mat", turns: 1, laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "home"), ("ECTOMATTER_SCENE", "wave")], at: |_| Vec::new() },
@@ -751,8 +760,71 @@ const MOVING: &[Moving] = &[
     Moving { name: "readme-lighting", turns: 1, laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")], at: |_| Vec::new() },
     Moving { name: "readme-keys", turns: 1, laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "420,416")], at: |_| Vec::new() },
     Moving { name: "readme-keyboard-lab.window", turns: 1, laid: Laid::Mat, size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1"), ("ECTOMATTER_CLICKS", KEYBOARD_LAB_SECTION)], at: |ms| slid(&KEYBOARD_LAB_SLIDER, ms) },
+    Moving { name: "readme-screen-stats", turns: 2, laid: Laid::Mat, size: (2880, 2056), set: &[("ECTOMATTER_SCALE", "2"), ("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "440,63")], at: |ms| vec![("ECTOMATTER_LCD_AT", format!("{}", ms as f64 / 1000.0)), ("ECTOMATTER_READINGS", shown_readings(ms))] },
+    Moving { name: "readme-screen-music", turns: 2, laid: Laid::Mat, size: (2880, 2056), set: &[("ECTOMATTER_SCALE", "2"), ("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "440,63"), ("ECTOMATTER_LCD_LAYOUT", "music"), ("ECTOMATTER_SOUND", SHOWN_MUSIC)], at: |ms| vec![("ECTOMATTER_LCD_AT", format!("{}", ms as f64 / 1000.0)), ("ECTOMATTER_SOUND_AT", format!("{}", ms as f64 / 1000.0))] },
     Moving { name: "readme-keycaps", turns: 3, laid: Laid::Mat, size: WIDE, set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_CLICKS", "358,63")], at: |ms| vec![("ECTOMATTER_LIGHT_SETUP", KEYCAPS[(ms * KEYCAPS.len() as u32 / (3 * TURN)) as usize].0.to_string())] },
 ];
+
+/// The computer's readings the screen's Stats shows, a second at a time over
+/// the moving picture's eight seconds, as a game loads and settles: the
+/// processor's temperature, load and clock, the memory in use, and the
+/// card's temperature, load, clock and video memory in use.
+fn shown_readings(ms: u32) -> String {
+    const EACH: [(f64, f64, f64, f64, u32, u32, u32, f64); 8] = [
+        (66.0, 12.0, 3.09, 33.4, 43, 6, 1882, 4.8),
+        (68.0, 31.0, 4.12, 33.6, 45, 24, 2340, 5.3),
+        (71.0, 47.0, 4.48, 34.1, 48, 61, 2610, 6.1),
+        (73.0, 58.0, 4.61, 34.5, 51, 78, 2655, 6.6),
+        (72.0, 52.0, 4.57, 34.4, 52, 74, 2640, 6.6),
+        (70.0, 38.0, 4.36, 34.2, 50, 52, 2520, 6.4),
+        (68.0, 24.0, 3.92, 33.9, 47, 28, 2205, 5.7),
+        (67.0, 16.0, 3.41, 33.6, 45, 11, 1950, 5.1),
+    ];
+    let (t, l, ghz, ram, gt, gl, gc, vram) = EACH[(ms / 1000) as usize % EACH.len()];
+    serde_json::json!({ "cpu_temp": t, "cpu_load": l, "cpu_ghz": ghz, "ram": [ram, 60.2], "gpu": { "temp": gt, "load": gl, "clock": gc, "vram": [vram, 31.8] } }).to_string()
+}
+
+/// The music the showcase's computer plays, for the screen's Music layout:
+/// four bars at 120 beats a minute, eight seconds, so it loops with the
+/// moving picture's two turns. Made here: a kick on each beat, a bass line,
+/// a snare on two and four, hats, chords off the beat and a lead running
+/// through each chord. 16 kHz mono, 16-bit, as `parec` hands Ectomatter the
+/// speakers' sound.
+fn shown_music() -> Vec<u8> {
+    use std::f64::consts::TAU;
+    const RATE: f64 = 16000.0;
+    let len = (8.0 * RATE) as usize;
+    // (each bar's chord, A minor, F, C and G, and the bass's root under it, in Hz)
+    let chords = [[220.0, 261.63, 329.63], [174.61, 220.0, 261.63], [261.63, 329.63, 392.0], [196.0, 246.94, 293.66]];
+    let roots = [55.0, 43.65, 65.41, 49.0];
+    let tone = |f: f64, t: f64, partials: u32| (1..=partials).map(|k| (TAU * f * k as f64 * t).sin() / k as f64).sum::<f64>();
+    let mut seed: u32 = 0x9E37_79B9;
+    let mut last = 0.0;
+    let mut mix = Vec::with_capacity(len);
+    for i in 0..len {
+        let t = i as f64 / RATE;
+        let bar = (t / 2.0) as usize % 4;
+        let (beat, in_beat) = ((t / 0.5) as usize, t % 0.5);
+        let (eighth, in_eighth) = ((t / 0.25) as usize, t % 0.25);
+        let (sixteenth, in_sixteenth) = ((t / 0.125) as usize, t % 0.125);
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let noise = seed as f64 / u32::MAX as f64 * 2.0 - 1.0;
+        let hiss = noise - last;
+        last = noise;
+        let kick = (TAU * (48.0 * in_beat + 70.0 / 30.0 * (1.0 - (-30.0 * in_beat).exp()))).sin() * (-16.0 * in_beat).exp();
+        let bass = tone(roots[bar] * if eighth % 2 == 1 { 2.0 } else { 1.0 }, t, 6) * (-28.0 * in_eighth).exp();
+        let snare = if beat % 2 == 1 { noise * (-35.0 * in_beat).exp() + (TAU * 190.0 * in_beat).sin() * (-25.0 * in_beat).exp() } else { 0.0 };
+        let hats = hiss * (-150.0 * in_sixteenth).exp() * if sixteenth % 4 == 2 { 1.0 } else { 0.6 };
+        let stab = if eighth % 2 == 1 { chords[bar].iter().map(|f| tone(*f, t, 5)).sum::<f64>() * (-10.0 * in_eighth).exp() } else { 0.0 };
+        let lead = tone(chords[bar][[0, 1, 2, 1][sixteenth % 4]] * 2.0, t, 6) * (-14.0 * in_sixteenth).exp();
+        mix.push(0.9 * kick + 0.35 * bass + 0.25 * snare + 0.06 * hats + 0.14 * stab + 0.16 * lead);
+    }
+    // (its loudest at 70% of full scale, so its quiet moments let the bars fall)
+    let peak = mix.iter().fold(0f64, |m, x| m.max(x.abs()));
+    mix.iter().flat_map(|x| ((x / peak * 0.7 * 32767.0).round() as i16).to_le_bytes()).collect()
+}
 
 /// The keyboard's caps as its moving picture shows them, three seconds
 /// each over three turns, the keys' wave running on through them: as the

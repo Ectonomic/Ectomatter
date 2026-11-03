@@ -28,6 +28,9 @@ static EAR: OnceLock<Arc<Mutex<Ear>>> = OnceLock::new();
 
 /// The sound's twenty bands now: all 0 while nothing plays, or when the sound can't be read.
 pub fn bands() -> [f32; 20] {
+    if let Some((samples, at)) = played() {
+        return looks(&samples, at).last().map(|l| l.1).unwrap_or([0.0; 20]);
+    }
     let ear = EAR.get_or_init(|| Arc::new(Mutex::new(Ear { bands: [0.0; 20], asked: Instant::now(), listening: false, failed: None })));
     let mut e = ear.lock().unwrap();
     e.asked = Instant::now();
@@ -43,6 +46,18 @@ pub fn bands() -> [f32; 20] {
 /// the last step, changed only once a step, as the screen can show (see
 /// [crate::lcd_fx::period]).
 pub fn held(period: f64) -> [f32; 20] {
+    if let Some((samples, at)) = played() {
+        // (the step `at` falls in shows the loudest of the step before it)
+        let to = at + samples.len() as f64 / RATE as f64;
+        let step = (to / period).floor() * period;
+        let mut peak = [0f32; 20];
+        for (_, levels) in looks(&samples, at).into_iter().filter(|(t, _)| *t >= step - period && *t < step) {
+            for (p, l) in peak.iter_mut().zip(levels) {
+                *p = p.max(l);
+            }
+        }
+        return peak;
+    }
     static HELD: OnceLock<Mutex<(Option<Instant>, [f32; 20], [f32; 20])>> = OnceLock::new();
     let now = bands();
     let mut h = HELD.get_or_init(|| Mutex::new((None, [0.0; 20], [0.0; 20]))).lock().unwrap();
@@ -53,6 +68,37 @@ pub fn held(period: f64) -> [f32; 20] {
         (h.0, h.1, h.2) = (Some(Instant::now()), h.2, [0.0; 20]);
     }
     h.1
+}
+
+/// ECTOMATTER_SOUND=FILE and ECTOMATTER_SOUND_AT=s: for a picture drawn
+/// offscreen, the sound is that file (16 kHz mono, as `parec` hands it here)
+/// played over and over since long before, heard `s` seconds into a play of
+/// it, in place of the speakers'.
+fn played() -> Option<(Vec<f32>, f64)> {
+    let file = std::env::var_os("ECTOMATTER_SOUND")?;
+    let at = std::env::var("ECTOMATTER_SOUND_AT").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let bytes = std::fs::read(file).ok()?;
+    let samples: Vec<f32> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0).collect();
+    (!samples.is_empty()).then_some((samples, at))
+}
+
+/// The levels a sound played over and over leaves at each look, as `listen`
+/// hears it, from the sound's start through a play and on to `at` seconds
+/// into the next: when each look was heard, and the levels then.
+fn looks(samples: &[f32], at: f64) -> Vec<(f64, [f32; 20])> {
+    let to = at + samples.len() as f64 / RATE as f64;
+    let mut levels = [0f32; 20];
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while (i + N) as f64 / RATE as f64 <= to {
+        let look: Vec<f32> = (i..i + N).map(|k| samples[k % samples.len()]).collect();
+        for (l, now) in levels.iter_mut().zip(heard(&look)) {
+            *l = now.max(*l - 0.5);
+        }
+        i += N;
+        out.push((i as f64 / RATE as f64, levels));
+    }
+    out
 }
 
 /// Listen until nothing has asked for a while, or the sound can no longer be read.
@@ -180,4 +226,20 @@ mod tests {
         assert!(loudest.abs_diff(k1000) <= 1, "{l:?}");
         assert!(l[loudest] > 9.0 && l[0] < 3.0, "{l:?}");
     }
+
+    #[test]
+    fn a_sound_played_over_and_over_is_heard_as_the_speakers_are() {
+        // a second: quiet, then a 1 kHz beep in its last tenth, over and over
+        let beep: Vec<f32> = (0..RATE as usize).map(|i| if i >= RATE as usize * 9 / 10 { 0.8 * (std::f32::consts::TAU * 1000.0 * i as f32 / RATE).sin() } else { 0.0 }).collect();
+        let heard_at = |at: f64| looks(&beep, at).last().unwrap().1;
+        let k1000 = (0..20).find(|k| 60.0 * (7000f32 / 60.0).powf((*k + 1) as f32 / 20.0) > 1000.0).unwrap();
+        // (during the beep, its band; most of a second after it, nothing, as the
+        // meter falls back a third of a row each look)
+        assert!(heard_at(0.98)[k1000] > 9.0, "{:?}", heard_at(0.98));
+        assert!(heard_at(0.85).iter().all(|l| *l == 0.0), "{:?}", heard_at(0.85));
+        // (just after the start, the meter still falls from the last play's
+        // beep, as the speakers' would: not from quiet, as a first play's)
+        assert!(heard_at(0.05)[k1000] > 3.0, "{:?}", heard_at(0.05));
+    }
+
 }

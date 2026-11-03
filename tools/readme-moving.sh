@@ -16,6 +16,10 @@
 #   through its run and the light following it
 # - readme-keycaps.webp: the keyboard's caps made over, three seconds each
 #   (renders.rs, KEYCAPS), its wave running on through them
+# - readme-screen-stats.webp, readme-screen-music.webp: the keyboard's screen
+#   alone, cut from its Screen page, over eight seconds: Stats, its readings
+#   new each second (shown_readings), and Music, its bars with the music the
+#   showcase's computer plays (shown_music)
 # - cores/<id>/pictures/<id>.png: each core's device for its own README, in
 #   its own repository, lit, cut out of its page along its own outline (the_cores_pictures draws it on a black
 #   stage and on a white one; where the two differ, the stage shows through)
@@ -50,6 +54,11 @@ for name in ('readme-lighting', 'readme-keys', 'readme-keyboard-lab'):
 # (twelve seconds, the wave over all of it: a little less quality keeps it
 # near 5 MB)
 save('readme-keycaps', frames('readme-keycaps'), quality=70)
+# (the screen alone: its box on the Screen page, drawn twice as dense, and
+# two pixels of the page round its rounded corners)
+screen = (892, 394, 2612, 818)
+for name in ('readme-screen-stats', 'readme-screen-music'):
+    save(name, [f.crop(screen) for f in frames(name)])
 # (the hero: the first desk from its ninth frame, then the second and the third,
 # each fading into the next over half a second, and the third into the first
 # desk's first eight frames, so the end fades into where it starts)

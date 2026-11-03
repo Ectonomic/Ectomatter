@@ -676,12 +676,41 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     // ECTOMATTER_LCD's rows (split by |), in ECTOMATTER_LCD_STATE
     // (playing, paused, missing, launch, exit)
     {
+        // ECTOMATTER_LCD_AT=s or turning,s,length: where the playlist stands in the page's
+        // turn (by default three seconds into an eight-second page)
+        let at: Vec<f64> = std::env::var("ECTOMATTER_LCD_AT").unwrap_or_default().split(',').filter_map(|v| v.trim().parse().ok()).collect();
+        let (turning, elapsed, length) = match at.as_slice() {
+            [t, e, l] => (*t > 0.5, *e, *l),
+            [e] => (false, *e, 8.0),
+            _ => (false, 3.0, 8.0),
+        };
         let rows = std::env::var("ECTOMATTER_LCD").map(|r| r.split('|').map(String::from).collect()).unwrap_or_else(|_| {
             // (asked for once, so the plugins read them, and read again once they've answered)
             let mut stats = lcd_stats::Stats::of(front.hosted.readings(), "snapshot");
             let _ = stats.rows();
             settle(&mut front);
-            stats.rows()
+            let mut r = stats.read();
+            // ECTOMATTER_READINGS='{"cpu_temp":66,"cpu_load":12,"cpu_ghz":3.1,"ram":[33.4,60.2],
+            // "gpu":{"temp":43,"load":6,"clock":1882,"vram":[4.8,31.8]}}': the computer's
+            // readings at that moment, as the Sensor Feed would tell them
+            if let Some(v) = std::env::var("ECTOMATTER_READINGS").ok().and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok()) {
+                let pair = |p: &serde_json::Value| Some((p[0].as_f64()?, p[1].as_f64()?));
+                let whole = |n: &serde_json::Value| n.as_f64().map(|x| x.round() as u32);
+                r.cpu_temp = v["cpu_temp"].as_f64().or(r.cpu_temp);
+                r.cpu_load = v["cpu_load"].as_f64().or(r.cpu_load);
+                r.cpu_ghz = v["cpu_ghz"].as_f64().or(r.cpu_ghz);
+                r.ram = pair(&v["ram"]).or(r.ram);
+                if v["gpu"].is_object() {
+                    let g = &v["gpu"];
+                    r.gpu = Some(lcd_stats::Gpu { temp: whole(&g["temp"]), load: whole(&g["load"]), clock: whole(&g["clock"]), vram: pair(&g["vram"]) });
+                }
+            }
+            // ECTOMATTER_LCD_LAYOUT=music: that built-in layout on the screen in place of
+            // Stats, ECTOMATTER_LCD_AT's seconds into its page, its effects at that moment
+            match std::env::var("ECTOMATTER_LCD_LAYOUT").ok().and_then(|k| lcd_page::Page::built_in(&k)) {
+                Some(page) => lcd_page::render_at(&page, &r, elapsed),
+                None => lcd_page::render(&lcd_page::Page::stats(), &r),
+            }
         });
         eprintln!("the screen's rows: {rows:?}");
         let st = std::env::var("ECTOMATTER_LCD_STATE").unwrap_or_default();
@@ -697,14 +726,6 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         };
         // ECTOMATTER_LCD_PAGE: which page of the playlist shows
         let page = std::env::var("ECTOMATTER_LCD_PAGE").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-        // ECTOMATTER_LCD_AT=s or turning,s,length: where the playlist stands in the page's
-        // turn (by default three seconds into an eight-second page)
-        let at: Vec<f64> = std::env::var("ECTOMATTER_LCD_AT").unwrap_or_default().split(',').filter_map(|v| v.trim().parse().ok()).collect();
-        let (turning, elapsed, length) = match at.as_slice() {
-            [t, e, l] => (*t > 0.5, *e, *l),
-            [e] => (false, *e, 8.0),
-            _ => (false, 3.0, 8.0),
-        };
         front.screen_news(lcd_player::News { rows, sequence, state, page, turning, elapsed, length });
     }
     // ECTOMATTER_LIBRARY=FILE: Ectomatter's own macros, as macros.json keeps them

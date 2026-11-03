@@ -142,11 +142,16 @@ store macros, and in Ectomatter if the device can't.
 
 ### Screens on your devices
 
-A device with a screen gets a playlist of layouts: the computer's
-temperatures and loads, the time, the weather where you are, a heartbeat that
-races as the CPU works harder, rain, a starfield, a campfire and an aquarium.
-In the Screen Editor you can build your own layouts from text, live readings,
-bars and effects. The screen can also show when a game starts and quits.
+A device with a screen gets a playlist of layouts: the computer's temperatures
+and loads, the time, the weather where you are, a heartbeat that races as the
+CPU works harder, rain, a starfield, a campfire, an aquarium and bars that
+rise and fall with the computer's sound. In the Screen Editor you can build
+your own layouts from text, live readings, bars and effects. The screen can
+also show when a game starts and quits.
+
+<img src="docs/pictures/readme-screen-stats.webp" width="100%" alt="A keyboard's screen playing the Stats layout, its readings new each second as a game loads: the processor's and the graphics card's temperatures, loads and clocks, and the memory and video memory in use">
+
+<img src="docs/pictures/readme-screen-music.webp" width="100%" alt="A keyboard's screen playing the Music layout: twenty bars rising and falling with the computer's sound">
 
 <p>
   <img src="docs/pictures/readme-screen.png" width="49%" alt="A keyboard's Screen page: its screen showing the computer's temperatures, loads and memory, a playlist of three layouts, and the layouts to choose from">

@@ -553,7 +553,8 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - The README's moving pictures (`docs/pictures/readme-hero.webp`, Home on
   three desks one after another, one of them laid out and lit as Grant has
   his, `readme-lighting.webp`, `readme-keys.webp`, `readme-keyboard-lab.webp`,
-  `readme-keycaps.webp`) and the pictures of the cores' devices in their
+  `readme-keycaps.webp`, `readme-screen-stats.webp`,
+  `readme-screen-music.webp`) and the pictures of the cores' devices in their
   own READMEs (`cores/<id>/pictures/<id>.png`, which
   `every_core_shows_its_device_in_its_readme` holds only to being there)
   aren't held to the app:

@@ -60,7 +60,8 @@ This is where they live in this repository.
   committed), held the same way (`the_readmes_pictures_are_the_app_as_it_is`);
   its moving pictures (Home, with keys typed and the mouse clicked;
   Lighting; Keys; the Keyboard lab, a slider dragged; the keycaps made
-  over) are made again with
+  over; the screen's Stats and Music, from `ECTOMATTER_READINGS` and
+  `ECTOMATTER_SOUND`) are made again with
   `tools/readme-moving.sh` when those pages change (`MOVING` in
   `renders.rs`; `ECTOMATTER_MOVING=name` and `ECTOMATTER_MOVING_AT=ms,ms`
   draw only those frames, to look at one). The same script cuts each core's
