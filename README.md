@@ -11,11 +11,11 @@
 </p>
 
 <p align="center">
-  <a href="#the-desk">The desk</a> &nbsp;·&nbsp;
-  <a href="#what-a-device-gets">What a device gets</a> &nbsp;·&nbsp;
-  <a href="#device-cores">Device cores</a> &nbsp;·&nbsp;
+  <a href="#across-all-your-devices">Across all your devices</a> &nbsp;·&nbsp;
+  <a href="#for-each-device">For each device</a> &nbsp;·&nbsp;
+  <a href="#how-device-cores-work">How device cores work</a> &nbsp;·&nbsp;
   <a href="#plugins">Plugins</a> &nbsp;·&nbsp;
-  <a href="#getting-it">Getting it</a>
+  <a href="#building-and-installing">Building and installing</a>
 </p>
 
 <br>
@@ -35,9 +35,9 @@ everything else on the desk, and switches it for each game. **Plugins** bring
 in what isn't a device: your games, your monitors, other programs, the
 weather.
 
-## The desk
+## Across all your devices
 
-### Everything you have, in one place
+### Every device on one screen
 
 Home draws every device to scale, lit as it's lit right now, and **Arrange**
 puts each one where it sits on your real desk, on the pads and mats it sits
@@ -45,7 +45,7 @@ on, each a color of its own or a photo you choose. Keys and mouse buttons
 send a ripple of their light across the desk as you press them. Select a
 device to change it.
 
-### Scenes across every device
+### One lighting scene across every device
 
 A scene lights the whole desk at once. Play one effect across all of it, and
 a wave crosses the keyboard, then the mouse, in the order they sit on Home; or
@@ -53,7 +53,7 @@ give each device an effect of its own.
 
 <img src="docs/pictures/readme-scene.png" width="100%" alt="A new scene over Home: one wave of orange and blue crossing the keyboard and then the mouse, with its colors, direction and speed">
 
-### A desk for every game
+### Settings that switch with each game
 
 The Library finds your Steam games and takes any you add by hand. For each
 one, choose what changes while you play: the scene, the profile of every
@@ -67,13 +67,13 @@ Ectomatter puts everything back.
   <img src="docs/pictures/readme-game.png" width="49%" alt="Cyberpunk 2077's page: its banner, the hours played, the scene and keyboard profile it switches to, and its Proton build">
 </p>
 
-## What a device gets
+## For each device
 
 Every device Ectomatter drives gets pages like these, built from what its
-[core](#device-cores) describes. They're shown with the first two cores: an EVGA Z10 RGB
+[core](#how-device-cores-work) describes. They're shown with the first two cores: an EVGA Z10 RGB
 keyboard and a SteelSeries Sensei 310 mouse.
 
-### Lighting
+### Lighting effects
 
 Every effect a device offers, each with its colors, brightness and speed,
 across the whole device or the zones you pick, played on the device's own
@@ -81,7 +81,7 @@ picture as it plays on the device.
 
 <img src="docs/pictures/readme-lighting.webp" width="100%" alt="A keyboard's Lighting page: a wave of orange and teal rolling across the keyboard, its profiles, its effects, the wave's colors and its zones">
 
-### Light that looks real
+### Light simulated in HDR
 
 Ectomatter works out each device's light as it really falls: up through each
 switch and keycap, around each legend, into the wells between the keys,
@@ -96,7 +96,7 @@ light follows it as you drag. Save the result as a setup of your own.
 
 <img src="docs/pictures/readme-keyboard-lab.webp" width="100%" alt="The Keyboard Lab's LEDs: the Beam slider dragged from tight to wide, the cone of light out of the switch and the light on the cap's top following it, the brightest legend read out in nits">
 
-### Keycaps of your own
+### Custom keycaps
 
 Put your own caps on the keyboard, the ones you have or the ones you want:
 shine-through, pudding or translucent plastic, any color on their tops and
@@ -106,7 +106,7 @@ place of its letter. Ectomatter lights each cap as its plastic would.
 
 <img src="docs/pictures/readme-keycaps.webp" width="100%" alt="The keyboard's page, its orange and teal wave running on while its caps change: black shine-through caps as it comes, pudding caps glowing through their clear sides, translucent caps lit all over, then white caps">
 
-### Keys, buttons and macros
+### Remap keys and buttons, record macros
 
 Give any key or button another job: another key, media, a mouse button, a
 macro, a profile, or nothing at all. The Macro Editor records what you type
@@ -117,7 +117,7 @@ Ectomatter when it can't.
 
 <img src="docs/pictures/readme-macros.png" width="100%" alt="The Macro Editor: a keyboard's macros listed by name, one open with its steps">
 
-### Screens
+### Screens on your devices
 
 A device with a screen gets a playlist of layouts: the computer's temperatures
 and loads, the time, the weather where you are, a heartbeat that races as the
@@ -138,7 +138,7 @@ by Ectomatter.
 
 <img src="docs/pictures/readme-mouse.png" width="100%" alt="A mouse's Lighting page: the mouse with its logo lit teal and its wheel orange, and the effects to choose from">
 
-## Device cores
+## How device cores work
 
 Ectomatter works the way RetroArch does for emulators: one app, and a
 **core** for each device. The core knows its device: how to find it, what it
@@ -217,7 +217,7 @@ Ectomatter checks each package's releases once a day, and a version that can
 reach more than the one you have waits for you to review it. Each core and
 plugin is a repository of its own, linked here under `cores/` and `plugins/`.
 
-## Getting it
+## Building and installing
 
 Ectomatter runs on Linux, and is made and tested on KDE Plasma with Wayland.
 Windows and macOS are planned. There's no release to download yet, so it's
@@ -243,7 +243,7 @@ sudo udevadm control --reload && sudo udevadm trigger
 Or make an RPM, which installs Ectomatter, its packages and the rule together:
 `tools/package-rpm.sh`, then `sudo dnf install target/rpm/ectomatter-*.rpm`.
 
-## How it's built
+## How it's built and tested
 
 Ectomatter is written in Rust and draws its windows with
 [Slint](https://slint.dev). Its packages run as WebAssembly components in
