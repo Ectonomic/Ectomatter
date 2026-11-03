@@ -168,8 +168,7 @@ def main(argv):
         shutil.rmtree(at, ignore_errors=True)
         at.mkdir(parents=True)
         # (the package as its release carries it, built module aside, which may hold
-        # files not tracked here, such as a drawing; its module's source; the rest
-        # as committed)
+        # files not tracked here; its module's source; the rest as committed)
         shipped = [str(p.relative_to(ROOT)) for p in rp.package(folder) if p.name != m['module']]
         held = rp.unshipped({f: (ROOT / f).read_bytes() for f in shipped})
         if held:

@@ -156,8 +156,8 @@ This is where they live in this repository.
   tuning as of 2026-10-26 shipped as the cores' defaults; later
   tuning waits for him again. Stage explicit paths only; never `git stash`,
   `git checkout -- file` or `git reset --hard`.
-- Commit untracked art, `before-*.svg`, `tools/sensei-310-art/`, untracked
-  mocks, `cores/*/module/target` or `docs/drafts`.
+- Commit `before-*.svg`, `tools/sensei-310-art/`, untracked mocks,
+  `cores/*/module/target` or `docs/drafts`.
 - Write to a device from a test or a scratch tool without Grant's go. Set
   `MOUSE_LIVE` (it opens the real mouse). Send firmware commands.
 - Signal a process without checking its exe, cwd and command line.

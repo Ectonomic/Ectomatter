@@ -315,11 +315,6 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   it, rust-lang/cargo#6914, is why `tools/build-module.sh` passes its flags
   as a compiler wrapper). So nobody can yet rebuild a release byte for byte
   from its tag.
-- The Sensei 310's drawing (`cores/steelseries-sensei-310/art/sensei-310.svg`)
-  isn't committed here (untracked art waits for Grant's word): a fresh clone
-  of Ectomatter has no drawing for the mouse. Its released copy, with the
-  tracing photo and the guides it was drawn over taken out (2026-11-02), is
-  in Ectonomic/ectomatter-steelseries-sensei-310.
 - `registry/check.py` takes a release's files as given: nothing rebuilds a
   package from its repository's source to see the release is what that
   source makes. Nothing is signed either: the checksums pinned in the list
