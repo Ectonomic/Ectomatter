@@ -64,9 +64,10 @@ This is where they live in this repository.
   `tools/readme-moving.sh` when those pages change (`MOVING` in
   `renders.rs`; `ECTOMATTER_MOVING=name` and `ECTOMATTER_MOVING_AT=ms,ms`
   draw only those frames, to look at one). The same script cuts each core's
-  device out of its page for the README's Cores (`docs/pictures/core-<id>.png`,
-  from `CORE_PICTURES`, drawn denser with `ECTOMATTER_SCALE`);
-  `every_core_has_its_picture_in_the_readme` fails for a core without one.
+  device out of its page for the core's own README, in its own repository
+  (`cores/<id>/pictures/<id>.png`, from `CORE_PICTURES`, drawn denser with
+  `ECTOMATTER_SCALE`; never on Ectomatter's README);
+  `every_core_shows_its_device_in_its_readme` fails for a core without one.
   `ECTOMATTER_RENDERS=name,name` runs only those; `ECTOMATTER_RENDERS_LOG=1`
   keeps every page's log.
   `a_main_menu_item_opens_its_place_at_its_first_page` leaves each place

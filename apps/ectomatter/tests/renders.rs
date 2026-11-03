@@ -916,8 +916,8 @@ fn the_readmes_moving_pictures() {
     });
 }
 
-/// The picture of each core's device in the README's Cores
-/// (`docs/pictures/core-<id>.png`): the device's page on the showcase's mat,
+/// The picture of each core's device in the core's own README, in its own
+/// repository (`cores/<id>/pictures/<id>.png`): the device's page on the showcase's mat,
 /// drawn denser than the window so the device is drawn sharp (three times
 /// for the mouse, whose stage is small), the rebindings left off the keys.
 const CORE_PICTURES: &[(&str, (u32, u32), &[(&str, &str)])] = &[
@@ -977,22 +977,22 @@ fn the_mouse_shows_on_a_denser_screen() {
     }
 }
 
-/// Every core in `cores/` has its device's picture in the README's Cores:
-/// `docs/pictures/core-<id>.png`, there and shown.
+/// Every core in `cores/` shows its device at the top of its own README:
+/// `pictures/<id>.png` in its own repository, there and shown.
 #[test]
-fn every_core_has_its_picture_in_the_readme() {
-    let readme = std::fs::read_to_string(repo().join("README.md")).unwrap();
+fn every_core_shows_its_device_in_its_readme() {
     let mut missing = Vec::new();
     for e in std::fs::read_dir(repo().join("cores")).unwrap().flatten() {
         let Ok(manifest) = std::fs::read_to_string(e.path().join("core.json")) else { continue };
         let manifest = ectomatter_draw::jsonc::parse(&manifest).unwrap();
         let id = manifest["id"].as_str().unwrap().to_string();
-        let picture = format!("docs/pictures/core-{id}.png");
-        if !repo().join(&picture).exists() || !readme.contains(&format!("src=\"{picture}\"")) {
-            missing.push(picture);
+        let picture = format!("pictures/{id}.png");
+        let readme = std::fs::read_to_string(e.path().join("README.md")).unwrap_or_default();
+        if !e.path().join(&picture).exists() || !readme.contains(&format!("src=\"{picture}\"")) {
+            missing.push(format!("{}/{picture}", e.path().display()));
         }
     }
-    assert!(missing.is_empty(), "cores without their picture in the README (made by tools/readme-moving.sh, shown under the core's heading in Cores): {}", missing.join(", "));
+    assert!(missing.is_empty(), "cores without their device's picture in their own README (made by tools/readme-moving.sh, shown under the README's title): {}", missing.join(", "));
 }
 
 /// Every page of a desk that's set up looks as approved.

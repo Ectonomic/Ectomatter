@@ -16,8 +16,8 @@
 #   through its run and the light following it
 # - readme-keycaps.webp: the keyboard's caps made over, three seconds each
 #   (renders.rs, KEYCAPS), its wave running on through them
-# - core-<id>.png: each core's device for the README's Cores, lit, cut out of
-#   its page along its own outline (the_cores_pictures draws it on a black
+# - cores/<id>/pictures/<id>.png: each core's device for its own README, in
+#   its own repository, lit, cut out of its page along its own outline (the_cores_pictures draws it on a black
 #   stage and on a white one; where the two differ, the stage shows through)
 #
 # Animated WebP, not GIF: a GIF's 256 colors band the lights' glow. The
@@ -76,7 +76,7 @@ for black in sorted(Path('target/core-pictures').glob('*-on-black.png')):
     inside = (x0 + 48, y0 + 48, x1 - 48, y1 - 48)
     device = cover.crop(inside).point(lambda v: 255 if v > 2 else 0).getbbox()
     cut = Image.merge('RGBA', (*color, cover)).crop(inside).crop(device)
-    out = Path('docs/pictures') / f'core-{core}.png'
+    out = Path('cores') / core / 'pictures' / f'{core}.png'
     cut.save(out, optimize=True)
     print(out, out.stat().st_size, 'bytes,', cut.size)
 PY

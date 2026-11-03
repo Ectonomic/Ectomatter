@@ -34,9 +34,10 @@ ROOT = Path(__file__).resolve().parents[1]
 GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
 # (what a package's folder holds that isn't the package: its module's source
 # and build, the lab's copies of what it changed, and what its own repository
-# keeps beside it: its libraries, tools, test cases, README and license tables)
+# keeps beside it: its libraries, tools, test cases, README, the pictures
+# its README shows and license tables)
 LEFT_OUT = re.compile(r'(^|/)(module|target)(/|$)|\.before-|(^|/)\.'
-                      r'|^(crates|tools|parity|LICENSES)(/|$)|^(Cargo\.toml|Cargo\.lock|README\.md|REUSE\.toml)$')
+                      r'|^(crates|tools|parity|pictures|LICENSES)(/|$)|^(Cargo\.toml|Cargo\.lock|README\.md|REUSE\.toml)$')
 
 
 def jsonc(text):

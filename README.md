@@ -224,8 +224,6 @@ Is your device missing? Anyone can write a core for it:
 
 ### EVGA Z10 RGB
 
-<img src="docs/pictures/core-evga-z10.png" width="100%" alt="The EVGA Z10 RGB core's drawing of the keyboard, lit by Ectomatter: a wave of teal and yellow across the keys, and the screen above them showing the computer's temperatures and loads">
-
 A full-size keyboard with a small screen above the keys. Ectomatter reads and
 writes everything the keyboard stores: five profiles, the job of each key on
 the base layer and the Fn layer, the lighting (Static, Breathing, Pulse,
@@ -237,10 +235,6 @@ the screen, from AIDA64. The commands for the keyboard's firmware updater are
 left out on purpose.
 
 ### SteelSeries Sensei 310
-
-<p align="center">
-  <img src="docs/pictures/core-steelseries-sensei-310.png" width="260" alt="The SteelSeries Sensei 310 core's drawing of the mouse, lit by Ectomatter: its logo teal and its scroll wheel orange">
-</p>
 
 An ambidextrous mouse with eight buttons, a lit logo and a lit scroll wheel.
 Ectomatter sets each button's job, the effect on each light (Static,
