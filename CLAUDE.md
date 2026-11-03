@@ -172,6 +172,14 @@ This is where they live in this repository.
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 
+- **Writing.** The README and the docs are for readers new to the project:
+  load `editorial-writing` before changing them. Name each part plainly and
+  keep them apart: Ectomatter is the app; a core talks to a device; a plugin
+  brings in another system; a device is the hardware. Say which one acts in
+  each sentence, and keep a device's own stored settings apart from
+  Ectomatter's profiles, scenes and light setups. A claim about what the app
+  does is checked against the code and `docs/deferred.md` first.
+
 ## Never
 
 - Push this repository, or a package's, without Grant's word for that push.

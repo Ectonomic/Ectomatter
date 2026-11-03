@@ -209,3 +209,11 @@ SPDX-License-Identifier = "CC0-1.0"
 path = ["apps/ectomatter/tests/renders/showcase/mousepad.jpg"]
 SPDX-FileCopyrightText = ["Katsushika Hokusai (the print)", "The Art Institute of Chicago (the photograph)"]
 SPDX-License-Identifier = "CC0-1.0"
+
+# the owl printed on the showcase keyboard's Escape key, in the Keyboard lab's
+# setup the README shows: Grant Garrison's own, traced from his photo of his
+# owl keycap
+[[annotations]]
+path = ["apps/ectomatter/tests/renders/showcase/owl-face.svg"]
+SPDX-FileCopyrightText = "2026 Grant Garrison"
+SPDX-License-Identifier = "GPL-3.0-only"

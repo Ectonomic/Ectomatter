@@ -571,6 +571,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   cap that can't be swapped (`"fixed": true`, docs/core-protocol.md,
   section 4) should offer none, as all keys' caps changes don't reach it
   (`crates/ectomatter-draw/src/sim.rs`, `key_light`).
+- `tools/release-package.py` made different `.ectocore` files for four of
+  the plugins on 2026-11-03 than their releases carry, with their versions
+  unchanged and every file in them still matching (`tools/released.py`
+  passes): the zip's own bytes differ, so docs/making-a-package.md's "The
+  same folder always makes the same file" doesn't hold. `tools/list-packages.py`
+  would have rewritten their pinned checksums; only the Z10's 1.0.1 entry
+  went into the list.
 - `no_page_is_found_by_a_devices_name` (`apps/ectomatter/src/boundaries.rs:281`)
   holds the app to a list of the two cores' names typed into the check,
   not names taken from the cores' manifests and descriptions, as Grant's
